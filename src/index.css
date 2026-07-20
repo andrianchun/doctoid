@@ -1,0 +1,19 @@
+@import "tailwindcss";
+
+/* Palet Doctoid — biru lembut flat 2D dengan gradasi tipis (lihat referensi desain) */
+@theme {
+  --color-primary: #5B7FFF;
+  --color-primary-deep: #3D5AF1;
+  --color-primary-soft: #A8B8F8;
+  --color-surface: #F4F5FB;
+  --color-card: #FFFFFF;
+  --color-ink: #1E2447;
+  --color-ink-muted: #8A90B8;
+  --font-sans: "Inter", system-ui, sans-serif;
+}
+
+body {
+  background-color: var(--color-surface);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+}
