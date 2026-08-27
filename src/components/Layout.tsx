@@ -1,7 +1,6 @@
 import { useRef } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { LayoutDashboard, Sparkles, FolderOpen, FileText } from 'lucide-react'
-import UpdaterAlert from './UpdaterAlert'
 
 const TABS = [
   { to: '/dasbor', label: 'Dasbor', Icon: LayoutDashboard },
@@ -67,9 +66,6 @@ export default function Layout() {
       onPointerDown={handlePointerDown}
       onPointerUp={handlePointerUp}
     >
-      {/* In-app OTA Updater Alert */}
-      <UpdaterAlert />
-
       {/* Konten Utama */}
       <div className="flex-1 pb-[calc(7rem+env(safe-area-inset-bottom,0px))]">
         <Outlet />

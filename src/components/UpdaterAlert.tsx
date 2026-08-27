@@ -264,7 +264,7 @@ export default function UpdaterAlert() {
 
   // Mode 2: NON-FORCED UPDATE (Floating Glass Banner yang nyaman)
   return (
-    <aside aria-label="Notifikasi Pembaruan" className="fixed bottom-24 inset-x-4 z-50 mx-auto max-w-md animate-in slide-in-from-bottom-4 duration-300">
+    <aside aria-label="Notifikasi Pembaruan" className="fixed bottom-24 inset-x-4 z-[100] mx-auto max-w-md animate-in slide-in-from-bottom-4 duration-300">
       <div className="flex flex-col gap-2.5 rounded-3xl border border-white/30 bg-card/95 p-4 shadow-2xl shadow-primary/10 backdrop-blur-xl">
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-2.5 min-w-0 flex-1">
