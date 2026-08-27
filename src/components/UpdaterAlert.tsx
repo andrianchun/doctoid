@@ -78,6 +78,7 @@ function DownloadProgressBar({ progress }: { progress: number }) {
 }
 
 export default function UpdaterAlert() {
+  const isDev = import.meta.env.DEV || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
   const [updateAvailable, setUpdateAvailable] = useState(false)
   const [manifest, setManifest] = useState<OtaManifest | null>(null)
   const [dismissed, setDismissed] = useState(false)
@@ -89,6 +90,7 @@ export default function UpdaterAlert() {
   const otaUrl = 'https://docto-id.web.app/ota/version.json'
 
   const checkUpdate = useCallback(async () => {
+    if (isDev) return
     try {
       const controller = new AbortController()
       const timeoutId = setTimeout(() => controller.abort(), 8000)
@@ -211,7 +213,7 @@ export default function UpdaterAlert() {
     setDismissed(true)
   }
 
-  if (!updateAvailable || !manifest || (dismissed && !manifest.is_forced)) {
+  if (isDev || !updateAvailable || !manifest || (dismissed && !manifest.is_forced)) {
     return null
   }
 
