@@ -2,13 +2,13 @@ import { useState, useRef, useEffect } from 'react'
 import {
   ShieldCheck, RefreshCw, Lock as LockIcon, Trash2, Loader2, Fingerprint,
   KeyRound, Download, Upload, Database, CheckCircle2, Sparkles, DownloadCloud,
-  CloudUpload, CloudDownload, Cloud, AlertTriangle
+  Cloud, AlertTriangle
 } from 'lucide-react'
 import { Capacitor } from '@capacitor/core'
 import { CapacitorUpdater } from '@capgo/capacitor-updater'
 import { useUi } from '../store'
 import {
-  syncUserCloud, forcePushCloud, forcePullCloud, selfDestruct,
+  syncUserCloud, selfDestruct,
   downloadBackupJson, restoreBackupJson
 } from '../sync'
 import { loginWithGoogle } from '../auth'
@@ -19,7 +19,6 @@ const inputCls =
 
 export default function SecuritySection({ notify }: { notify: (m: string) => void }) {
   const { user, setUser, setIsUnlocked } = useUi()
-  const [devName, setDevName] = useState(localStorage.getItem('doctoid_device_name') ?? '')
   const [busy, setBusy] = useState(false)
   const [bioOn, setBioOn] = useState(localStorage.getItem('doctoid_bio_enabled') === 'true')
   const [pinInput, setPinInput] = useState('')
@@ -160,45 +159,6 @@ export default function SecuritySection({ notify }: { notify: (m: string) => voi
     setHasPin(false)
     setShowPinSetup(false)
     notify('PIN Kunci Layar dihapus.')
-  }
-
-  const jalankanSync = async () => {
-    if (!user) return
-    setBusy(true)
-    try {
-      const arah = await syncUserCloud(user.uid)
-      notify(arah === 'pull' ? 'Sync ✓ — data terbaru ditarik dari cloud' : 'Sync ✓ — data lokal terkirim ke cloud')
-    } catch (e: any) {
-      notify(`Sync gagal: ${e.message || 'Periksa konfigurasi Firebase & koneksi internet.'}`)
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const handleForcePush = async () => {
-    if (!user) return notify('Masuk dengan Google terlebih dahulu.')
-    setBusy(true)
-    try {
-      await forcePushCloud(user.uid)
-      notify('Semua data lokal berhasil dikirim ke Cloud ✓')
-    } catch (e: any) {
-      notify(`Gagal push ke cloud: ${e.message}`)
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const handleForcePull = async () => {
-    if (!user) return notify('Masuk dengan Google terlebih dahulu.')
-    setBusy(true)
-    try {
-      const res = await forcePullCloud(user.uid)
-      notify(res.message)
-    } catch (e: any) {
-      notify(`Gagal menarik data cloud: ${e.message}`)
-    } finally {
-      setBusy(false)
-    }
   }
 
   const handleLoginGoogle = async () => {
@@ -440,30 +400,30 @@ export default function SecuritySection({ notify }: { notify: (m: string) => voi
       </div>
 
       {/* Sinkronisasi Cloud (Firebase) */}
-      <div className="rounded-2xl border border-surface bg-card p-4 space-y-3.5 shadow-sm">
+      <div className="rounded-2xl border border-surface bg-card p-4 space-y-3 shadow-sm">
         <div className="flex items-center justify-between">
           <p className="text-xs font-bold text-ink flex items-center gap-1.5">
             <Cloud size={15} className="text-primary" />
             Sinkronisasi Cloud Akun Google
           </p>
           {user ? (
-            <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-lg">
-              <CheckCircle2 size={12} /> Terhubung
+            <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-800 bg-emerald-100 px-2.5 py-0.5 rounded-lg">
+              <CheckCircle2 size={12} /> Terhubung & Realtime
             </span>
           ) : (
-            <span className="inline-flex items-center gap-1 text-[11px] font-bold text-amber-800 bg-amber-100 px-2 py-0.5 rounded-lg">
+            <span className="inline-flex items-center gap-1 text-[11px] font-bold text-amber-800 bg-amber-100 px-2.5 py-0.5 rounded-lg">
               <AlertTriangle size={12} /> Offline
             </span>
           )}
         </div>
 
         {user ? (
-          <div className="rounded-xl bg-surface/70 p-3 space-y-2 border border-surface">
-            <div className="flex items-center gap-2.5">
+          <div className="rounded-2xl bg-surface/70 p-3.5 space-y-2.5 border border-surface">
+            <div className="flex items-center gap-3">
               {user.photoURL ? (
-                <img src={user.photoURL} alt="Avatar" className="size-8 rounded-lg object-cover ring-1 ring-primary/20" />
+                <img src={user.photoURL} alt="Avatar" className="size-10 rounded-xl object-cover ring-2 ring-primary/20" />
               ) : (
-                <div className="size-8 rounded-lg bg-primary/20 flex items-center justify-center font-bold text-primary text-xs">
+                <div className="size-10 rounded-xl bg-primary/20 flex items-center justify-center font-bold text-primary text-sm">
                   {user.displayName?.[0] || 'D'}
                 </div>
               )}
@@ -473,73 +433,26 @@ export default function SecuritySection({ notify }: { notify: (m: string) => voi
               </div>
             </div>
 
-            <p className="caption text-ink-muted">
-              Data pasien, Faskes, ruangan, dan catatan medis tersinkronisasi otomatis dengan cloud akun Google ini.
+            <p className="caption text-xs text-ink-muted leading-relaxed pt-1.5 border-t border-surface">
+              Data pasien, Faskes, ruangan, dan catatan medis tersinkronisasi otomatis secara dua arah (real-time) antar perangkat.
             </p>
           </div>
         ) : (
-          <div className="rounded-xl bg-amber-50/80 p-3 space-y-2 border border-amber-200/60">
+          <div className="rounded-2xl bg-amber-50/80 p-3.5 space-y-2.5 border border-amber-200/60">
             <p className="text-xs font-semibold text-amber-900 leading-relaxed">
-              Anda belum login akun Google di perangkat ini. Masuk dengan Google agar data dari perangkat lain (atau localhost) otomatis muncul.
+              Anda belum login akun Google di perangkat ini. Masuk dengan Google agar data otomatis tersinkronisasi secara real-time.
             </p>
             <button
+              type="button"
               onClick={handleLoginGoogle}
               disabled={busy}
-              className="w-full flex cursor-pointer items-center justify-center gap-2 rounded-xl bg-gradient-to-br from-primary to-primary-deep text-white py-2 text-xs font-bold shadow-md shadow-primary/20 active:scale-95 transition-all"
+              className="w-full flex cursor-pointer items-center justify-center gap-2 rounded-xl bg-gradient-to-br from-primary to-primary-deep text-white py-2.5 text-xs font-bold shadow-md shadow-primary/20 active:scale-95 transition-all"
             >
               {busy ? <Loader2 size={14} className="animate-spin" /> : <Cloud size={14} />}
               <span>Masuk dengan Google</span>
             </button>
           </div>
         )}
-
-        {/* Tombol Aksi Sinkronisasi Manual (Push & Pull) */}
-        {user && (
-          <div className="space-y-2 pt-1">
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                onClick={handleForcePush}
-                disabled={busy}
-                className="flex cursor-pointer items-center justify-center gap-1.5 rounded-xl bg-primary/10 hover:bg-primary/20 text-primary-deep py-2.5 px-2 text-xs font-bold transition-all active:scale-95 disabled:opacity-50"
-              >
-                {busy ? <Loader2 size={14} className="animate-spin" /> : <CloudUpload size={14} />}
-                <span>Kirim ke Cloud (Push)</span>
-              </button>
-              <button
-                type="button"
-                onClick={handleForcePull}
-                disabled={busy}
-                className="flex cursor-pointer items-center justify-center gap-1.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200/60 py-2.5 px-2 text-xs font-bold transition-all active:scale-95 disabled:opacity-50"
-              >
-                {busy ? <Loader2 size={14} className="animate-spin" /> : <CloudDownload size={14} />}
-                <span>Tarik dari Cloud (Pull)</span>
-              </button>
-            </div>
-            <button
-              type="button"
-              onClick={jalankanSync}
-              disabled={busy}
-              className="w-full flex cursor-pointer items-center justify-center gap-2 rounded-xl bg-surface hover:bg-surface/80 border border-surface py-2 text-xs font-bold text-ink-muted active:scale-95 transition-all disabled:opacity-50"
-            >
-              {busy ? <Loader2 size={13} className="animate-spin text-primary" /> : <RefreshCw size={13} />}
-              <span>Sync Otomatis (2-Arah)</span>
-            </button>
-          </div>
-        )}
-
-        <label className="block pt-1">
-          <span className="mb-1 block text-xs font-medium text-ink-muted">Nama perangkat ini</span>
-          <input
-            value={devName}
-            onChange={(e) => {
-              setDevName(e.target.value)
-              localStorage.setItem('doctoid_device_name', e.target.value)
-            }}
-            placeholder="Perangkat Dokter"
-            className={inputCls}
-          />
-        </label>
       </div>
 
       <div className="flex flex-wrap gap-2 pt-2">
