@@ -264,7 +264,7 @@ export default function Dasbor() {
               <h2 className="text-sm sm:text-base font-black text-white leading-tight break-words">
                 {user?.displayName || 'Dokter'}
               </h2>
-              <p className="text-[11px] sm:text-xs font-semibold text-white/80 leading-snug break-words mt-0.5">
+              <p className="text-xs font-semibold text-white/80 leading-snug break-words mt-0.5">
                 {user?.specialty || 'Spesialis Neurologi (Sp.N)'}
               </p>
             </div>
@@ -275,7 +275,7 @@ export default function Dasbor() {
                 <h1 className="h1 text-2xl sm:text-3xl font-black text-white leading-none">
                   {aktif?.length ?? 0}
                 </h1>
-                <p className="text-[11px] sm:text-xs font-bold text-white/95 mt-1 tracking-wide">
+                <p className="text-xs font-bold text-white/95 mt-1 tracking-wide">
                   Pasien Dirawat
                 </p>
               </div>
@@ -337,7 +337,7 @@ export default function Dasbor() {
 
         {/* Tombol Kelola Faskes (Icon Pensil Tanpa Teks) */}
         <button
-          onClick={() => navigate('/pengaturan?tab=faskes')}
+          onClick={() => navigate('/pengaturan?tab=manajemen')}
           title="Kelola Faskes & Ruangan"
           aria-label="Kelola Faskes & Ruangan"
           className="flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-full glass-card text-ink-muted hover:text-primary hover:bg-primary/10 active:scale-95 transition-all ml-auto"

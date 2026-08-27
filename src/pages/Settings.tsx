@@ -1,38 +1,190 @@
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
 import {
-  ChevronLeft, Plus, Trash2, Building, Copy, ChevronDown, ChevronUp,
+  ChevronLeft, Plus, Trash2, Building2, Copy, ChevronDown, ChevronUp,
   Edit2, Check, GripVertical, Calendar, Clock,
-  Sparkles, ShieldCheck, Eye, EyeOff, CheckCircle2, HelpCircle
+  Sparkles, Eye, EyeOff, CheckCircle2, HelpCircle,
+  Stethoscope, Brain, HeartPulse, Activity, ShieldPlus, Cross,
+  Pill, Ambulance, FlaskConical, UserCheck, BriefcaseMedical,
+  X
 } from 'lucide-react'
 import { db } from '../db'
 import { PALETTE } from '../store'
 import SecuritySection from '../components/SecuritySection'
-import { DndContext, closestCenter, PointerSensor, TouchSensor, useSensor, useSensors } from '@dnd-kit/core'
+import { DndContext, closestCenter, PointerSensor, useSensor, useSensors, DragOverlay } from '@dnd-kit/core'
 import type { DragEndEvent } from '@dnd-kit/core'
+import { restrictToVerticalAxis } from '@dnd-kit/modifiers'
 import { SortableContext, verticalListSortingStrategy, useSortable, arrayMove } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { getStoredDateFormat, getStoredTimeFormat, saveDateFormat, saveTimeFormat, type DateFormat, type TimeFormat } from '../utils/dateFormat'
+import { convertToWebP } from '../utils/mediaCompress'
 
-const AVAILABLE_ICONS = [
-  { path: '/icons/hospital.png', label: 'Rumah Sakit' },
-  { path: '/icons/clinic.png', label: 'Klinik' },
+export const PRESET_ICONS = [
+  { id: 'hospital-building', icon: Building2 },
+  { id: 'stethoscope', icon: Stethoscope },
+  { id: 'brain', icon: Brain },
+  { id: 'heart-pulse', icon: HeartPulse },
+  { id: 'activity', icon: Activity },
+  { id: 'shield-plus', icon: ShieldPlus },
+  { id: 'cross', icon: Cross },
+  { id: 'pill', icon: Pill },
+  { id: 'ambulance', icon: Ambulance },
+  { id: 'flask', icon: FlaskConical },
+  { id: 'user-check', icon: UserCheck },
+  { id: 'briefcase', icon: BriefcaseMedical },
 ]
 
-function ColorPicker({ value, onChange }: { value: string; onChange: (c: string) => void }) {
+export function RenderFaskesIcon({
+  icon,
+  color = '#3B82F6',
+  size = 20,
+  className = '',
+}: {
+  icon?: string
+  color?: string
+  size?: number
+  className?: string
+}) {
+  if (icon?.startsWith('data:') || icon?.startsWith('http')) {
+    return (
+      <img
+        src={icon}
+        alt="Faskes"
+        className={`object-contain rounded-lg ${className}`}
+        style={{ width: size, height: size }}
+      />
+    )
+  }
+  const match = PRESET_ICONS.find((p) => p.id === icon)
+  if (match) {
+    const IconComp = match.icon
+    return <IconComp size={size} style={{ color }} className={className} />
+  }
+  return <Building2 size={size} style={{ color }} className={className} />
+}
+
+function FaskesIconColorModal({
+  open,
+  onClose,
+  color,
+  onColorChange,
+  icon,
+  onIconChange,
+}: {
+  open: boolean
+  onClose: () => void
+  color: string
+  onColorChange: (c: string) => void
+  icon: string
+  onIconChange: (i: string) => void
+}) {
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    try {
+      const webp = await convertToWebP(file, 256, 0.85)
+      onIconChange(webp)
+      if (fileInputRef.current) fileInputRef.current.value = ''
+    } catch {
+      alert('Gagal memproses gambar. Coba gambar lain.')
+    }
+  }
+
+  if (!open) return null
+
   return (
-    <div className="flex flex-wrap gap-2">
-      {PALETTE.map((c) => (
+    <div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in">
+      <div className="w-full max-w-md rounded-3xl bg-card border border-surface p-5 shadow-2xl space-y-4 animate-in slide-in-from-bottom-6">
+        {/* Header Bersih Tanpa Ikon */}
+        <div className="flex items-center justify-between pb-2 border-b border-surface">
+          <h4 className="text-sm font-bold text-ink">Ikon & Warna Faskes</h4>
+          <button
+            onClick={onClose}
+            className="p-1 rounded-full text-ink-muted hover:text-ink hover:bg-surface transition-colors cursor-pointer"
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        {/* Pilihan Warna Faskes (Langsung Warna Tanpa Tulisan) */}
+        <div className="flex flex-wrap gap-2.5">
+          {PALETTE.map((c) => (
+            <button
+              key={c}
+              type="button"
+              onClick={() => onColorChange(c)}
+              aria-label={`Warna ${c}`}
+              className={`size-7 cursor-pointer rounded-full transition-transform ${
+                color === c ? 'scale-110 ring-3 ring-primary ring-offset-2' : 'hover:scale-105'
+              }`}
+              style={{ backgroundColor: c }}
+            />
+          ))}
+        </div>
+
+        {/* Pilihan Ikon Medis */}
+        <div className="space-y-2.5 pt-1">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold text-ink">Ikon</span>
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className="text-xs font-bold text-primary hover:underline cursor-pointer"
+            >
+              Unggah
+            </button>
+            <input
+              type="file"
+              ref={fileInputRef}
+              onChange={handleFileUpload}
+              accept="image/*"
+              className="hidden"
+            />
+          </div>
+
+          <div className="grid grid-cols-6 gap-2 max-h-48 overflow-y-auto p-1">
+            {icon?.startsWith('data:') && (
+              <button
+                type="button"
+                className="flex items-center justify-center p-2.5 rounded-2xl border-2 border-primary bg-primary/10 shadow-xs"
+                title="Foto Unggahan Anda"
+              >
+                <img src={icon} alt="Foto" className="size-6 object-contain rounded-md" />
+              </button>
+            )}
+            {PRESET_ICONS.map((p) => {
+              const isSelected = icon === p.id
+              const IconComp = p.icon
+              return (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => onIconChange(p.id)}
+                  className={`flex items-center justify-center p-3 rounded-2xl border transition-all cursor-pointer ${
+                    isSelected
+                      ? 'border-primary bg-primary/10 ring-2 ring-primary/30 shadow-xs'
+                      : 'border-surface bg-surface/50 hover:bg-surface hover:border-surface/80'
+                  }`}
+                >
+                  <IconComp size={20} style={{ color: isSelected ? color : '#64748B' }} />
+                </button>
+              )
+            })}
+          </div>
+        </div>
+
+        {/* Tombol Selesai */}
         <button
-          key={c}
           type="button"
-          onClick={() => onChange(c)}
-          aria-label={`Warna ${c}`}
-          className={`size-6 cursor-pointer rounded-full transition-transform ${value === c ? 'scale-110 ring-2 ring-primary ring-offset-2' : 'hover:scale-105'}`}
-          style={{ backgroundColor: c }}
-        />
-      ))}
+          onClick={onClose}
+          className="w-full py-3 rounded-2xl bg-gradient-to-br from-primary to-primary-deep text-white font-bold text-xs shadow-md shadow-primary/20 hover:brightness-110 active:scale-98 transition-all cursor-pointer"
+        >
+          Selesai & Terapkan
+        </button>
+      </div>
     </div>
   )
 }
@@ -105,123 +257,210 @@ function ApiKeyCard({ notify }: { notify: (m: string) => void }) {
   )
 }
 
-function WardItem({ ward, notify }: { ward: any, notify: (m: string) => void }) {
+function WardItem({
+  ward,
+  notify,
+  isOverlay = false,
+}: {
+  ward: any
+  notify?: (m: string) => void
+  isOverlay?: boolean
+}) {
   const [isEditing, setIsEditing] = useState(false)
   const [name, setName] = useState(ward.nama)
-  
+  const [color, setColor] = useState(ward.kode_warna || PALETTE[0])
+  const [showColorPicker, setShowColorPicker] = useState(false)
+
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: ward.id })
   const style = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-    opacity: isDragging ? 0.5 : 1,
-    zIndex: isDragging ? 10 : 1,
+    transform: CSS.Translate.toString(transform),
+    transition: isDragging ? undefined : transition,
+    opacity: isDragging ? 0.25 : 1,
   }
 
   const handleSave = async () => {
     if (!name.trim()) return
-    await db.wards.update(ward.id, { nama: name.trim() })
-    setIsEditing(false)
-    notify('Nama ruangan diperbarui ✓')
-  }
-
-  const handleCopy = async () => {
-    await db.wards.add({
-      hospital_id: ward.hospital_id,
-      nama: `${ward.nama} (Copy)`,
-      kode_warna: ward.kode_warna,
-      order: (ward.order ?? 0) + 1
+    await db.wards.update(ward.id, {
+      nama: name.trim(),
+      kode_warna: color,
     })
-    notify('Ruangan diduplikasi ✓')
+    setIsEditing(false)
+    setShowColorPicker(false)
+    notify?.('Ruangan diperbarui ✓')
   }
 
   return (
-    <div ref={setNodeRef} style={style} className={`flex flex-col gap-2 rounded-2xl bg-card border border-surface p-3 shadow-xs transition-all ${isDragging ? 'shadow-xl relative' : ''}`}>
+    <div
+      ref={isOverlay ? undefined : setNodeRef}
+      style={isOverlay ? undefined : style}
+      className={`flex items-center justify-between gap-2.5 rounded-2xl bg-white border px-3.5 py-2.5 transition-all ${
+        isOverlay
+          ? 'border-2 border-primary/50 shadow-2xl scale-[1.02] opacity-95'
+          : 'border-slate-200/80 shadow-xs hover:border-slate-300'
+      }`}
+    >
       {isEditing ? (
-        <div className="flex flex-col gap-2 p-1">
-          <input 
+        <div className="flex items-center gap-1.5 w-full min-w-0 relative">
+          {/* Color Selector saat Edit */}
+          <div className="relative shrink-0">
+            <button
+              type="button"
+              onClick={() => setShowColorPicker(!showColorPicker)}
+              title="Ganti warna ruangan"
+              className="size-6 rounded-lg flex items-center justify-center border border-slate-200 bg-slate-50 hover:scale-105 cursor-pointer shadow-2xs"
+            >
+              <span
+                className="size-3.5 rounded-full ring-1 ring-black/10"
+                style={{ backgroundColor: color }}
+              />
+            </button>
+            {showColorPicker && (
+              <div className="absolute left-0 bottom-full mb-2 z-50 p-2 rounded-2xl bg-white border border-slate-200 shadow-xl flex items-center gap-1.5 animate-in fade-in zoom-in-95">
+                {PALETTE.map((c) => (
+                  <button
+                    key={c}
+                    type="button"
+                    onClick={() => {
+                      setColor(c)
+                      setShowColorPicker(false)
+                    }}
+                    aria-label={`Pilih warna ${c}`}
+                    className={`size-5 rounded-full transition-transform cursor-pointer ${
+                      color === c ? 'scale-110 ring-2 ring-primary ring-offset-1' : 'hover:scale-105'
+                    }`}
+                    style={{ backgroundColor: c }}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+
+          <input
             autoFocus
             value={name}
             onChange={(e) => setName(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleSave()}
-            placeholder="Nama ruangan…"
-            className="w-full rounded-xl border border-primary/40 bg-surface px-3 py-2 text-xs font-bold outline-none focus:ring-2 focus:ring-primary/40"
+            placeholder="Nama ruangan..."
+            className="flex-1 min-w-0 rounded-xl border border-primary/40 bg-slate-50 px-2.5 py-1.5 text-xs font-bold outline-none focus:bg-white focus:ring-2 focus:ring-primary/20 text-slate-800"
           />
-          <div className="flex items-center justify-end gap-2">
-            <button 
-              type="button" 
-              onClick={() => { setIsEditing(false); setName(ward.nama) }} 
-              className="px-3 py-1.5 rounded-xl text-xs font-bold text-ink-muted hover:bg-surface"
-            >
-              Batal
-            </button>
-            <button 
-              type="button" 
-              onClick={handleSave} 
-              className="px-4 py-1.5 rounded-xl bg-primary text-white text-xs font-bold shadow-xs hover:bg-primary-deep"
-            >
-              Simpan
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={() => {
+              setIsEditing(false)
+              setName(ward.nama)
+              setColor(ward.kode_warna || PALETTE[0])
+              setShowColorPicker(false)
+            }}
+            className="px-2.5 py-1.5 rounded-xl text-xs font-semibold text-slate-500 hover:bg-slate-100 shrink-0 cursor-pointer"
+          >
+            Batal
+          </button>
+          <button
+            type="button"
+            onClick={handleSave}
+            className="px-3.5 py-1.5 rounded-xl bg-primary text-white text-xs font-bold shadow-xs hover:bg-primary-deep shrink-0 cursor-pointer"
+          >
+            Simpan
+          </button>
         </div>
       ) : (
-        <div className="flex items-center gap-2">
-          <button {...attributes} {...listeners} className="cursor-grab text-ink-muted/50 hover:text-ink p-1 touch-none">
-            <GripVertical size={16} />
-          </button>
-          
-          <span className="size-3 rounded-full shrink-0 shadow-xs" style={{ backgroundColor: ward.kode_warna }} />
-          
-          <span className="flex-1 text-xs font-bold text-ink truncate">{ward.nama}</span>
-          
-          <div className="flex items-center gap-1 shrink-0">
-            <button onClick={() => setIsEditing(true)} title="Ubah Nama" className="p-1.5 text-ink-muted hover:text-primary hover:bg-surface rounded-xl transition-colors cursor-pointer"><Edit2 size={14} /></button>
-            <button onClick={handleCopy} title="Duplikat" className="p-1.5 text-ink-muted hover:text-blue-500 hover:bg-surface rounded-xl transition-colors cursor-pointer"><Copy size={14} /></button>
-            <button 
-              onClick={async () => {
-                if (window.confirm(`Hapus ruangan "${ward.nama}"?`)) {
-                  await db.wards.delete(ward.id)
-                  notify('Ruangan dihapus')
-                }
-              }} 
-              title="Hapus" 
-              className="p-1.5 text-ink-muted hover:text-red-500 hover:bg-surface rounded-xl transition-colors cursor-pointer"
+        <>
+          <div className="flex items-center gap-2.5 min-w-0 flex-1">
+            <button
+              {...attributes}
+              {...listeners}
+              className="cursor-grab text-slate-300 hover:text-slate-600 p-1 touch-none select-none shrink-0"
+              title="Geser urutan"
             >
-              <Trash2 size={14} />
+              <GripVertical size={15} />
             </button>
+
+            {/* Titik Warna Ruangan */}
+            <span
+              className="size-3 rounded-full shrink-0 shadow-2xs ring-1 ring-black/10"
+              style={{ backgroundColor: ward.kode_warna || '#3B82F6' }}
+            />
+
+            <span className="text-xs font-bold text-slate-800 truncate">{ward.nama}</span>
           </div>
-        </div>
+
+          {!isOverlay && (
+            <div className="flex items-center gap-1 shrink-0">
+              <button
+                onClick={() => setIsEditing(true)}
+                title="Ubah Nama & Warna"
+                className="p-1.5 text-slate-400 hover:text-primary hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+              >
+                <Edit2 size={13} />
+              </button>
+              <button
+                onClick={async () => {
+                  if (window.confirm(`Hapus ruangan "${ward.nama}"?`)) {
+                    await db.wards.delete(ward.id)
+                    notify?.('Ruangan dihapus')
+                  }
+                }}
+                title="Hapus"
+                className="p-1.5 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+              >
+                <Trash2 size={13} />
+              </button>
+            </div>
+          )}
+        </>
       )}
     </div>
   )
 }
 
-function HospitalAccordion({ hospital, notify }: { hospital: any, notify: (m: string) => void }) {
+function HospitalAccordion({
+  hospital,
+  notify,
+  isOverlay = false,
+}: {
+  hospital: any
+  notify?: (m: string) => void
+  isOverlay?: boolean
+}) {
   const [isOpen, setIsOpen] = useState(false)
-  const [isEditing, setIsEditing] = useState(false)
+  const [showEditModal, setShowEditModal] = useState(false)
   const [name, setName] = useState(hospital.nama)
   const [color, setColor] = useState(hospital.kode_warna)
-  const [icon, setIcon] = useState(hospital.icon || '/icons/hospital.png')
-  
-  const [newWardName, setNewWardName] = useState('')
-  const [newWardColor, setNewWardColor] = useState(PALETTE[1])
+  const [icon, setIcon] = useState(hospital.icon || 'hospital-building')
 
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: hospital.id })
+  const [newWardName, setNewWardName] = useState('')
+  const [newWardColor, setNewWardColor] = useState(hospital.kode_warna || PALETTE[0])
+  const [showWardColorPicker, setShowWardColorPicker] = useState(false)
+
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: hospital.id,
+  })
   const style = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-    opacity: isDragging ? 0.5 : 1,
-    zIndex: isDragging ? 10 : 1,
+    transform: CSS.Translate.toString(transform),
+    transition: isDragging ? undefined : transition,
+    opacity: isDragging ? 0.25 : 1,
   }
 
-  const wards = useLiveQuery(
-    async () => (await db.wards.where('hospital_id').equals(hospital.id).toArray()).sort((a, b) => (a.order ?? 0) - (b.order ?? 0)),
+  const rawWards = useLiveQuery(
+    async () =>
+      (await db.wards.where('hospital_id').equals(hospital.id).toArray()).sort(
+        (a, b) => (a.order ?? 0) - (b.order ?? 0)
+      ),
     [hospital.id],
     []
   )
 
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
-    useSensor(TouchSensor, { activationConstraint: { delay: 100, tolerance: 5 } })
+  const [localWards, setLocalWards] = useState<any[]>([])
+  const [activeWardId, setActiveWardId] = useState<number | null>(null)
+
+  useEffect(() => {
+    if (rawWards) {
+      setLocalWards(rawWards)
+    }
+  }, [rawWards])
+
+  const wardSensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
   )
 
   const handleSaveHospital = async () => {
@@ -229,10 +468,10 @@ function HospitalAccordion({ hospital, notify }: { hospital: any, notify: (m: st
     await db.hospitals.update(hospital.id, {
       nama: name.trim(),
       kode_warna: color,
-      icon: icon
+      icon: icon,
     })
-    setIsEditing(false)
-    notify('Faskes diperbarui ✓')
+    setShowEditModal(false)
+    notify?.('Faskes diperbarui ✓')
   }
 
   const handleCopyRs = async () => {
@@ -240,26 +479,26 @@ function HospitalAccordion({ hospital, notify }: { hospital: any, notify: (m: st
       nama: `${hospital.nama} (Copy)`,
       kode_warna: hospital.kode_warna,
       icon: hospital.icon,
-      order: (hospital.order ?? 0) + 1
+      order: (hospital.order ?? 0) + 1,
     })
-    if (wards && wards.length > 0) {
-      for (const w of wards) {
+    if (localWards && localWards.length > 0) {
+      for (const w of localWards) {
         await db.wards.add({
           hospital_id: newHId as number,
           nama: w.nama,
           kode_warna: w.kode_warna,
-          order: w.order
+          order: w.order,
         })
       }
     }
-    notify('Faskes beserta ruangan diduplikasi ✓')
+    notify?.('Faskes beserta ruangan diduplikasi ✓')
   }
 
   const handleDeleteRs = async () => {
     if (window.confirm(`Hapus faskes "${hospital.nama}" beserta seluruh ruangannya?`)) {
       await db.wards.where('hospital_id').equals(hospital.id).delete()
       await db.hospitals.delete(hospital.id)
-      notify('Faskes dan seluruh ruangannya dihapus')
+      notify?.('Faskes dan seluruh ruangannya dihapus')
     }
   }
 
@@ -269,138 +508,343 @@ function HospitalAccordion({ hospital, notify }: { hospital: any, notify: (m: st
       hospital_id: hospital.id,
       nama: newWardName.trim(),
       kode_warna: newWardColor,
-      order: (wards?.length ?? 0) + 1
+      order: (localWards?.length ?? 0) + 1,
     })
     setNewWardName('')
-    notify('Ruangan baru ditambahkan ✓')
+    setShowWardColorPicker(false)
+    notify?.('Ruangan baru ditambahkan ✓')
   }
 
   const handleDragEndWards = async (event: DragEndEvent) => {
     const { active, over } = event
-    if (over && active.id !== over.id && wards) {
-      const oldIndex = wards.findIndex(w => w.id === active.id)
-      const newIndex = wards.findIndex(w => w.id === over.id)
-      const newOrder = arrayMove(wards, oldIndex, newIndex)
-      
-      for (let i = 0; i < newOrder.length; i++) {
-        await db.wards.update(newOrder[i].id!, { order: i + 1 })
+    setActiveWardId(null)
+    if (over && active.id !== over.id && localWards) {
+      const oldIndex = localWards.findIndex((w) => w.id === active.id)
+      const newIndex = localWards.findIndex((w) => w.id === over.id)
+      if (oldIndex !== -1 && newIndex !== -1) {
+        const newOrder = arrayMove(localWards, oldIndex, newIndex)
+        setLocalWards(newOrder)
+
+        await db.transaction('rw', db.wards, async () => {
+          for (let i = 0; i < newOrder.length; i++) {
+            await db.wards.update(newOrder[i].id!, { order: i + 1 })
+          }
+        })
       }
     }
   }
 
+  const activeWard = activeWardId ? localWards?.find((w) => w.id === activeWardId) : null
+
   return (
-    <div ref={setNodeRef} style={style} className="rounded-3xl border border-surface bg-card shadow-sm overflow-hidden transition-all">
-      {isEditing ? (
-        <div className="p-4 bg-surface/40 space-y-3">
-          <div className="flex items-center gap-2">
-            <div className="flex gap-1.5 bg-surface p-1 rounded-xl border border-surface">
-              {AVAILABLE_ICONS.map((ic) => (
-                <button
-                  key={ic.path}
-                  type="button"
-                  onClick={() => setIcon(ic.path)}
-                  className={`p-1 rounded-lg transition-all ${icon === ic.path ? 'bg-primary/20 ring-2 ring-primary' : 'opacity-60 hover:opacity-100'}`}
-                >
-                  <img src={ic.path} alt={ic.label} className="size-5 object-contain" />
-                </button>
-              ))}
-            </div>
-            <input 
-              autoFocus
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="Nama Rumah Sakit / Klinik…"
-              className="flex-1 rounded-xl border border-primary/40 bg-card px-3 py-2 text-xs font-bold outline-none focus:ring-2 focus:ring-primary/40"
-            />
+    <>
+      <div
+        ref={isOverlay ? undefined : setNodeRef}
+        style={isOverlay ? undefined : style}
+        className={`rounded-3xl border bg-white transition-all overflow-hidden ${
+          isOverlay
+            ? 'border-2 border-primary/50 shadow-2xl scale-[1.02] opacity-95'
+            : 'border-slate-200/80 shadow-xs hover:border-slate-300'
+        }`}
+      >
+        {/* Faskes Header Row: Bersih, Lega & Luas */}
+        <div
+          className="flex items-center gap-3 p-4 cursor-pointer hover:bg-slate-50/70 transition-colors"
+          onClick={() => !isOverlay && setIsOpen(!isOpen)}
+        >
+          <button
+            {...attributes}
+            {...listeners}
+            className="cursor-grab text-slate-300 hover:text-slate-600 p-1 touch-none select-none shrink-0"
+            onClick={(e) => e.stopPropagation()}
+            title="Geser urutan"
+          >
+            <GripVertical size={16} />
+          </button>
+
+          {/* Faskes Icon Avatar */}
+          <div
+            className="size-10 rounded-xl flex items-center justify-center shrink-0 shadow-xs"
+            style={{ backgroundColor: `${hospital.kode_warna || '#3B82F6'}15` }}
+          >
+            <RenderFaskesIcon icon={hospital.icon} color={hospital.kode_warna} size={20} />
           </div>
 
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1 border-t border-surface/80">
-            <ColorPicker value={color} onChange={setColor} />
-            <div className="flex items-center gap-2 self-end">
-              <button 
-                type="button" 
-                onClick={() => { setIsEditing(false); setName(hospital.nama); setColor(hospital.kode_warna) }} 
-                className="px-3.5 py-1.5 rounded-xl text-xs font-bold text-ink-muted hover:bg-surface cursor-pointer"
+          {/* Faskes Name & Ward Count */}
+          <div className="flex-1 min-w-0 pr-2">
+            <h4 className="h3 text-ink truncate leading-snug">
+              {hospital.nama}
+            </h4>
+            <p className="caption text-ink-muted mt-0.5">
+              {localWards?.length ?? 0} Ruangan
+            </p>
+          </div>
+
+          {/* Action Buttons Sederhana: Edit & Chevron */}
+          {!isOverlay && (
+            <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
+              <button
+                onClick={() => {
+                  setName(hospital.nama)
+                  setColor(hospital.kode_warna)
+                  setIcon(hospital.icon || 'hospital-building')
+                  setShowEditModal(true)
+                }}
+                title="Ubah Faskes"
+                className="p-2 text-slate-400 hover:text-primary hover:bg-slate-100 rounded-xl transition-colors cursor-pointer"
+              >
+                <Edit2 size={15} />
+              </button>
+              <button
+                className="p-2 text-slate-400 hover:text-slate-700 cursor-pointer rounded-xl hover:bg-slate-100 transition-colors"
+                onClick={() => setIsOpen(!isOpen)}
+                title={isOpen ? 'Tutup Ruangan' : 'Buka Ruangan'}
+              >
+                {isOpen ? <ChevronUp size={17} /> : <ChevronDown size={17} />}
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Accordion Content: Background Abu-abu Sunken (#EEF1F6) untuk Hirarki Jelas */}
+        {!isOverlay && isOpen && (
+          <div
+            className="p-4 border-t border-slate-200/70 bg-[#EEF1F6] space-y-3 cursor-default"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header Dalam: Label Ruangan */}
+            <div className="flex items-center justify-between px-1">
+              <p className="caption font-bold text-ink uppercase tracking-wider">
+                Daftar Ruangan ({localWards?.length ?? 0})
+              </p>
+            </div>
+
+            {/* List Ruangan (Kartu Putih di atas Background Abu-abu) */}
+            <DndContext
+              sensors={wardSensors}
+              collisionDetection={closestCenter}
+              modifiers={[restrictToVerticalAxis]}
+              onDragStart={(event) => setActiveWardId(event.active.id as number)}
+              onDragEnd={handleDragEndWards}
+              onDragCancel={() => setActiveWardId(null)}
+            >
+              <SortableContext items={localWards?.map((w) => w.id!) ?? []} strategy={verticalListSortingStrategy}>
+                <div className="space-y-2">
+                  {(!localWards || localWards.length === 0) && (
+                    <div className="rounded-2xl border border-dashed border-slate-300/80 bg-white/70 p-4 text-center text-xs text-slate-400 font-medium">
+                      Belum ada ruangan.
+                    </div>
+                  )}
+                  {localWards?.map((w) => (
+                    <WardItem key={w.id} ward={w} notify={notify} />
+                  ))}
+                </div>
+              </SortableContext>
+
+              <DragOverlay dropAnimation={{ duration: 150, easing: 'cubic-bezier(0.18, 0.67, 0.6, 1.22)' }}>
+                {activeWard ? <WardItem ward={activeWard} isOverlay /> : null}
+              </DragOverlay>
+            </DndContext>
+
+            {/* Form Tambah Ruangan Ringkas & Rapi 1 Baris */}
+            <div className="bg-white rounded-2xl p-2 border border-slate-200/80 shadow-xs flex items-center gap-2 relative">
+              {/* Selector Warna Ruangan */}
+              <div className="relative shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setShowWardColorPicker(!showWardColorPicker)}
+                  title="Pilih warna ruangan"
+                  className="size-7 rounded-xl flex items-center justify-center border border-slate-200 bg-slate-50 hover:scale-105 active:scale-95 transition-all cursor-pointer shadow-2xs"
+                >
+                  <span
+                    className="size-4 rounded-full shadow-2xs ring-1 ring-black/10"
+                    style={{ backgroundColor: newWardColor }}
+                  />
+                </button>
+
+                {showWardColorPicker && (
+                  <div className="absolute left-0 bottom-full mb-2 z-50 p-2 rounded-2xl bg-white border border-slate-200 shadow-xl flex items-center gap-1.5 animate-in fade-in zoom-in-95">
+                    {PALETTE.map((c) => (
+                      <button
+                        key={c}
+                        type="button"
+                        onClick={() => {
+                          setNewWardColor(c)
+                          setShowWardColorPicker(false)
+                        }}
+                        aria-label={`Pilih warna ${c}`}
+                        className={`size-6 rounded-full transition-transform cursor-pointer ${
+                          newWardColor === c ? 'scale-110 ring-2 ring-primary ring-offset-1' : 'hover:scale-105'
+                        }`}
+                        style={{ backgroundColor: c }}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <input
+                value={newWardName}
+                onChange={(e) => setNewWardName(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleAddWard()}
+                placeholder="Nama Ruang Baru..."
+                className="flex-1 min-w-0 rounded-xl bg-slate-50 px-3.5 py-2 text-xs font-semibold outline-none focus:bg-white focus:ring-1 focus:ring-primary text-slate-800 placeholder:text-slate-400"
+              />
+              <button
+                type="button"
+                onClick={handleAddWard}
+                disabled={!newWardName.trim()}
+                className="flex items-center gap-1 rounded-xl bg-gradient-to-br from-primary to-primary-deep px-4 py-2 text-xs font-bold text-white shadow-xs disabled:opacity-40 hover:brightness-110 active:scale-95 transition-all cursor-pointer shrink-0"
+              >
+                <Plus size={14} /> Tambah
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Edit Faskes Modal */}
+      {showEditModal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in">
+          <div className="w-full max-w-md rounded-3xl bg-card border border-surface p-5 shadow-2xl space-y-4 animate-in zoom-in-95">
+            <div className="flex items-center justify-between pb-2 border-b border-surface">
+              <h4 className="text-sm font-bold text-ink">Ubah Data Faskes</h4>
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    handleCopyRs()
+                    setShowEditModal(false)
+                  }}
+                  title="Duplikat Faskes"
+                  className="p-1.5 text-slate-400 hover:text-primary hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+                >
+                  <Copy size={16} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowEditModal(false)
+                    handleDeleteRs()
+                  }}
+                  title="Hapus Faskes"
+                  className="p-1.5 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                >
+                  <Trash2 size={16} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowEditModal(false)}
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+            </div>
+
+            <div className="space-y-3.5">
+              <input
+                autoFocus
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleSaveHospital()}
+                placeholder="Nama Faskes..."
+                className="w-full rounded-2xl border border-surface bg-surface/70 px-4 py-2.5 text-xs font-bold outline-none focus:border-primary text-ink"
+              />
+
+              {/* Warna (Langsung Baris Warna) */}
+              <div className="flex flex-wrap gap-2.5">
+                {PALETTE.map((c) => (
+                  <button
+                    key={c}
+                    type="button"
+                    onClick={() => setColor(c)}
+                    aria-label={`Warna ${c}`}
+                    className={`size-7 cursor-pointer rounded-full transition-transform ${
+                      color === c ? 'scale-110 ring-3 ring-primary ring-offset-2' : 'hover:scale-105'
+                    }`}
+                    style={{ backgroundColor: c }}
+                  />
+                ))}
+              </div>
+
+              {/* Ikon */}
+              <div className="space-y-2 pt-1">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-ink">Ikon</span>
+                  <label className="text-xs font-bold text-primary hover:underline cursor-pointer">
+                    Unggah
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={async (e) => {
+                        const file = e.target.files?.[0]
+                        if (file) {
+                          try {
+                            const webp = await convertToWebP(file, 256, 0.85)
+                            setIcon(webp)
+                          } catch {
+                            alert('Gagal memproses gambar.')
+                          }
+                        }
+                      }}
+                    />
+                  </label>
+                </div>
+
+                <div className="grid grid-cols-6 gap-2 max-h-40 overflow-y-auto p-1">
+                  {icon?.startsWith('data:') && (
+                    <button
+                      type="button"
+                      className="flex items-center justify-center p-2.5 rounded-2xl border-2 border-primary bg-primary/10 shadow-xs"
+                      title="Foto Unggahan"
+                    >
+                      <img src={icon} alt="Foto" className="size-6 object-contain rounded-md" />
+                    </button>
+                  )}
+                  {PRESET_ICONS.map((p) => {
+                    const isSelected = icon === p.id
+                    const IconComp = p.icon
+                    return (
+                      <button
+                        key={p.id}
+                        type="button"
+                        onClick={() => setIcon(p.id)}
+                        className={`flex items-center justify-center p-3 rounded-2xl border transition-all cursor-pointer ${
+                          isSelected
+                            ? 'border-primary bg-primary/10 ring-2 ring-primary/30 shadow-xs'
+                            : 'border-surface bg-surface/50 hover:bg-surface hover:border-surface/80'
+                        }`}
+                      >
+                        <IconComp size={20} style={{ color: isSelected ? color : '#64748B' }} />
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-surface">
+              <button
+                type="button"
+                onClick={() => setShowEditModal(false)}
+                className="px-4 py-2 rounded-xl text-xs font-semibold text-ink-muted hover:bg-surface cursor-pointer"
               >
                 Batal
               </button>
-              <button 
-                type="button" 
-                onClick={handleSaveHospital} 
-                className="px-4 py-1.5 rounded-xl bg-primary text-white text-xs font-bold shadow-xs hover:bg-primary-deep cursor-pointer"
+              <button
+                type="button"
+                onClick={handleSaveHospital}
+                className="px-5 py-2 rounded-xl bg-gradient-to-br from-primary to-primary-deep text-white text-xs font-bold shadow-md shadow-primary/20 hover:brightness-110 active:scale-95 cursor-pointer"
               >
                 Simpan Perubahan
               </button>
             </div>
           </div>
         </div>
-      ) : (
-        <div className="flex items-center gap-3 p-4 cursor-pointer hover:bg-surface/30 transition-colors" onClick={() => setIsOpen(!isOpen)}>
-          <button {...attributes} {...listeners} className="cursor-grab text-ink-muted/50 hover:text-ink p-1 touch-none" onClick={e => e.stopPropagation()}>
-            <GripVertical size={18} />
-          </button>
-
-          <div className="relative size-10 rounded-2xl flex items-center justify-center shrink-0 shadow-xs" style={{ backgroundColor: `${hospital.kode_warna}15` }}>
-            {hospital.icon ? (
-              <img src={hospital.icon} alt="Icon" className="size-6 object-contain" />
-            ) : (
-              <Building size={20} style={{ color: hospital.kode_warna }} />
-            )}
-            <span className="absolute -bottom-0.5 -right-0.5 size-3 rounded-full border-2 border-card" style={{ backgroundColor: hospital.kode_warna }} />
-          </div>
-
-          <div className="flex-1 min-w-0">
-            <h4 className="text-xs font-bold text-ink truncate">{hospital.nama}</h4>
-            <p className="caption text-ink-muted">{wards.length} Ruangan</p>
-          </div>
-
-          <div className="flex items-center gap-1 shrink-0" onClick={e => e.stopPropagation()}>
-            <button onClick={() => setIsEditing(true)} title="Ubah Nama" className="p-1.5 text-ink-muted hover:text-primary hover:bg-surface rounded-xl transition-colors cursor-pointer"><Edit2 size={15} /></button>
-            <button onClick={handleCopyRs} title="Duplikat" className="p-1.5 text-ink-muted hover:text-blue-500 hover:bg-surface rounded-xl transition-colors cursor-pointer"><Copy size={15} /></button>
-            <button onClick={handleDeleteRs} title="Hapus" className="p-1.5 text-ink-muted hover:text-red-500 hover:bg-surface rounded-xl transition-colors cursor-pointer"><Trash2 size={15} /></button>
-            <div className="w-px h-5 bg-surface mx-1" />
-            <button className="p-1.5 text-ink-muted cursor-pointer" onClick={() => setIsOpen(!isOpen)}>
-              {isOpen ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
-            </button>
-          </div>
-        </div>
       )}
-
-      {isOpen && (
-        <div className="p-4 border-t border-surface bg-surface/20 cursor-default" onClick={e => e.stopPropagation()}>
-          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEndWards}>
-            <SortableContext items={wards.map(w => w.id!)} strategy={verticalListSortingStrategy}>
-              <div className="space-y-2 mb-4">
-                {wards.length === 0 && <p className="caption text-ink-muted text-center py-2">Belum ada ruangan di faskes ini.</p>}
-                {wards.map(w => <WardItem key={w.id} ward={w} notify={notify} />)}
-              </div>
-            </SortableContext>
-          </DndContext>
-
-          <div className="bg-card rounded-2xl p-3 border border-surface shadow-xs space-y-2">
-            <h5 className="caption font-bold text-ink-muted">Tambah Ruangan Baru</h5>
-            <input
-              value={newWardName}
-              onChange={(e) => setNewWardName(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && handleAddWard()}
-              placeholder="Nama ruangan (mis: ICU, Melati...)"
-              className="w-full rounded-xl border border-surface bg-surface/60 px-3 py-2 text-xs outline-none focus:border-primary"
-            />
-            <div className="flex items-center justify-between pt-1">
-              <ColorPicker value={newWardColor} onChange={setNewWardColor} />
-              <button
-                type="button"
-                onClick={handleAddWard}
-                disabled={!newWardName.trim()}
-                className="flex items-center gap-1 rounded-xl bg-primary px-3 py-1.5 text-xs font-bold text-white shadow-xs disabled:opacity-40 hover:bg-primary-deep cursor-pointer"
-              >
-                <Plus size={14} /> Tambah
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
+    </>
   )
 }
 
@@ -423,7 +867,6 @@ export default function Settings() {
     normalizeTab(rawTab)
   )
 
-  // Update query param when activeTab changes with history replacement
   const switchTab = (tab: 'manajemen' | 'preferensi' | 'lanjutan') => {
     setActiveTab(tab)
     setSearchParams({ tab }, { replace: true })
@@ -440,7 +883,8 @@ export default function Settings() {
   // Faskes State
   const [newRsName, setNewRsName] = useState('')
   const [newRsColor, setNewRsColor] = useState(PALETTE[0])
-  const [newRsIcon, setNewRsIcon] = useState('/icons/hospital.png')
+  const [newRsIcon, setNewRsIcon] = useState('hospital-building')
+  const [showIconPicker, setShowIconPicker] = useState(false)
 
   // Date & Time State
   const [dateFormat, setDateFormat] = useState<DateFormat>(getStoredDateFormat())
@@ -458,15 +902,23 @@ export default function Settings() {
     notify(`Format jam diubah ke ${f === '24h' ? '24 Jam' : '12 Jam'} ✓`)
   }
 
-  const hospitals = useLiveQuery(
+  const rawHospitals = useLiveQuery(
     async () => (await db.hospitals.toArray()).sort((a, b) => (a.order ?? 0) - (b.order ?? 0)),
     [],
     []
   )
 
+  const [localHospitals, setLocalHospitals] = useState<any[]>([])
+  const [activeHospitalId, setActiveHospitalId] = useState<number | null>(null)
+
+  useEffect(() => {
+    if (rawHospitals) {
+      setLocalHospitals(rawHospitals)
+    }
+  }, [rawHospitals])
+
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
-    useSensor(TouchSensor, { activationConstraint: { delay: 100, tolerance: 5 } })
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
   )
 
   const handleAddRs = async () => {
@@ -475,7 +927,7 @@ export default function Settings() {
       nama: newRsName.trim(),
       kode_warna: newRsColor,
       icon: newRsIcon,
-      order: (hospitals?.length ?? 0) + 1
+      order: (localHospitals?.length ?? 0) + 1,
     })
     setNewRsName('')
     notify('Faskes baru berhasil ditambahkan ✓')
@@ -483,16 +935,26 @@ export default function Settings() {
 
   const handleDragEndHospitals = async (event: DragEndEvent) => {
     const { active, over } = event
-    if (over && active.id !== over.id && hospitals) {
-      const oldIndex = hospitals.findIndex(h => h.id === active.id)
-      const newIndex = hospitals.findIndex(h => h.id === over.id)
-      const newOrder = arrayMove(hospitals, oldIndex, newIndex)
-      
-      for (let i = 0; i < newOrder.length; i++) {
-        await db.hospitals.update(newOrder[i].id!, { order: i + 1 })
+    setActiveHospitalId(null)
+    if (over && active.id !== over.id && localHospitals) {
+      const oldIndex = localHospitals.findIndex((h) => h.id === active.id)
+      const newIndex = localHospitals.findIndex((h) => h.id === over.id)
+      if (oldIndex !== -1 && newIndex !== -1) {
+        const newOrder = arrayMove(localHospitals, oldIndex, newIndex)
+        setLocalHospitals(newOrder)
+
+        await db.transaction('rw', db.hospitals, async () => {
+          for (let i = 0; i < newOrder.length; i++) {
+            await db.hospitals.update(newOrder[i].id!, { order: i + 1 })
+          }
+        })
       }
     }
   }
+
+  const activeHospital = activeHospitalId
+    ? localHospitals?.find((h) => h.id === activeHospitalId)
+    : null
 
   return (
     <main className="space-y-5 p-5 pb-36">
@@ -511,26 +973,24 @@ export default function Settings() {
         </div>
       </div>
 
-      {/* Navigasi 3 Tab Tetap (Fit Layar Tanpa Scroll Horizontal) */}
+      {/* Navigasi 3 Tab Tetap (Bersih Tanpa Ikon Sesuai Permintaan) */}
       <div className="grid grid-cols-3 gap-2">
         {[
-          { id: 'manajemen' as const, label: 'Manajemen', icon: Building },
-          { id: 'preferensi' as const, label: 'Preferensi', icon: Calendar },
-          { id: 'lanjutan' as const, label: 'Lanjutan', icon: ShieldCheck },
+          { id: 'manajemen' as const, label: 'Manajemen' },
+          { id: 'preferensi' as const, label: 'Preferensi' },
+          { id: 'lanjutan' as const, label: 'Lanjutan' },
         ].map((tab) => {
-          const Icon = tab.icon
           const isActive = activeTab === tab.id
           return (
             <button
               key={tab.id}
               onClick={() => switchTab(tab.id)}
-              className={`flex items-center justify-center gap-1.5 rounded-2xl py-3 text-xs font-bold transition-all cursor-pointer ${
+              className={`flex items-center justify-center rounded-2xl py-3 text-xs font-bold transition-all cursor-pointer ${
                 isActive
                   ? 'bg-gradient-to-br from-primary to-primary-deep text-white shadow-md shadow-primary/20'
                   : 'glass-card text-ink-muted hover:text-ink hover:bg-surface/80'
               }`}
             >
-              <Icon size={16} />
               <span>{tab.label}</span>
             </button>
           )
@@ -539,74 +999,88 @@ export default function Settings() {
 
       {/* TAB 1: MANAJEMEN FASKES & RUANGAN */}
       {activeTab === 'manajemen' && (
-        <div className="space-y-4 animate-in fade-in">
-          {/* Card Tambah Faskes Baru */}
-          <div className="glass-card rounded-3xl p-5 shadow-sm space-y-3">
-            <p className="text-xs font-bold text-ink flex items-center gap-2">
-              <Plus size={16} className="text-primary" /> Tambah Faskes Baru
-            </p>
-
-            <div className="flex items-center gap-2">
-              <div className="flex gap-1.5 bg-surface p-1 rounded-2xl border border-surface shrink-0">
-                {AVAILABLE_ICONS.map((ic) => (
-                  <button
-                    key={ic.path}
-                    type="button"
-                    onClick={() => setNewRsIcon(ic.path)}
-                    className={`p-1.5 rounded-xl transition-all cursor-pointer ${newRsIcon === ic.path ? 'bg-primary/20 ring-2 ring-primary' : 'opacity-60 hover:opacity-100'}`}
-                    title={ic.label}
-                  >
-                    <img src={ic.path} alt={ic.label} className="size-6 object-contain" />
-                  </button>
-                ))}
+        <div className="animate-in fade-in">
+          {/* Satu Kartu Utama Terpadu untuk Fasilitas Kesehatan */}
+          <div className="rounded-3xl border border-slate-200/80 bg-white p-5 shadow-xs space-y-4">
+            {/* Header Kartu */}
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div>
+                <h3 className="h3 text-ink font-bold">Fasilitas Kesehatan</h3>
+                <p className="caption text-ink-muted mt-0.5">
+                  Daftar Faskes ({localHospitals?.length ?? 0})
+                </p>
               </div>
+            </div>
+
+            {/* List Faskes (Sortable) */}
+            <DndContext
+              sensors={sensors}
+              collisionDetection={closestCenter}
+              modifiers={[restrictToVerticalAxis]}
+              onDragStart={(event) => setActiveHospitalId(event.active.id as number)}
+              onDragEnd={handleDragEndHospitals}
+              onDragCancel={() => setActiveHospitalId(null)}
+            >
+              <SortableContext items={localHospitals?.map((h) => h.id!) ?? []} strategy={verticalListSortingStrategy}>
+                <div className="space-y-3">
+                  {localHospitals?.map((h) => (
+                    <HospitalAccordion key={h.id} hospital={h} notify={notify} />
+                  ))}
+                  {(!localHospitals || localHospitals.length === 0) && (
+                    <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50/50 p-6 text-center text-xs text-slate-400 font-medium">
+                      Belum ada faskes terdaftar.
+                    </div>
+                  )}
+                </div>
+              </SortableContext>
+
+              <DragOverlay dropAnimation={{ duration: 150, easing: 'cubic-bezier(0.18, 0.67, 0.6, 1.22)' }}>
+                {activeHospital ? <HospitalAccordion hospital={activeHospital} isOverlay /> : null}
+              </DragOverlay>
+            </DndContext>
+
+            {/* Form Tambah Faskes di Paling Bawah (Sama Persis Logikanya dengan Tambah Ruangan) */}
+            <div className="pt-2 border-t border-slate-100 flex items-center gap-2">
+              {/* Trigger Icon & Color Button */}
+              <button
+                type="button"
+                onClick={() => setShowIconPicker(true)}
+                title="Pilih Ikon & Warna Faskes"
+                className="size-11 rounded-2xl flex items-center justify-center shrink-0 border border-slate-200 bg-slate-50 hover:bg-slate-100 active:scale-95 transition-all cursor-pointer shadow-xs"
+                style={{ backgroundColor: `${newRsColor}15` }}
+              >
+                <RenderFaskesIcon icon={newRsIcon} color={newRsColor} size={20} />
+              </button>
 
               <input
                 value={newRsName}
                 onChange={(e) => setNewRsName(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && handleAddRs()}
-                placeholder="Nama Rumah Sakit / Klinik..."
-                className="w-full rounded-2xl border border-surface bg-surface/60 px-4 py-3 text-xs outline-none focus:border-primary"
+                placeholder="Nama Faskes Baru..."
+                className="flex-1 min-w-0 rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-2.5 text-xs font-semibold outline-none focus:bg-white focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all text-slate-800 placeholder:text-slate-400"
               />
-            </div>
 
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2">
-              <ColorPicker value={newRsColor} onChange={setNewRsColor} />
               <button
                 type="button"
                 onClick={handleAddRs}
                 disabled={!newRsName.trim()}
-                className="flex items-center justify-center gap-1.5 rounded-2xl bg-gradient-to-br from-primary to-primary-deep px-5 py-2.5 text-xs font-bold text-white shadow-md shadow-primary/20 disabled:opacity-40 hover:brightness-110 active:scale-95 transition-all cursor-pointer self-end"
+                className="flex items-center justify-center gap-1.5 rounded-2xl bg-gradient-to-br from-primary to-primary-deep px-5 py-2.5 text-xs font-bold text-white shadow-md shadow-primary/20 disabled:opacity-40 hover:brightness-110 active:scale-95 transition-all cursor-pointer shrink-0"
               >
-                <Plus size={16} /> Simpan Faskes
+                <Plus size={16} />
+                <span>Simpan</span>
               </button>
             </div>
           </div>
 
-          {/* Daftar Faskes Tersimpan */}
-          <div className="space-y-3">
-            <div className="flex items-center justify-between px-1">
-              <p className="caption font-bold uppercase tracking-wider text-ink-muted">
-                Daftar Faskes ({hospitals?.length ?? 0})
-              </p>
-              <span className="caption text-ink-muted">Tahan & geser untuk atur urutan</span>
-            </div>
-
-            <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEndHospitals}>
-              <SortableContext items={hospitals?.map(h => h.id!) ?? []} strategy={verticalListSortingStrategy}>
-                <div className="space-y-3">
-                  {hospitals?.map((h) => (
-                    <HospitalAccordion key={h.id} hospital={h} notify={notify} />
-                  ))}
-                  {(!hospitals || hospitals.length === 0) && (
-                    <div className="glass-card rounded-3xl p-8 text-center text-xs text-ink-muted">
-                      Belum ada faskes terdaftar. Tambahkan RS atau Klinik di atas.
-                    </div>
-                  )}
-                </div>
-              </SortableContext>
-            </DndContext>
-          </div>
+          {/* Modal Picker Ikon & Warna Baru */}
+          <FaskesIconColorModal
+            open={showIconPicker}
+            onClose={() => setShowIconPicker(false)}
+            color={newRsColor}
+            onColorChange={setNewRsColor}
+            icon={newRsIcon}
+            onIconChange={setNewRsIcon}
+          />
         </div>
       )}
 
@@ -703,10 +1177,14 @@ export default function Settings() {
 
       {/* Toast Notification */}
       {toast && (
-        <aside aria-label="Notifikasi" className="fixed inset-x-0 bottom-24 z-50 mx-auto w-fit max-w-[90%] rounded-2xl bg-ink/90 backdrop-blur-md px-5 py-2.5 text-xs font-semibold text-white shadow-2xl animate-in fade-in slide-in-from-bottom-2">
+        <aside
+          aria-label="Notifikasi"
+          className="fixed inset-x-0 bottom-24 z-50 mx-auto w-fit max-w-[90%] rounded-2xl bg-ink/90 backdrop-blur-md px-5 py-2.5 text-xs font-semibold text-white shadow-2xl animate-in fade-in slide-in-from-bottom-2"
+        >
           {toast}
         </aside>
       )}
     </main>
   )
 }
+

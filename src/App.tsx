@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { Capacitor } from '@capacitor/core'
 import { CapacitorUpdater } from '@capgo/capacitor-updater'
+import { StatusBar, Style } from '@capacitor/status-bar'
 import { useUi } from './store'
 import Lock from './components/Lock'
 import Layout from './components/Layout'
@@ -22,10 +23,12 @@ const IDLE_LOCK_MS = 5 * 60 * 1000 // 5 menit tanpa aktivitas → auto-lock laya
 export default function App() {
   const { user, setUser, isUnlocked, setIsUnlocked } = useUi()
 
-  // Capgo: Beri sinyal ke native updater bahwa bundle sehat setelah mount pertama
+  // Inisialisasi Native Android: Status Bar & Capgo
   useEffect(() => {
     if (Capacitor.isNativePlatform()) {
       CapacitorUpdater.notifyAppReady()
+      StatusBar.setStyle({ style: Style.Light }).catch(() => {})
+      StatusBar.setOverlaysWebView({ overlay: true }).catch(() => {})
     }
   }, [])
 

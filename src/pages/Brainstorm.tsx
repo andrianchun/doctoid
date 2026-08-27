@@ -739,7 +739,7 @@ export default function Brainstorm() {
             <div className="flex items-center justify-between mb-1">
               <label className="block text-xs font-bold text-slate-700">Tanggal Onset</label>
               {form.tgl_onset && (
-                <span className="caption text-[10px] font-extrabold text-amber-800 bg-amber-50 border border-amber-200/70 px-1.5 py-0.5 rounded-md shadow-2xs">
+                <span className="caption text-xs font-extrabold text-amber-800 bg-amber-50 border border-amber-200/70 px-1.5 py-0.5 rounded-md shadow-2xs">
                   OH-{hariKe(form.tgl_onset)}
                 </span>
               )}
@@ -755,7 +755,7 @@ export default function Brainstorm() {
             <div className="flex items-center justify-between mb-1">
               <label className="block text-xs font-bold text-slate-700">Tanggal MRS</label>
               {form.tgl_mrs && (
-                <span className="caption text-[10px] font-extrabold text-emerald-800 bg-emerald-50 border border-emerald-200/70 px-1.5 py-0.5 rounded-md shadow-2xs">
+                <span className="caption text-xs font-extrabold text-emerald-800 bg-emerald-50 border border-emerald-200/70 px-1.5 py-0.5 rounded-md shadow-2xs">
                   P-{hariKe(form.tgl_mrs)}
                 </span>
               )}

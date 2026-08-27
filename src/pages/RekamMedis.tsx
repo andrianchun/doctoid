@@ -170,7 +170,7 @@ export default function RekamMedis() {
 
                     <div className="flex items-center gap-1.5 flex-wrap mt-0.5">
                       <p className="text-xs font-bold text-primary truncate">{p.diagnosis_utama || '—'}</p>
-                      <span className="flex items-center gap-1 text-[10px] font-extrabold text-slate-700 bg-slate-100 border border-slate-200/90 rounded-md px-1.5 py-0.5 shrink-0 shadow-2xs">
+                      <span className="caption flex items-center gap-1 text-xs font-extrabold text-slate-700 bg-slate-100 border border-slate-200/90 rounded-md px-1.5 py-0.5 shrink-0 shadow-2xs">
                         {p.tgl_onset && <span>OH-{hariKe(p.tgl_onset)}</span>}
                         {p.tgl_onset && <span className="text-slate-400">·</span>}
                         <span>P-{hariKe(p.tgl_mrs)}</span>
