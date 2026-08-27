@@ -1,21 +1,12 @@
-/* Gerbang biometrik lokal untuk unmask data pasien.
-   Credential platform dipakai murni sebagai user-verification lokal —
-   tidak ada server, jadi challenge acak lokal sudah cukup. */
-import { vaultExists, unwrapEntropy } from './crypto'
-
 const CRED_KEY = 'doctoid_webauthn_cred'
 
-/* Fallback tanpa sensor biometrik: verifikasi Master PIN */
+/* Fallback tanpa sensor biometrik: verifikasi PIN layar jika ada */
 async function pinFallback(): Promise<boolean> {
-  if (!vaultExists()) return true // belum setup vault (mis. onboarding) — jangan kunci user
-  const pin = window.prompt('Sensor biometrik tidak tersedia.\nMasukkan Master PIN:')
+  const storedPin = localStorage.getItem('doctoid_screen_pin')
+  if (!storedPin) return true
+  const pin = window.prompt('Sensor biometrik tidak tersedia.\nMasukkan PIN Kunci Layar:')
   if (!pin) return false
-  try {
-    await unwrapEntropy(pin)
-    return true
-  } catch {
-    return false
-  }
+  return pin.trim() === storedPin.trim()
 }
 
 export async function verifyBiometric(): Promise<boolean> {

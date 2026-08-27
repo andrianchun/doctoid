@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import type { UserProfile } from './auth'
 
 export interface SessionKeys {
   entropy: Uint8Array
@@ -10,7 +11,11 @@ interface UiState {
   setUnmasked: (v: boolean) => void
   settingsOpen: boolean
   setSettingsOpen: (v: boolean) => void
-  sessionKeys: SessionKeys | null // hanya di memori — hilang saat tab ditutup/dikunci
+  user: UserProfile | null
+  setUser: (u: UserProfile | null) => void
+  isUnlocked: boolean
+  setIsUnlocked: (v: boolean) => void
+  sessionKeys: SessionKeys | null // untuk backward compatibility enkripsi lokal/sync
   setSessionKeys: (v: SessionKeys | null) => void
 }
 
@@ -19,6 +24,10 @@ export const useUi = create<UiState>((set) => ({
   setUnmasked: (unmasked) => set({ unmasked }),
   settingsOpen: false,
   setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
+  user: null,
+  setUser: (user) => set({ user }),
+  isUnlocked: false,
+  setIsUnlocked: (isUnlocked) => set({ isUnlocked }),
   sessionKeys: null,
   setSessionKeys: (sessionKeys) => set({ sessionKeys }),
 }))

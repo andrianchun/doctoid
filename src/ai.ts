@@ -1,5 +1,5 @@
-import type { Jaminan, KategoriTerapi } from './db'
-import { NEURO_LOCK, RAPIKAN_INSTRUKSI, DIRECT_EDIT_INSTRUKSI, ANALISIS_INSTRUKSI } from './prompts'
+import type { Jaminan, KategoriTerapi, RegexField } from './db'
+import { getNeuroLockPrompt, getAnalisisInstruksi, RAPIKAN_INSTRUKSI, DIRECT_EDIT_INSTRUKSI } from './prompts'
 import { db } from './db'
 
 class APIError extends Error {
@@ -25,6 +25,12 @@ function getProvider(key: string): 'openai' | 'google' | 'anthropic' {
   if (key.startsWith('sk-')) return 'openai'
   if (key.startsWith('AIza') || key.startsWith('AQ.')) return 'google'
   return 'google'
+}
+
+/* Fase Hemat Token: Gemini Flash dicoba dulu (termurah), baru OpenAI gpt-4o-mini */
+const PROVIDER_COST_TIER: Record<string, number> = { google: 0, openai: 1, anthropic: 2 }
+function cheapestFirst(keys: string[]): string[] {
+  return [...keys].sort((a, b) => PROVIDER_COST_TIER[getProvider(a)] - PROVIDER_COST_TIER[getProvider(b)])
 }
 
 function getPplxKeys(): string[] {
@@ -61,14 +67,13 @@ export interface RapikanResult {
   O_pemfis: string
   O_penunjang: string
   A: { kategori: 'Utama' | 'Sekunder'; nama_diagnosis: string; icd10: string }[]
-  P: { nama_item: string; dosis_keterangan: string; kategori: KategoriTerapi }[]
-  icd9_code: string
+  P: { nama_item: string; dosis_keterangan: string; kategori: KategoriTerapi; icd9?: string }[]
+  regex_baru?: { field: RegexField; pattern: string; flags: string }[]
 }
 
 export interface AnalisisResult {
   A: { kategori: 'Utama' | 'Sekunder'; nama_diagnosis: string; icd10: string }[]
-  P: { nama_item: string; dosis_keterangan: string; kategori: KategoriTerapi; status: 'aktif' | 'stop' }[]
-  icd9_code: string
+  P: { nama_item: string; dosis_keterangan: string; kategori: KategoriTerapi; status: 'aktif' | 'stop'; icd9?: string }[]
   komentar: string
 }
 
@@ -86,7 +91,7 @@ export async function rapikan(text: string, attachments: { type: string; dataUrl
 
   let lastError = new Error('Gagal menghubungi AI Server')
 
-  for (const key of keys) {
+  for (const key of cheapestFirst(keys)) {
     const provider = getProvider(key)
     if (provider === 'anthropic') continue // not supported for text yet
 
@@ -95,7 +100,7 @@ export async function rapikan(text: string, attachments: { type: string; dataUrl
       const modeInstruction = isRingkas 
         ? '\n\nATURAN MODE RINGKAS: PADA BAGIAN O_pemfis dan O_penunjang, HANYA cantumkan baris/kategori yang memiliki kelainan (abnormal/positif). Jika suatu sub-sistem (misal Meningeal Sign, Abdomen) sepenuhnya normal, BUANG baris tersebut sepenuhnya dari hasil teks untuk menghemat tempat.'
         : '\n\nATURAN MODE LENGKAP: PADA BAGIAN O_pemfis dan O_penunjang, cantumkan SELURUH struktur secara utuh (head-to-toe), termasuk yang normal/negatif sebagai bukti medis bahwa pemeriksaan telah dilakukan.'
-      const systemPrompt = NEURO_LOCK + prefs + modeInstruction + '\n\n' + RAPIKAN_INSTRUKSI
+      const systemPrompt = getNeuroLockPrompt() + prefs + modeInstruction + '\n\n' + RAPIKAN_INSTRUKSI
       let res;
       
       if (provider === 'openai') {
@@ -181,13 +186,13 @@ export async function analisisKasus(formStateStr: string): Promise<AnalisisResul
 
   let lastError = new Error('Gagal menghubungi AI Server')
 
-  for (const key of keys) {
+  for (const key of cheapestFirst(keys)) {
     const provider = getProvider(key)
     if (provider === 'anthropic') continue
 
     try {
       const prefs = await preferensiDokter()
-      const systemPrompt = NEURO_LOCK + prefs + '\n\n' + ANALISIS_INSTRUKSI
+      const systemPrompt = getNeuroLockPrompt() + prefs + '\n\n' + getAnalisisInstruksi()
       let res;
       
       if (provider === 'openai') {
@@ -270,13 +275,13 @@ export async function chatPasien(messages: ChatMsg[], konteksPasien: string): Pr
 
   let lastError = new Error('Gagal menghubungi AI Server')
 
-  for (const key of keys) {
+  for (const key of cheapestFirst(keys)) {
     const provider = getProvider(key)
     if (provider === 'anthropic') continue
 
     try {
       const prefs = await preferensiDokter()
-      const systemPrompt = NEURO_LOCK + prefs + '\n\n' + DIRECT_EDIT_INSTRUKSI + '\n\n' + konteksPasien
+      const systemPrompt = getNeuroLockPrompt() + prefs + '\n\n' + DIRECT_EDIT_INSTRUKSI + '\n\n' + konteksPasien
       let res;
       
       if (provider === 'openai') {
@@ -354,7 +359,7 @@ export async function deepSearch(query: string, konteks = ''): Promise<{ content
           messages: [
             {
               role: 'system',
-              content: NEURO_LOCK + '\n\nJawab ringkas berbasis bukti (EBM) dan sertakan sitasi.' + konteks,
+              content: getNeuroLockPrompt() + '\n\nJawab ringkas berbasis bukti (EBM) dan sertakan sitasi.' + konteks,
             },
             { role: 'user', content: query },
           ],

@@ -1,0 +1,9 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Doctoid</string>
+    <string name="title_activity_main">Doctoid</string>
+    <string name="package_name">com.andrianchun.doctoid</string>
+    <string name="custom_url_scheme">com.andrianchun.doctoid</string>
+    <string name="no_webview_text">Google System WebView is not available on this device.</string>
+    <string name="no_webview_button_text">Install or update WebView</string>
+</resources>

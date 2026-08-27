@@ -90,6 +90,38 @@ export async function decryptJson<T>(key: CryptoKey, payload: string): Promise<T
   return JSON.parse(new TextDecoder().decode(pt))
 }
 
+/* Buka Cepat Biometrik: entropy dibungkus AES key acak yang disimpan lokal,
+   dibuka hanya setelah gerbang WebAuthn (verifyBiometric) sukses.
+   ponytail: kunci & ciphertext sama-sama di localStorage — biometrik di sini adalah
+   GERBANG UX di perangkat ini, bukan pengganti kripto PIN. Diterima sebagai trade-off
+   kenyamanan vs PIN murni (lihat diskusi keamanan). */
+const BIO_KEY = 'doctoid_bio_key'
+const BIO_VAULT = 'doctoid_bio_vault'
+
+export const bioUnlockEnabled = () => !!localStorage.getItem(BIO_VAULT)
+
+export async function enableBioUnlock(entropy: Uint8Array): Promise<void> {
+  const key = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, true, ['encrypt', 'decrypt'])
+  const raw = await crypto.subtle.exportKey('raw', key)
+  const payload = await encryptJson(key, { e: b64(entropy) })
+  localStorage.setItem(BIO_KEY, b64(raw))
+  localStorage.setItem(BIO_VAULT, payload)
+}
+
+export const disableBioUnlock = () => {
+  localStorage.removeItem(BIO_KEY)
+  localStorage.removeItem(BIO_VAULT)
+}
+
+export async function unlockWithBio(): Promise<Uint8Array> {
+  const rawB64 = localStorage.getItem(BIO_KEY)
+  const payload = localStorage.getItem(BIO_VAULT)
+  if (!rawB64 || !payload) throw new Error('Buka cepat biometrik belum diaktifkan.')
+  const key = await crypto.subtle.importKey('raw', unb64(rawB64) as BufferSource, 'AES-GCM', false, ['decrypt'])
+  const { e } = await decryptJson<{ e: string }>(key, payload)
+  return unb64(e)
+}
+
 /* ID dokumen sync: hash entropy — bukan rahasia, hanya penunjuk lokasi ciphertext */
 export async function syncIdFromEntropy(entropy: Uint8Array): Promise<string> {
   const h = await crypto.subtle.digest('SHA-256', new Uint8Array([...entropy, ...te.encode('sync-v1')]))

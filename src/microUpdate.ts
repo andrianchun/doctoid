@@ -43,7 +43,6 @@ export async function applyMicroUpdate(patientId: number, command: string): Prom
       O_penunjang: (last as any)?.O_penunjang ?? '',
       A: last?.A ?? [],
       P,
-      icd9_code: last?.icd9_code ?? '',
     })
   }
   return { applied, ignored }

@@ -31,3 +31,6 @@ interface Window {
   SpeechRecognition?: new () => SpeechRecognition
   webkitSpeechRecognition?: new () => SpeechRecognition
 }
+
+declare const __APP_VERSION__: string
+

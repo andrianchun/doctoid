@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "1037044059481",
+    "project_id": "docto-id",
+    "storage_bucket": "docto-id.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1037044059481:android:331dc3938d7172fdaf5048",
+        "android_client_info": {
+          "package_name": "com.andrianchun.doctoid"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "1037044059481-o4on5052nf2u7l8vueb4pmedogosock2.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.andrianchun.doctoid",
+            "certificate_hash": "cd3801dbf81689ae2c9a91d1c46ba6a0869fae7d"
+          }
+        },
+        {
+          "client_id": "1037044059481-vp3s9mp4e44li3ae49bm52fd8u8p3ccd.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAtzL9rHyDRYnaStK90cMrNKq7ucCTLveI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "1037044059481-vp3s9mp4e44li3ae49bm52fd8u8p3ccd.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

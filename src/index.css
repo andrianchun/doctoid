@@ -1,19 +1,197 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
 @import "tailwindcss";
 
-/* Palet Doctoid — biru lembut flat 2D dengan gradasi tipis (lihat referensi desain) */
+/* Palet & Sistem Desain Doctoid — Modern Clinical Glassmorphism & Futurism */
 @theme {
-  --color-primary: #5B7FFF;
-  --color-primary-deep: #3D5AF1;
-  --color-primary-soft: #A8B8F8;
-  --color-surface: #F4F5FB;
+  --color-primary: #2563EB;
+  --color-primary-deep: #1D4ED8;
+  --color-primary-soft: #93C5FD;
+  --color-surface: #F6F8FD;
   --color-card: #FFFFFF;
-  --color-ink: #1E2447;
-  --color-ink-muted: #8A90B8;
-  --font-sans: "Inter", system-ui, sans-serif;
+  --color-ink: #0F172A;
+  --color-ink-muted: #64748B;
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-heading: "Inter", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+
+  /* TIGA tingkat ukuran baku: 16px (1rem) / 21px (1.3125rem) / 33px (2.0625rem) */
+  --text-xs: 1rem;
+  --text-xs--line-height: 1.4;
+  --text-sm: 1rem;
+  --text-sm--line-height: 1.4;
+  --text-base: 1rem;
+  --text-base--line-height: 1.4;
+
+  --text-md: 1.3125rem;
+  --text-md--line-height: 1.35;
+  --text-lg: 1.3125rem;
+  --text-lg--line-height: 1.35;
+  --text-xl: 1.3125rem;
+  --text-xl--line-height: 1.35;
+
+  --text-2xl: 2.0625rem;
+  --text-2xl--line-height: 1.2;
+  --text-3xl: 2.0625rem;
+  --text-3xl--line-height: 1.2;
+  --text-4xl: 2.0625rem;
+  --text-4xl--line-height: 1.2;
+  --text-5xl: 2.0625rem;
+  --text-5xl--line-height: 1.2;
+}
+
+/* ==========================================================================
+   SISTEM TIPOGRAFI BAKU (3 TINGKAT BERBASIS GOLDEN RATIO — PERSIS LOMEAL & LOGYM)
+   ========================================================================== */
+
+/* Tier 1: Display / Judul Layar Utama (33px / 2.0625rem) */
+.h1 {
+  font-family: var(--font-sans);
+  font-size: 2.0625rem;
+  line-height: 1.2;
+  font-weight: 800;
+  letter-spacing: -0.025em;
+}
+
+/* Tier 2: Judul Bagian, Kartu, & Angka Metrik (21px / 1.3125rem) */
+.h2 {
+  font-family: var(--font-sans);
+  font-size: 1.3125rem;
+  line-height: 1.35;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+}
+
+.body-lg {
+  font-family: var(--font-sans);
+  font-size: 1.3125rem;
+  line-height: 1.4;
+  font-weight: 600;
+}
+
+/* Tier 3: Teks Isi, Label Seksi, Meta, & Badge (16px / 1.0000rem) */
+.h3 {
+  font-family: var(--font-sans);
+  font-size: 1rem;
+  line-height: 1.4;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.body-md {
+  font-family: var(--font-sans);
+  font-size: 1rem;
+  line-height: 1.5;
+  font-weight: 500;
+}
+
+.caption {
+  font-family: var(--font-sans);
+  font-size: 1rem;
+  line-height: 1.35;
+  font-weight: 500;
+  color: var(--color-ink-muted);
+}
+
+/* Base resets */
+html {
+  overscroll-behavior-y: none;
+  overflow-x: clip;
 }
 
 body {
+  font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  margin: 0;
+  padding: 0;
+  overflow-x: clip;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
   background-color: var(--color-surface);
   color: var(--color-ink);
-  font-family: var(--font-sans);
+}
+
+/* Safe Area Insets (Edge-to-edge / Status Bar padding) */
+:root {
+  --sat: env(safe-area-inset-top, 0px);
+  --sab: env(safe-area-inset-bottom, 0px);
+  --sal: env(safe-area-inset-left, 0px);
+  --sar: env(safe-area-inset-right, 0px);
+}
+
+.pt-safe {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+.pl-safe {
+  padding-left: env(safe-area-inset-left, 0px);
+}
+
+.pr-safe {
+  padding-right: env(safe-area-inset-right, 0px);
+}
+
+input, textarea, [contenteditable="true"] {
+  user-select: auto;
+  -webkit-user-select: auto;
+}
+
+/* ==========================================================================
+   PERMUKAAN KACA & ELEVASI (GLASSMORPHISM SURFACES)
+   ========================================================================== */
+.glass-card {
+  background-color: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.8);
+  box-shadow: 0 10px 30px -5px rgba(37, 99, 235, 0.05), 0 4px 12px -2px rgba(15, 23, 42, 0.03);
+}
+
+.glass-card-hover {
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.glass-card-hover:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 16px 36px -6px rgba(37, 99, 235, 0.09), 0 6px 16px -3px rgba(15, 23, 42, 0.04);
+}
+
+.glass-nav {
+  background-color: rgba(255, 255, 255, 0.88);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid rgba(255, 255, 255, 0.8);
+  box-shadow: 0 12px 40px -8px rgba(15, 23, 42, 0.12);
+}
+
+.glass-blue-hero {
+  background: linear-gradient(135deg, #2563EB 0%, #1D4ED8 100%);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  box-shadow: 0 16px 36px -8px rgba(37, 99, 235, 0.35);
+}
+
+/* Dot Notifikasi Putih Bersih */
+.badge-white-dot {
+  width: 6px;
+  height: 6px;
+  background-color: #FFFFFF;
+  border-radius: 9999px;
+  box-shadow: 0 0 8px rgba(255, 255, 255, 0.9);
+}
+
+/* Scrollbar Minimalis */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(100, 116, 139, 0.25);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(100, 116, 139, 0.45);
 }
