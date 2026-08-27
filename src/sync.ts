@@ -260,6 +260,56 @@ export async function syncUserCloud(uid: string, forcePush = false): Promise<str
   return 'push'
 }
 
+/**
+ * Paksa kirim seluruh database lokal saat ini ke Firestore Cloud
+ */
+export async function forcePushCloud(uid: string): Promise<string> {
+  return syncUserCloud(uid, true)
+}
+
+/**
+ * Paksa tarik seluruh database dari Firestore Cloud dan terapkan ke perangkat ini
+ */
+export async function forcePullCloud(uid: string): Promise<{ success: boolean; count: number; message: string }> {
+  if (!uid || uid === 'local') return { success: false, count: 0, message: 'Belum login akun Google.' }
+  const { fs, doc, getDoc } = await fb()
+  const ref = doc(fs, 'users', uid)
+  const snap = await getDoc(ref)
+  if (!snap.exists()) {
+    return { success: false, count: 0, message: 'Belum ada data cadangan di cloud untuk akun ini.' }
+  }
+  const remote = snap.data()
+  if (!remote.tables || typeof remote.tables !== 'object') {
+    return { success: false, count: 0, message: 'Format data di cloud tidak valid atau kosong.' }
+  }
+
+  const imported = await safeImportTables(remote.tables)
+  if (imported) {
+    const updatedAt = typeof remote.updatedAt === 'number' ? remote.updatedAt : Date.now()
+    localStorage.setItem('doctoid_last_push', String(updatedAt))
+    
+    // Sinkronisasi profil
+    if (remote.displayName || remote.photoURL || remote.specialty) {
+      const current = getSavedUserProfile()
+      const updatedProfile: UserProfile = {
+        uid,
+        email: remote.email || current?.email || null,
+        displayName: remote.displayName || current?.displayName || 'Dokter',
+        photoURL: remote.photoURL || current?.photoURL || null,
+        specialty: remote.specialty || current?.specialty || getDoctorSpecialty(),
+      }
+      saveUserProfile(updatedProfile)
+    }
+
+    let total = 0
+    for (const t of TABLES) {
+      if (Array.isArray(remote.tables[t])) total += remote.tables[t].length
+    }
+    return { success: true, count: total, message: `Berhasil menarik ${total} data dari Cloud!` }
+  }
+  return { success: false, count: 0, message: 'Gagal menarik data cloud.' }
+}
+
 /* Ekspor Cadangan Data Offline (JSON File Download) */
 export async function downloadBackupJson(): Promise<void> {
   const tables = await exportTables()
