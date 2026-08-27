@@ -16,7 +16,7 @@ import PatientProfile from './pages/PatientProfile'
 import Settings from './pages/Settings'
 import DoctorProfile from './pages/DoctorProfile'
 import { initAuthListener } from './auth'
-import { checkRevoked, syncUserCloud, fbConfigured } from './sync'
+import { checkRevoked, initRealtimeCloudSync, fbConfigured } from './sync'
 
 const IDLE_LOCK_MS = 5 * 60 * 1000 // 5 menit tanpa aktivitas → auto-lock layar (proteksi data pasien)
 
@@ -78,27 +78,15 @@ export default function App() {
     }
   }, [user, isUnlocked, setIsUnlocked])
 
-  // Background cloud sync: saat unlock, saat window focus / app aktif, dan berkala tiap 60 detik
+  // Real-Time Two-Way Cloud Sync (Firestore onSnapshot Listener)
+  // Langsung mendengarkan dan mengirim pembaruan data secara instan <1 detik antar perangkat
   useEffect(() => {
-    if (!user || !isUnlocked || !fbConfigured()) return
-    const run = () => syncUserCloud(user.uid).catch(() => {})
-    run()
-    const iv = setInterval(run, 60_000)
-
-    const onFocus = () => {
-      if (document.visibilityState === 'visible') {
-        run()
-      }
-    }
-    window.addEventListener('focus', onFocus)
-    document.addEventListener('visibilitychange', onFocus)
-
+    if (!user || !fbConfigured() || user.uid === 'local') return
+    const unsubscribe = initRealtimeCloudSync(user.uid)
     return () => {
-      clearInterval(iv)
-      window.removeEventListener('focus', onFocus)
-      document.removeEventListener('visibilitychange', onFocus)
+      unsubscribe()
     }
-  }, [user, isUnlocked])
+  }, [user])
 
   return (
     <>

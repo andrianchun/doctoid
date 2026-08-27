@@ -1,6 +1,6 @@
 import { db } from './db'
 import { encryptJson, decryptJson, syncIdFromEntropy } from './crypto'
-import { getFirestore, doc, getDoc, setDoc } from 'firebase/firestore'
+import { getFirestore, doc, getDoc, setDoc, onSnapshot } from 'firebase/firestore'
 import { getFirebaseApp, getSavedUserProfile, saveUserProfile, saveDoctorSpecialty, getDoctorSpecialty, type UserProfile } from './auth'
 
 /* Zero-knowledge sync & Cloud sync engine dengan proteksi Wipe-Out, Auto-Trigger, & Anti-Pingpong. */
@@ -27,7 +27,7 @@ export const getDeviceId = () => {
 
 async function fb() {
   const app = getFirebaseApp()
-  return { fs: getFirestore(app), doc, getDoc, setDoc }
+  return { fs: getFirestore(app), doc, getDoc, setDoc, onSnapshot }
 }
 
 export const fbConfigured = () => true
@@ -38,10 +38,97 @@ export const getIsImporting = () => isImporting
 let syncDebounceTimer: any = null
 
 /**
- * Pemicu Sinkronisasi Cloud Otomatis (Debounced 800ms)
+ * Inisialisasi Sinkronisasi Cloud Real-Time (Two-Way Live Sync)
+ * Mendengarkan snapshot Firestore secara langsung tanpa jeda
+ */
+export function initRealtimeCloudSync(uid: string): () => void {
+  if (!uid || uid === 'local') return () => {}
+  const app = getFirebaseApp()
+  const fs = getFirestore(app)
+  const ref = doc(fs, 'users', uid)
+
+  let isFirst = true
+
+  const unsubscribe = onSnapshot(
+    ref,
+    async (snap) => {
+      // Abaikan write lokal yang belum selesai dari device ini sendiri (anti-loop)
+      if (snap.metadata.hasPendingWrites) return
+
+      if (!snap.exists()) {
+        // Jika dokumen cloud belum ada tapi lokal punya data, push data awal ke cloud
+        const local = await exportTables()
+        let hasData = false
+        for (const t of TABLES) {
+          if (local[t] && local[t].length > 0) {
+            hasData = true
+            break
+          }
+        }
+        if (hasData) {
+          await syncUserCloud(uid, true)
+        }
+        return
+      }
+
+      const remote = snap.data() as {
+        tables?: Record<string, unknown[]>
+        updatedAt?: number | string
+        displayName?: string
+        photoURL?: string
+        specialty?: string
+        email?: string
+      }
+
+      if (remote.tables && typeof remote.tables === 'object') {
+        const lastPush = Number(localStorage.getItem('doctoid_last_push') ?? 0)
+        const remoteUpdatedAt =
+          typeof remote.updatedAt === 'number'
+            ? remote.updatedAt
+            : remote.updatedAt
+            ? new Date(remote.updatedAt).getTime()
+            : 0
+
+        // Jika remote lebih baru atau saat pertama kali inisialisasi koneksi
+        if (remoteUpdatedAt > lastPush || isFirst) {
+          isFirst = false
+          const imported = await safeImportTables(remote.tables)
+          if (imported) {
+            localStorage.setItem('doctoid_last_push', String(remoteUpdatedAt || Date.now()))
+            window.dispatchEvent(new CustomEvent('doctoid_data_synced'))
+          }
+        }
+
+        // Update profil dokter jika ada pembaruan di cloud
+        if (remote.displayName || remote.photoURL || remote.specialty) {
+          const current = getSavedUserProfile()
+          const updatedProfile: UserProfile = {
+            uid,
+            email: remote.email || current?.email || null,
+            displayName: remote.displayName || current?.displayName || 'Dokter',
+            photoURL: remote.photoURL || current?.photoURL || null,
+            specialty: remote.specialty || current?.specialty || getDoctorSpecialty(),
+          }
+          saveUserProfile(updatedProfile)
+          if (updatedProfile.specialty) {
+            saveDoctorSpecialty(updatedProfile.specialty)
+          }
+        }
+      }
+    },
+    (error) => {
+      console.warn('Realtime cloud sync listener warning:', error)
+    }
+  )
+
+  return unsubscribe
+}
+
+/**
+ * Pemicu Sinkronisasi Cloud Otomatis (Debounced 400ms)
  * Otomatis dipanggil saat ada perubahan tabel database lokal (Faskes, Pasien, CPPT, Template, dll)
  */
-export function triggerCloudSync(delayMs = 800) {
+export function triggerCloudSync(delayMs = 400) {
   if (isImporting) return
   if (syncDebounceTimer) clearTimeout(syncDebounceTimer)
 
