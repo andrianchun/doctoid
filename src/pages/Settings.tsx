@@ -413,13 +413,18 @@ export default function Settings() {
     setTimeout(() => setToast(''), 4000)
   }
 
-  const initialTab = searchParams.get('tab') || 'faskes'
-  const [activeTab, setActiveTab] = useState<'faskes' | 'waktu' | 'keamanan' | 'ai'>(
-    (initialTab as any) || 'faskes'
+  const rawTab = searchParams.get('tab')
+  const normalizeTab = (t: string | null): 'manajemen' | 'preferensi' | 'lanjutan' => {
+    if (t === 'waktu' || t === 'preferensi') return 'preferensi'
+    if (t === 'keamanan' || t === 'ai' || t === 'lanjutan') return 'lanjutan'
+    return 'manajemen'
+  }
+  const [activeTab, setActiveTab] = useState<'manajemen' | 'preferensi' | 'lanjutan'>(
+    normalizeTab(rawTab)
   )
 
   // Update query param when activeTab changes with history replacement
-  const switchTab = (tab: 'faskes' | 'waktu' | 'keamanan' | 'ai') => {
+  const switchTab = (tab: 'manajemen' | 'preferensi' | 'lanjutan') => {
     setActiveTab(tab)
     setSearchParams({ tab }, { replace: true })
   }
@@ -506,13 +511,12 @@ export default function Settings() {
         </div>
       </div>
 
-      {/* Navigasi Kategori Pengaturan (Horizontal Tab Pills) */}
-      <div className="flex items-center gap-2 overflow-x-auto pb-1 hide-scrollbar">
+      {/* Navigasi 3 Tab Tetap (Fit Layar Tanpa Scroll Horizontal) */}
+      <div className="grid grid-cols-3 gap-2">
         {[
-          { id: 'faskes' as const, label: 'Faskes & Ruangan', icon: Building },
-          { id: 'waktu' as const, label: 'Tanggal & Jam', icon: Calendar },
-          { id: 'keamanan' as const, label: 'Keamanan & Backup', icon: ShieldCheck },
-          { id: 'ai' as const, label: 'Asisten AI & API', icon: Sparkles },
+          { id: 'manajemen' as const, label: 'Manajemen', icon: Building },
+          { id: 'preferensi' as const, label: 'Preferensi', icon: Calendar },
+          { id: 'lanjutan' as const, label: 'Lanjutan', icon: ShieldCheck },
         ].map((tab) => {
           const Icon = tab.icon
           const isActive = activeTab === tab.id
@@ -520,7 +524,7 @@ export default function Settings() {
             <button
               key={tab.id}
               onClick={() => switchTab(tab.id)}
-              className={`flex items-center gap-2 rounded-2xl px-4 py-2.5 text-xs font-bold whitespace-nowrap transition-all cursor-pointer ${
+              className={`flex items-center justify-center gap-1.5 rounded-2xl py-3 text-xs font-bold transition-all cursor-pointer ${
                 isActive
                   ? 'bg-gradient-to-br from-primary to-primary-deep text-white shadow-md shadow-primary/20'
                   : 'glass-card text-ink-muted hover:text-ink hover:bg-surface/80'
@@ -533,8 +537,8 @@ export default function Settings() {
         })}
       </div>
 
-      {/* TAB 1: FASKES & RUANGAN */}
-      {activeTab === 'faskes' && (
+      {/* TAB 1: MANAJEMEN FASKES & RUANGAN */}
+      {activeTab === 'manajemen' && (
         <div className="space-y-4 animate-in fade-in">
           {/* Card Tambah Faskes Baru */}
           <div className="glass-card rounded-3xl p-5 shadow-sm space-y-3">
@@ -606,8 +610,8 @@ export default function Settings() {
         </div>
       )}
 
-      {/* TAB 2: TANGGAL & JAM */}
-      {activeTab === 'waktu' && (
+      {/* TAB 2: PREFERENSI (TANGGAL & JAM) */}
+      {activeTab === 'preferensi' && (
         <div className="space-y-4 animate-in fade-in">
           <div className="glass-card rounded-3xl p-5 shadow-sm space-y-4">
             <div>
@@ -679,20 +683,20 @@ export default function Settings() {
         </div>
       )}
 
-      {/* TAB 3: KEAMANAN & AKUN */}
-      {activeTab === 'keamanan' && (
-        <div className="animate-in fade-in">
+      {/* TAB 3: LANJUTAN (API GEMINI + KEAMANAN, CADANGAN & UPDATE OTA) */}
+      {activeTab === 'lanjutan' && (
+        <div className="space-y-4 animate-in fade-in">
+          {/* Section 1: Asisten AI & Kunci API Google Gemini */}
+          <div className="glass-card rounded-3xl p-5 shadow-sm space-y-4">
+            <h3 className="flex items-center gap-2 text-xs font-bold text-ink">
+              <Sparkles size={16} className="text-primary" /> Asisten AI & Kunci API
+            </h3>
+            <ApiKeyCard notify={notify} />
+          </div>
+
+          {/* Section 2: Keamanan & Privasi Klinis, Kunci Layar, Cadangan & OTA */}
           <div className="glass-card rounded-3xl p-5 shadow-sm">
             <SecuritySection notify={notify} />
-          </div>
-        </div>
-      )}
-
-      {/* TAB 4: ASISTEN AI & KUNCI API */}
-      {activeTab === 'ai' && (
-        <div className="animate-in fade-in">
-          <div className="glass-card rounded-3xl p-5 shadow-sm">
-            <ApiKeyCard notify={notify} />
           </div>
         </div>
       )}

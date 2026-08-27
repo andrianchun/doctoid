@@ -259,14 +259,24 @@ export default function Dasbor() {
 
           {/* Sisi Kanan: Identitas Dokter + Tombol Aksi + Metrik Pasien Dirawat */}
           <div className="flex-1 p-4 sm:p-5 flex flex-col justify-between min-w-0">
-            {/* Atas: Nama Dokter & Role di bawahnya, Tombol Mata/Gir */}
-            <div className="flex items-start justify-between gap-2">
-              <div className="min-w-0 flex-1">
-                <h2 className="text-sm sm:text-base font-black text-white leading-tight break-words">
-                  {user?.displayName || 'Dokter'}
-                </h2>
-                <p className="text-[11px] sm:text-xs font-semibold text-white/80 leading-tight truncate mt-0.5">
-                  {user?.specialty || 'Spesialis Neurologi (Sp.N)'}
+            {/* Atas: Nama Dokter & Spesialisasi (Full Width — tidak terpotong) */}
+            <div className="min-w-0 w-full">
+              <h2 className="text-sm sm:text-base font-black text-white leading-tight break-words">
+                {user?.displayName || 'Dokter'}
+              </h2>
+              <p className="text-[11px] sm:text-xs font-semibold text-white/80 leading-snug break-words mt-0.5">
+                {user?.specialty || 'Spesialis Neurologi (Sp.N)'}
+              </p>
+            </div>
+
+            {/* Bawah: Pasien Dirawat di Kiri & Tombol Aksi Cepat (Mata + Gir) di Kanan */}
+            <div className="flex items-end justify-between pt-3 border-t border-white/15 gap-2">
+              <div>
+                <h1 className="h1 text-2xl sm:text-3xl font-black text-white leading-none">
+                  {aktif?.length ?? 0}
+                </h1>
+                <p className="text-[11px] sm:text-xs font-bold text-white/95 mt-1 tracking-wide">
+                  Pasien Dirawat
                 </p>
               </div>
 
@@ -275,40 +285,25 @@ export default function Dasbor() {
                 <button
                   onClick={handleToggleMask}
                   aria-label={unmasked ? 'Sensor Identitas Pasien' : 'Tampilkan Identitas Pasien (Biometrik)'}
-                  className={`flex size-9 cursor-pointer items-center justify-center rounded-2xl transition-all ${
+                  className={`flex size-8 sm:size-9 cursor-pointer items-center justify-center rounded-2xl transition-all ${
                     unmasked
                       ? 'bg-amber-400 text-amber-950 shadow-md'
                       : 'bg-white/15 backdrop-blur-md text-white hover:bg-white/25'
                   }`}
                   title={unmasked ? 'Sensor Identitas (Aktif)' : 'Buka Sensor Identitas (Biometrik)'}
                 >
-                  {unmasked ? <EyeOff size={16} /> : <Eye size={16} />}
+                  {unmasked ? <EyeOff size={15} /> : <Eye size={15} />}
                 </button>
 
                 <button
                   onClick={() => navigate('/pengaturan')}
                   aria-label="Pengaturan"
                   title="Pengaturan"
-                  className="flex size-9 cursor-pointer items-center justify-center rounded-2xl bg-white/15 backdrop-blur-md text-white hover:bg-white/25 active:scale-95 transition-all"
+                  className="flex size-8 sm:size-9 cursor-pointer items-center justify-center rounded-2xl bg-white/15 backdrop-blur-md text-white hover:bg-white/25 active:scale-95 transition-all"
                 >
-                  <Settings size={16} />
+                  <Settings size={15} />
                 </button>
               </div>
-            </div>
-
-            {/* Bawah: Pasien Dirawat (di sebelah kanan foto) & Tanggal */}
-            <div className="flex items-end justify-between pt-3 border-t border-white/15">
-              <div>
-                <h1 className="h1 text-3xl font-black text-white leading-none">
-                  {aktif?.length ?? 0}
-                </h1>
-                <p className="text-xs font-bold text-white/95 mt-1 tracking-wide">
-                  Pasien Dirawat
-                </p>
-              </div>
-              <span className="text-[11px] sm:text-xs font-semibold text-white/80 pb-0.5">
-                {new Date().toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'short' })}
-              </span>
             </div>
           </div>
         </div>
