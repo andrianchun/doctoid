@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { Sparkles, AlertCircle, X, DownloadCloud } from 'lucide-react'
 import { Capacitor } from '@capacitor/core'
 import { CapacitorUpdater } from '@capgo/capacitor-updater'
@@ -12,20 +12,66 @@ interface OtaManifest {
 }
 
 function DownloadProgressBar({ progress }: { progress: number }) {
+  const [displayProgress, setDisplayProgress] = useState(0)
+  const targetRef = useRef(0)
+  const isDoneRef = useRef(false)
+
+  useEffect(() => {
+    if (typeof progress === 'number') {
+      targetRef.current = Math.max(targetRef.current, progress)
+      if (progress >= 100) {
+        isDoneRef.current = true
+      }
+    }
+  }, [progress])
+
+  useEffect(() => {
+    const crawlerInterval = setInterval(() => {
+      if (isDoneRef.current) return
+      targetRef.current = Math.min(92, targetRef.current + (targetRef.current < 25 ? 1.8 : targetRef.current < 60 ? 1.0 : 0.4))
+    }, 200)
+
+    const renderInterval = setInterval(() => {
+      setDisplayProgress((prev) => {
+        const target = isDoneRef.current ? 100 : targetRef.current
+        if (prev >= target) return prev
+        const diff = target - prev
+        const step = diff > 20 ? 1.8 : diff > 5 ? 0.9 : 0.35
+        const next = prev + step
+        return next >= target ? target : next
+      })
+    }, 30)
+
+    return () => {
+      clearInterval(crawlerInterval)
+      clearInterval(renderInterval)
+    }
+  }, [])
+
+  const rounded = Math.round(displayProgress)
+  const isExtracting = rounded >= 100
+
   return (
-    <div className="w-full space-y-1.5 pt-1">
+    <div className="w-full space-y-1.5 pt-1 text-left">
       <div className="flex items-center justify-between text-xs font-bold text-ink">
-        <span className="text-ink-muted">Mengunduh pembaruan OTA…</span>
-        <span className="tabular-nums font-mono text-primary">{progress}%</span>
+        <span className="text-ink-muted">
+          {isExtracting ? 'Memasang berkas & memuat ulang…' : 'Mengunduh pembaruan OTA…'}
+        </span>
+        <span className="tabular-nums font-mono text-primary">{rounded}%</span>
       </div>
-      <div className="h-2.5 w-full overflow-hidden rounded-full bg-surface">
+      <div className="h-2.5 w-full overflow-hidden rounded-full bg-surface relative">
         <div
-          className="h-full rounded-full bg-gradient-to-r from-primary to-primary-deep transition-all duration-200 ease-out"
-          style={{ width: `${Math.max(progress, 4)}%` }}
+          className="h-full rounded-full bg-gradient-to-r from-primary to-primary-deep transition-all duration-75 ease-out"
+          style={{ width: `${Math.min(100, Math.max(rounded, 3))}%` }}
         />
+        {isExtracting && (
+          <div className="absolute inset-0 bg-white/30 animate-pulse rounded-full" />
+        )}
       </div>
       <p className="caption text-ink-muted text-center">
-        Jangan tutup aplikasi. Doctoid akan otomatis dimuat ulang setelah selesai.
+        {isExtracting
+          ? 'Memasang pembaruan. Doctoid akan segera dimuat ulang…'
+          : 'Jangan tutup aplikasi. Doctoid akan otomatis dimuat ulang setelah selesai.'}
       </p>
     </div>
   )
@@ -46,9 +92,6 @@ export default function UpdaterAlert() {
     try {
       const res = await fetch(`${otaUrl}?t=${Date.now()}`, { cache: 'no-store' })
       if (!res.ok) return
-      const contentType = res.headers.get('content-type')
-      if (!contentType || !contentType.includes('application/json')) return
-
       const data = (await res.json()) as OtaManifest
       
       // Jika nomor versi berbeda dari versi saat ini
@@ -78,7 +121,7 @@ export default function UpdaterAlert() {
 
     document.addEventListener('visibilitychange', onVisibilityChange)
     window.addEventListener('online', onOnline)
-    const interval = setInterval(checkUpdate, 15 * 60 * 1000)
+    const interval = setInterval(checkUpdate, 10 * 60 * 1000)
 
     return () => {
       document.removeEventListener('visibilitychange', onVisibilityChange)
@@ -105,12 +148,21 @@ export default function UpdaterAlert() {
     setErrorMsg('')
     localStorage.removeItem('doctoid_dismissed_ota')
 
+    // Jalur APK Langsung
+    if (manifest.is_apk || !manifest.ota_url.toLowerCase().endsWith('.zip')) {
+      window.open(manifest.ota_url, '_blank')
+      return
+    }
+
     // Web / PWA: Refresh halaman untuk memuat bundle assets baru
     if (!isNative) {
       setDownloadProgress(0)
       const reg = await navigator.serviceWorker?.getRegistration()
       if (reg?.waiting) reg.waiting.postMessage({ type: 'SKIP_WAITING' })
-      window.location.reload()
+      setDownloadProgress(100)
+      setTimeout(() => {
+        window.location.reload()
+      }, 500)
       return
     }
 
@@ -121,6 +173,8 @@ export default function UpdaterAlert() {
         url: manifest.ota_url,
         version: manifest.ota_version,
       })
+      setDownloadProgress(100)
+      await new Promise((resolve) => setTimeout(resolve, 600))
       await CapacitorUpdater.set(bundle)
     } catch (err: any) {
       console.error('OTA Update failed:', err)

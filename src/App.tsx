@@ -1,9 +1,12 @@
 import { useEffect } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { Capacitor } from '@capacitor/core'
+import { CapacitorUpdater } from '@capgo/capacitor-updater'
 import { useUi } from './store'
 import Lock from './components/Lock'
 import Layout from './components/Layout'
 import PwaInstallPrompt from './components/PwaInstallPrompt'
+import UpdaterAlert from './components/UpdaterAlert'
 import Dasbor from './pages/Dasbor'
 import Brainstorm from './pages/Brainstorm'
 import RekamMedis from './pages/RekamMedis'
@@ -18,6 +21,13 @@ const IDLE_LOCK_MS = 5 * 60 * 1000 // 5 menit tanpa aktivitas → auto-lock laya
 
 export default function App() {
   const { user, setUser, isUnlocked, setIsUnlocked } = useUi()
+
+  // Capgo: Beri sinyal ke native updater bahwa bundle sehat setelah mount pertama
+  useEffect(() => {
+    if (Capacitor.isNativePlatform()) {
+      CapacitorUpdater.notifyAppReady()
+    }
+  }, [])
 
   // Inisialisasi Auth Listener
   useEffect(() => {
@@ -87,27 +97,30 @@ export default function App() {
     }
   }, [user, isUnlocked])
 
-  if (!user || !isUnlocked) return <Lock />
-
   return (
     <>
-      <BrowserRouter>
-        <Routes>
-          <Route element={<Layout />}>
-            <Route path="/" element={<Navigate to="/dasbor" replace />} />
-            <Route path="/dasbor" element={<Dasbor />} />
-            <Route path="/brainstorm" element={<Brainstorm />} />
-            <Route path="/rekammedis" element={<RekamMedis />} />
-            <Route path="/rekap" element={<Navigate to="/rekammedis" replace />} />
-            <Route path="/template" element={<TemplateTab />} />
-            <Route path="/pasien/:id" element={<PatientProfile />} />
-            <Route path="/pengaturan" element={<Settings />} />
-            <Route path="/settings" element={<Navigate to="/pengaturan" replace />} />
-            <Route path="/profil" element={<DoctorProfile />} />
-            <Route path="/profile" element={<Navigate to="/profil" replace />} />
-          </Route>
-        </Routes>
-      </BrowserRouter>
+      {!user || !isUnlocked ? (
+        <Lock />
+      ) : (
+        <BrowserRouter>
+          <Routes>
+            <Route element={<Layout />}>
+              <Route path="/" element={<Navigate to="/dasbor" replace />} />
+              <Route path="/dasbor" element={<Dasbor />} />
+              <Route path="/brainstorm" element={<Brainstorm />} />
+              <Route path="/rekammedis" element={<RekamMedis />} />
+              <Route path="/rekap" element={<Navigate to="/rekammedis" replace />} />
+              <Route path="/template" element={<TemplateTab />} />
+              <Route path="/pasien/:id" element={<PatientProfile />} />
+              <Route path="/pengaturan" element={<Settings />} />
+              <Route path="/settings" element={<Navigate to="/pengaturan" replace />} />
+              <Route path="/profil" element={<DoctorProfile />} />
+              <Route path="/profile" element={<Navigate to="/profil" replace />} />
+            </Route>
+          </Routes>
+        </BrowserRouter>
+      )}
+      <UpdaterAlert />
       <PwaInstallPrompt />
     </>
   )
