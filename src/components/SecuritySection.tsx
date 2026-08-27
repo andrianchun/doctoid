@@ -1,8 +1,10 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import {
   ShieldCheck, RefreshCw, Lock as LockIcon, Trash2, Loader2, Fingerprint,
-  KeyRound, Download, Upload, Database, CheckCircle2, Sparkles
+  KeyRound, Download, Upload, Database, CheckCircle2, Sparkles, DownloadCloud
 } from 'lucide-react'
+import { Capacitor } from '@capacitor/core'
+import { CapacitorUpdater } from '@capgo/capacitor-updater'
 import { useUi } from '../store'
 import { syncUserCloud, selfDestruct, fbConfigured, downloadBackupJson, restoreBackupJson } from '../sync'
 import { verifyBiometric } from '../webauthn'
@@ -19,26 +21,55 @@ export default function SecuritySection({ notify }: { notify: (m: string) => voi
   const [hasPin, setHasPin] = useState(!!localStorage.getItem('doctoid_screen_pin'))
   const [showPinSetup, setShowPinSetup] = useState(false)
   const [otaChecking, setOtaChecking] = useState(false)
-  const [otaInfo, setOtaInfo] = useState<{ current: string; remote?: string; status?: string } | null>(null)
+  const [otaInfo, setOtaInfo] = useState<{ current: string; remote?: string; status?: string; notes?: string } | null>(null)
+  const [otaManifest, setOtaManifest] = useState<any | null>(null)
+  const [downloadProgress, setDownloadProgress] = useState<number | null>(null)
+  const [otaError, setOtaError] = useState('')
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const currentVersion = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '0.1.0'
+  const isNative = Capacitor.isNativePlatform()
+
+  // Listener progres Capgo di native Android
+  useEffect(() => {
+    if (!isNative) return
+    let listener: any
+    CapacitorUpdater.addListener('download', (info: { percent: number }) => {
+      setDownloadProgress(Math.round(info.percent))
+    }).then((l) => { listener = l })
+    return () => {
+      if (listener) listener.remove()
+    }
+  }, [isNative])
 
   const handleCheckOta = async () => {
     setOtaChecking(true)
+    setOtaError('')
     try {
-      const res = await fetch(`https://docto-id.web.app/ota/version.json?t=${Date.now()}`, { cache: 'no-store' })
-      if (!res.ok) throw new Error('Gagal mengakses server hosting.')
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), 10000)
+      const res = await fetch(`https://docto-id.web.app/ota/version.json?t=${Date.now()}`, {
+        cache: 'no-store',
+        signal: controller.signal,
+      })
+      clearTimeout(timeoutId)
+
+      if (!res.ok) throw new Error(`HTTP ${res.status}: Gagal mengakses server hosting.`)
       const data = await res.json()
       if (data.ota_version) {
         if (data.ota_version !== currentVersion) {
+          setOtaManifest(data)
           setOtaInfo({
             current: currentVersion,
             remote: data.ota_version,
             status: `Pembaruan v${data.ota_version} tersedia di Cloud.`,
+            notes: data.release_notes,
           })
+          localStorage.removeItem('doctoid_dismissed_ota')
+          window.dispatchEvent(new CustomEvent('doctoid_trigger_ota', { detail: data }))
           notify(`Pembaruan v${data.ota_version} tersedia di Cloud ✓`)
         } else {
+          setOtaManifest(null)
           setOtaInfo({
             current: currentVersion,
             remote: data.ota_version,
@@ -48,9 +79,51 @@ export default function SecuritySection({ notify }: { notify: (m: string) => voi
         }
       }
     } catch (e: any) {
-      notify(`Gagal cek pembaruan: ${e.message || 'Periksa koneksi internet.'}`)
+      const msg = e.name === 'AbortError' ? 'Koneksi timeout (server lambat merespon).' : e.message || 'Periksa koneksi internet.'
+      setOtaError(msg)
+      notify(`Gagal cek pembaruan: ${msg}`)
     } finally {
       setOtaChecking(false)
+    }
+  }
+
+  const handleDirectInstallOta = async () => {
+    if (!otaManifest) return
+    setOtaError('')
+
+    // Jika jalur APK
+    if (otaManifest.is_apk || !otaManifest.ota_url.toLowerCase().endsWith('.zip')) {
+      window.open(otaManifest.ota_url, '_blank')
+      return
+    }
+
+    // Web / PWA: Refresh service worker
+    if (!isNative) {
+      setDownloadProgress(0)
+      const reg = await navigator.serviceWorker?.getRegistration()
+      if (reg?.waiting) reg.waiting.postMessage({ type: 'SKIP_WAITING' })
+      setDownloadProgress(100)
+      setTimeout(() => {
+        window.location.reload()
+      }, 500)
+      return
+    }
+
+    // Native APK
+    try {
+      setDownloadProgress(0)
+      const bundle = await CapacitorUpdater.download({
+        url: otaManifest.ota_url,
+        version: otaManifest.ota_version,
+      })
+      setDownloadProgress(100)
+      await new Promise((resolve) => setTimeout(resolve, 600))
+      await CapacitorUpdater.set(bundle)
+    } catch (err: any) {
+      console.error('OTA Install error:', err)
+      setDownloadProgress(null)
+      setOtaError(err.message || 'Gagal mengunduh bundle update.')
+      notify(`Gagal memasang update: ${err.message || 'Error'}`)
     }
   }
 
@@ -176,26 +249,70 @@ export default function SecuritySection({ notify }: { notify: (m: string) => voi
           Doctoid mendukung pembaruan instan tanpa harus menginstal ulang file APK. Versi terpasang saat ini adalah <strong className="text-ink font-semibold">v{currentVersion}</strong>.
         </p>
         {otaInfo && (
-          <div className="rounded-xl bg-surface/70 p-3 text-xs space-y-1 border border-primary-soft/20 animate-in fade-in">
-            <p className="font-bold text-ink flex items-center gap-1.5">
-              <CheckCircle2 size={14} className="text-primary" />
-              Status: {otaInfo.status}
-            </p>
-            {otaInfo.remote && (
-              <p className="caption text-xs text-ink-muted">
-                Versi Cloud Terkini: <strong className="text-ink">v{otaInfo.remote}</strong>
+          <div className="rounded-2xl bg-surface/80 p-3.5 text-xs space-y-2.5 border border-primary-soft/30 animate-in fade-in">
+            <div className="flex items-center justify-between">
+              <p className="font-bold text-ink flex items-center gap-1.5">
+                <CheckCircle2 size={15} className="text-primary" />
+                <span>{otaInfo.status}</span>
               </p>
+              {otaInfo.remote && (
+                <span className="font-mono font-bold text-primary bg-primary/10 px-2 py-0.5 rounded-lg">
+                  v{otaInfo.remote}
+                </span>
+              )}
+            </div>
+
+            {otaInfo.notes && (
+              <div className="rounded-xl bg-card p-2.5 border border-surface text-ink-muted">
+                <span className="font-bold text-primary block mb-0.5">Catatan Rilis:</span>
+                <p className="leading-relaxed">{otaInfo.notes}</p>
+              </div>
+            )}
+
+            {otaManifest && !downloadProgress && (
+              <button
+                type="button"
+                onClick={handleDirectInstallOta}
+                className="w-full flex cursor-pointer items-center justify-center gap-2 rounded-xl bg-gradient-to-br from-primary to-primary-deep py-2.5 text-xs font-bold text-white shadow-md shadow-primary/20 hover:brightness-110 active:scale-95 transition-all"
+              >
+                <DownloadCloud size={16} />
+                <span>Pasang Pembaruan v{otaManifest.ota_version} Sekarang</span>
+              </button>
+            )}
+
+            {downloadProgress !== null && (
+              <div className="space-y-1.5 pt-1">
+                <div className="flex items-center justify-between text-xs font-bold text-ink">
+                  <span className="text-ink-muted">
+                    {downloadProgress >= 100 ? 'Mengekstrak & memuat ulang…' : 'Mengunduh bundle OTA…'}
+                  </span>
+                  <span className="tabular-nums font-mono text-primary">{downloadProgress}%</span>
+                </div>
+                <div className="h-2 w-full overflow-hidden rounded-full bg-surface relative">
+                  <div
+                    className="h-full rounded-full bg-gradient-to-r from-primary to-primary-deep transition-all duration-75 ease-out"
+                    style={{ width: `${Math.min(100, Math.max(downloadProgress, 5))}%` }}
+                  />
+                </div>
+              </div>
             )}
           </div>
         )}
+
+        {otaError && (
+          <p className="text-xs font-semibold text-rose-500 bg-rose-50 border border-rose-200 p-2.5 rounded-xl">
+            {otaError}
+          </p>
+        )}
+
         <div className="pt-1">
           <button
             onClick={handleCheckOta}
-            disabled={otaChecking}
-            className="flex cursor-pointer items-center gap-2 rounded-xl bg-gradient-to-br from-primary to-primary-deep text-white px-4 py-2.5 text-xs font-bold shadow-md shadow-primary/20 hover:brightness-110 active:scale-95 transition-all disabled:opacity-50"
+            disabled={otaChecking || downloadProgress !== null}
+            className="flex cursor-pointer items-center gap-2 rounded-xl bg-surface hover:bg-surface/80 border border-slate-200 text-ink px-4 py-2.5 text-xs font-bold shadow-xs hover:border-primary/40 active:scale-95 transition-all disabled:opacity-50"
           >
-            {otaChecking ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
-            <span>Cek Pembaruan Cloud Sekarang</span>
+            {otaChecking ? <Loader2 size={14} className="animate-spin text-primary" /> : <RefreshCw size={14} className="text-primary" />}
+            <span>Cek Pembaruan Cloud</span>
           </button>
         </div>
       </div>

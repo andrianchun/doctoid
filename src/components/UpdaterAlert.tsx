@@ -90,8 +90,18 @@ export default function UpdaterAlert() {
 
   const checkUpdate = useCallback(async () => {
     try {
-      const res = await fetch(`${otaUrl}?t=${Date.now()}`, { cache: 'no-store' })
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), 8000)
+      const res = await fetch(`${otaUrl}?t=${Date.now()}`, {
+        cache: 'no-store',
+        signal: controller.signal,
+      })
+      clearTimeout(timeoutId)
+
       if (!res.ok) return
+      const contentType = res.headers.get('content-type')
+      if (contentType && !contentType.includes('application/json')) return
+
       const data = (await res.json()) as OtaManifest
       
       // Jika nomor versi berbeda dari versi saat ini
@@ -118,14 +128,25 @@ export default function UpdaterAlert() {
       if (document.visibilityState === 'visible') checkUpdate()
     }
     const onOnline = () => checkUpdate()
+    const onTrigger = (e: any) => {
+      if (e.detail) {
+        setManifest(e.detail)
+        setUpdateAvailable(true)
+        setDismissed(false)
+      } else {
+        checkUpdate()
+      }
+    }
 
     document.addEventListener('visibilitychange', onVisibilityChange)
     window.addEventListener('online', onOnline)
-    const interval = setInterval(checkUpdate, 10 * 60 * 1000)
+    window.addEventListener('doctoid_trigger_ota', onTrigger)
+    const interval = setInterval(checkUpdate, 15 * 1000)
 
     return () => {
       document.removeEventListener('visibilitychange', onVisibilityChange)
       window.removeEventListener('online', onOnline)
+      window.removeEventListener('doctoid_trigger_ota', onTrigger)
       clearInterval(interval)
     }
   }, [checkUpdate])
