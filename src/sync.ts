@@ -1,7 +1,10 @@
 import { db } from './db'
 import { encryptJson, decryptJson, syncIdFromEntropy } from './crypto'
 import { getFirestore, doc, getDoc, setDoc, onSnapshot } from 'firebase/firestore'
-import { getFirebaseApp, getSavedUserProfile, saveUserProfile, saveDoctorSpecialty, getDoctorSpecialty, type UserProfile } from './auth'
+import {
+  getFirebaseApp, getFirebaseAuth, getSavedUserProfile, saveUserProfile,
+  saveDoctorSpecialty, getDoctorSpecialty, type UserProfile
+} from './auth'
 
 /* Zero-knowledge sync & Cloud sync engine dengan proteksi Wipe-Out, Auto-Trigger, & Anti-Pingpong. */
 
@@ -260,6 +263,14 @@ export interface SyncMeta {
    - Jika lokal lebih baru atau forcePush: PUSH tables & profil dokter terbaru ke cloud. */
 export async function syncUserCloud(uid: string, forcePush = false): Promise<string> {
   if (!uid || uid === 'local') return 'idle'
+  const auth = getFirebaseAuth()
+  if (auth && typeof auth.authStateReady === 'function') {
+    await auth.authStateReady()
+  }
+  if (!auth.currentUser) {
+    console.warn('[Sync] Sesi Firebase Auth belum aktif. Sinkronisasi cloud ditunda.')
+    return 'idle'
+  }
   const { fs, doc, getDoc, setDoc } = await fb()
   const deviceId = getDeviceId()
   const ref = doc(fs, 'users', uid)
@@ -351,6 +362,13 @@ export async function syncUserCloud(uid: string, forcePush = false): Promise<str
  * Paksa kirim seluruh database lokal saat ini ke Firestore Cloud
  */
 export async function forcePushCloud(uid: string): Promise<string> {
+  const auth = getFirebaseAuth()
+  if (auth && typeof auth.authStateReady === 'function') {
+    await auth.authStateReady()
+  }
+  if (!auth.currentUser) {
+    throw new Error('Sesi autentikasi Google belum aktif di browser ini. Silakan klik "Masuk dengan Google" di kartu atas.')
+  }
   return syncUserCloud(uid, true)
 }
 
@@ -359,6 +377,13 @@ export async function forcePushCloud(uid: string): Promise<string> {
  */
 export async function forcePullCloud(uid: string): Promise<{ success: boolean; count: number; message: string }> {
   if (!uid || uid === 'local') return { success: false, count: 0, message: 'Belum login akun Google.' }
+  const auth = getFirebaseAuth()
+  if (auth && typeof auth.authStateReady === 'function') {
+    await auth.authStateReady()
+  }
+  if (!auth.currentUser) {
+    return { success: false, count: 0, message: 'Sesi autentikasi Google belum aktif di browser ini. Silakan klik "Masuk dengan Google" di kartu atas.' }
+  }
   const { fs, doc, getDoc } = await fb()
   const ref = doc(fs, 'users', uid)
   const snap = await getDoc(ref)

@@ -53,8 +53,8 @@ if (fs.existsSync('.firebase')) {
   fs.rmSync('.firebase', { recursive: true, force: true });
 }
 
-console.log('\n📡 Mengunggah ke Firebase Hosting...');
-run('firebase deploy --only hosting');
+console.log('\n📡 Mengunggah ke Firebase Hosting & Firestore Rules...');
+run('firebase deploy --only hosting,firestore:rules');
 
 console.log('\n🌿 Menyimpan perubahan ke Git...');
 run('git add -A');
