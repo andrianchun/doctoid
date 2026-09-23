@@ -187,6 +187,13 @@ export async function loginWithGoogle(): Promise<UserProfile> {
 
   if (Capacitor.isNativePlatform()) {
     // JALUR APK NATIVE ANDROID: Dialog pemilih akun Google bawaan HP
+    // Reset sesi Google native terlebih dahulu agar dialog pilihan akun selalu ditampilkan
+    try {
+      await FirebaseAuthentication.signOut()
+    } catch {
+      // ignore
+    }
+
     const res = await FirebaseAuthentication.signInWithGoogle()
     const idToken = res.credential?.idToken
     if (!idToken) throw new Error('Gagal mendapatkan token akun Google dari perangkat.')
@@ -225,6 +232,19 @@ export async function loginWithGoogle(): Promise<UserProfile> {
 }
 
 export async function logoutUser(): Promise<void> {
+  // Hapus data lokal terlebih dahulu untuk menghindari race-condition pada auth listener
+  saveUserProfile(null)
+  localStorage.removeItem(LOCAL_USER_KEY)
+  localStorage.removeItem('doctoid_unlocked')
+
+  if (Capacitor.isNativePlatform()) {
+    try {
+      await FirebaseAuthentication.signOut()
+    } catch {
+      // ignore
+    }
+  }
+
   const auth = getFirebaseAuth()
   if (auth) {
     try {
@@ -233,28 +253,18 @@ export async function logoutUser(): Promise<void> {
       // ignore
     }
   }
-  if (Capacitor.isNativePlatform()) {
-    try {
-      await FirebaseAuthentication.signOut()
-    } catch {
-      // ignore
-    }
-  }
-  saveUserProfile(null)
-  localStorage.removeItem('doctoid_unlocked')
 }
 
 export function initAuthListener(onUserChanged: (user: UserProfile | null) => void): () => void {
   const auth = getFirebaseAuth()
   if (!auth) {
-    const saved = getSavedUserProfile()
-    onUserChanged(saved)
+    onUserChanged(null)
     return () => {}
   }
 
   const unsubscribe = onAuthStateChanged(auth, async (firebaseUser: User | null) => {
-    const saved = getSavedUserProfile()
     if (firebaseUser) {
+      const saved = getSavedUserProfile()
       const cloud = await fetchCloudUserProfile(firebaseUser.uid)
 
       const profile: UserProfile = {
@@ -267,12 +277,9 @@ export function initAuthListener(onUserChanged: (user: UserProfile | null) => vo
       saveUserProfile(profile)
       onUserChanged(profile)
     } else {
-      if (saved) {
-        onUserChanged(saved)
-      } else {
-        saveUserProfile(null)
-        onUserChanged(null)
-      }
+      // Jika tidak ada user terautentikasi di Firebase Auth, kosongkan profil
+      saveUserProfile(null)
+      onUserChanged(null)
     }
   })
 

@@ -3,15 +3,6 @@ import { Capacitor } from '@capacitor/core'
 
 const CRED_KEY = 'doctoid_webauthn_cred'
 
-/* Fallback tanpa sensor biometrik: verifikasi PIN layar jika ada */
-async function pinFallback(): Promise<boolean> {
-  const storedPin = localStorage.getItem('doctoid_screen_pin')
-  if (!storedPin) return true
-  const pin = window.prompt('Sensor biometrik tidak aktif.\nMasukkan PIN Kunci Layar:')
-  if (!pin) return false
-  return pin.trim() === storedPin.trim()
-}
-
 export async function checkBiometricAvailable(): Promise<boolean> {
   try {
     if (Capacitor.isNativePlatform()) {
@@ -37,13 +28,10 @@ export async function verifyBiometric(): Promise<boolean> {
         })
         return true
       }
+      return false
     } catch (e: any) {
       console.warn('Native biometric error/cancel:', e)
-      // Jika dibatalkan eksplisit oleh pengguna
-      if (e?.code === 'userCancel' || e?.message?.includes('cancel') || e?.message?.includes('Cancel')) {
-        return false
-      }
-      return pinFallback()
+      return false
     }
   }
 
@@ -73,7 +61,7 @@ export async function verifyBiometric(): Promise<boolean> {
             timeout: 60000,
           },
         })) as PublicKeyCredential | null
-        if (!cred) return pinFallback()
+        if (!cred) return false
         localStorage.setItem(
           CRED_KEY,
           btoa(String.fromCharCode(...new Uint8Array(cred.rawId))),
@@ -90,10 +78,11 @@ export async function verifyBiometric(): Promise<boolean> {
         },
       })
       return !!assertion
-    } catch {
-      return pinFallback()
+    } catch (err: any) {
+      console.warn('WebAuthn biometric error/cancel:', err)
+      return false
     }
   }
 
-  return pinFallback()
+  return false
 }

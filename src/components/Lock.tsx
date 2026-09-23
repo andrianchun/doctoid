@@ -32,8 +32,18 @@ export default function Lock() {
       setUser(loggedUser)
       setIsUnlocked(true)
     } catch (e: any) {
-      console.error(e)
-      setErr(e.message || 'Gagal masuk dengan akun Google. Periksa koneksi internet Anda.')
+      console.error('Google login error:', e)
+      if (
+        e?.code === 'auth/popup-closed-by-user' ||
+        e?.code === 'auth/cancelled-popup-request' ||
+        e?.message?.includes('closed-by-user') ||
+        e?.message?.includes('cancel') ||
+        e?.message?.includes('Cancel')
+      ) {
+        setErr('Pemilihan akun Google dibatalkan.')
+      } else {
+        setErr(e.message || 'Gagal masuk dengan akun Google. Periksa koneksi internet Anda.')
+      }
     } finally {
       setBusy(false)
     }
@@ -160,12 +170,17 @@ export default function Lock() {
                 </button>
               </div>
             ) : !bioEnabled ? (
-              <button
-                onClick={() => setIsUnlocked(true)}
-                className="flex h-12 w-full cursor-pointer items-center justify-center gap-2 rounded-2xl bg-gradient-to-br from-primary to-primary-deep text-xs font-bold text-white shadow-md shadow-primary/30 hover:brightness-110 active:scale-95 transition-all"
-              >
-                Buka Aplikasi
-              </button>
+              <div className="space-y-2 text-center">
+                <p className="caption text-xs text-amber-600 bg-amber-50 rounded-xl p-2.5 border border-amber-200/60 leading-relaxed">
+                  Proteksi kunci layar belum diaktifkan (PIN / Biometrik). Atur proteksi di menu Pengaturan.
+                </p>
+                <button
+                  onClick={() => setIsUnlocked(true)}
+                  className="flex h-12 w-full cursor-pointer items-center justify-center gap-2 rounded-2xl bg-gradient-to-br from-primary to-primary-deep text-xs font-bold text-white shadow-md shadow-primary/30 hover:brightness-110 active:scale-95 transition-all"
+                >
+                  Buka Aplikasi
+                </button>
+              </div>
             ) : null}
 
             {/* Logout / Switch Account */}

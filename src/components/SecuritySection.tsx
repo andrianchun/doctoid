@@ -137,7 +137,8 @@ export default function SecuritySection({ notify }: { notify: (m: string) => voi
       setBioOn(false)
       return notify('Kunci biometrik dimatikan.')
     }
-    if (!(await verifyBiometric())) return notify('Verifikasi biometrik gagal.')
+    const ok = await verifyBiometric()
+    if (!ok) return notify('Verifikasi biometrik gagal atau dibatalkan.')
     localStorage.setItem('doctoid_bio_enabled', 'true')
     setBioOn(true)
     notify('Kunci biometrik diaktifkan ✓')
@@ -169,7 +170,17 @@ export default function SecuritySection({ notify }: { notify: (m: string) => voi
       notify(`Berhasil masuk sebagai ${loggedUser.displayName || loggedUser.email} ✓`)
       await syncUserCloud(loggedUser.uid)
     } catch (e: any) {
-      notify(`Gagal login: ${e.message}`)
+      if (
+        e?.code === 'auth/popup-closed-by-user' ||
+        e?.code === 'auth/cancelled-popup-request' ||
+        e?.message?.includes('closed-by-user') ||
+        e?.message?.includes('cancel') ||
+        e?.message?.includes('Cancel')
+      ) {
+        notify('Pemilihan akun Google dibatalkan.')
+      } else {
+        notify(`Gagal login: ${e.message}`)
+      }
     } finally {
       setBusy(false)
     }
@@ -457,7 +468,14 @@ export default function SecuritySection({ notify }: { notify: (m: string) => voi
 
       <div className="flex flex-wrap gap-2 pt-2">
         <button
-          onClick={() => setIsUnlocked(false)}
+          onClick={() => {
+            if (!bioOn && !hasPin) {
+              notify('Aktifkan Kunci Sidik Jari atau buat PIN Layar terlebih dahulu agar layar dapat dikunci.')
+              setShowPinSetup(true)
+              return
+            }
+            setIsUnlocked(false)
+          }}
           className="flex cursor-pointer items-center gap-1.5 rounded-xl bg-surface px-3.5 py-2 text-xs font-semibold text-ink-muted hover:text-ink"
         >
           <LockIcon size={14} /> Kunci Layar Sekarang

@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { Capacitor } from '@capacitor/core'
 import { CapacitorUpdater } from '@capgo/capacitor-updater'
 import { StatusBar, Style } from '@capacitor/status-bar'
+import { Activity, Loader2 } from 'lucide-react'
 import { useUi } from './store'
 import Lock from './components/Lock'
 import Layout from './components/Layout'
@@ -21,7 +22,7 @@ import { checkRevoked, initRealtimeCloudSync, fbConfigured } from './sync'
 const IDLE_LOCK_MS = 5 * 60 * 1000 // 5 menit tanpa aktivitas → auto-lock layar (proteksi data pasien)
 
 export default function App() {
-  const { user, setUser, isUnlocked, setIsUnlocked } = useUi()
+  const { user, setUser, isUnlocked, setIsUnlocked, authLoading, setAuthLoading } = useUi()
 
   // Inisialisasi Native Android: Status Bar & Capgo
   useEffect(() => {
@@ -36,6 +37,7 @@ export default function App() {
   useEffect(() => {
     const unsubscribe = initAuthListener((u) => {
       setUser(u)
+      setAuthLoading(false)
       if (u) {
         // Jika tidak ada PIN dan tidak ada biometrik yang diaktifkan, otomatis buka
         const bioOn = localStorage.getItem('doctoid_bio_enabled') === 'true'
@@ -48,7 +50,7 @@ export default function App() {
       }
     })
     return () => unsubscribe()
-  }, [setUser, setIsUnlocked])
+  }, [setUser, setIsUnlocked, setAuthLoading])
 
   // Kill switch: cek status revoke saat mount
   useEffect(() => {
@@ -87,6 +89,20 @@ export default function App() {
       unsubscribe()
     }
   }, [user])
+
+  if (authLoading) {
+    return (
+      <div className="mx-auto flex min-h-dvh max-w-md flex-col items-center justify-center gap-4 p-6">
+        <span className="flex size-16 items-center justify-center rounded-3xl bg-gradient-to-br from-primary to-primary-deep text-white shadow-xl shadow-primary/30 animate-pulse">
+          <Activity size={34} />
+        </span>
+        <div className="flex items-center gap-2 text-xs font-semibold text-ink-muted">
+          <Loader2 size={16} className="animate-spin text-primary" />
+          <span>Memeriksa sesi dokter...</span>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <>

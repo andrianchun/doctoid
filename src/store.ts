@@ -13,6 +13,8 @@ interface UiState {
   setSettingsOpen: (v: boolean) => void
   user: UserProfile | null
   setUser: (u: UserProfile | null) => void
+  authLoading: boolean
+  setAuthLoading: (v: boolean) => void
   isUnlocked: boolean
   setIsUnlocked: (v: boolean) => void
   sessionKeys: SessionKeys | null // untuk backward compatibility enkripsi lokal/sync
@@ -26,6 +28,8 @@ export const useUi = create<UiState>((set) => ({
   setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
   user: null,
   setUser: (user) => set({ user }),
+  authLoading: true,
+  setAuthLoading: (authLoading) => set({ authLoading }),
   isUnlocked: false,
   setIsUnlocked: (isUnlocked) => set({ isUnlocked }),
   sessionKeys: null,
