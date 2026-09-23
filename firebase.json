@@ -27,6 +27,9 @@
       {
         "source": "/apk/**",
         "headers": [
+          { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" },
+          { "key": "Content-Type", "value": "application/vnd.android.package-archive" },
+          { "key": "Content-Disposition", "value": "attachment; filename=\"doctoid-latest.apk\"" },
           { "key": "Access-Control-Allow-Origin", "value": "*" }
         ]
       }

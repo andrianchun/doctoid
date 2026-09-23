@@ -99,8 +99,9 @@ Script `npm run release` secara otomatis melakukan rangkaian:
 3. Build TypeScript & Vite bundle.
 4. Kompresi OTA ZIP level 9 dengan retensi 3 versi terakhir.
 5. Pembersihan cache `.firebase`.
-6. Deploy hosting Firebase (`firebase deploy --only hosting`).
-7. Git auto-commit (`release vX.Y.Z`) & Git push ke repository.
+6. Deploy hosting Firebase & Firestore rules (`firebase deploy --only hosting,firestore:rules`).
+7. Verifikasi ganda hasil deploy di hosting (memeriksa content-type, version, CORS `*`, dan ukuran berkas ZIP 2x dengan jeda 20 detik untuk menangkal rewrite SPA).
+8. Git auto-commit (`release vX.Y.Z`) & Git push ke repository.
 
 ---
 *Dokumen ini merupakan panduan rilis resmi Doctoid v0.1+.*

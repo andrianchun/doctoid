@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { Sparkles, AlertCircle, X, DownloadCloud } from 'lucide-react'
 import { Capacitor } from '@capacitor/core'
 import { CapacitorUpdater } from '@capgo/capacitor-updater'
@@ -11,102 +11,78 @@ interface OtaManifest {
   release_notes?: string
 }
 
-function DownloadProgressBar({ progress }: { progress: number }) {
-  const [displayProgress, setDisplayProgress] = useState(0)
-  const targetRef = useRef(0)
-  const isDoneRef = useRef(false)
-
-  useEffect(() => {
-    if (typeof progress === 'number') {
-      targetRef.current = Math.max(targetRef.current, progress)
-      if (progress >= 100) {
-        isDoneRef.current = true
-      }
-    }
-  }, [progress])
-
-  useEffect(() => {
-    const crawlerInterval = setInterval(() => {
-      if (isDoneRef.current) return
-      targetRef.current = Math.min(92, targetRef.current + (targetRef.current < 25 ? 1.8 : targetRef.current < 60 ? 1.0 : 0.4))
-    }, 200)
-
-    const renderInterval = setInterval(() => {
-      setDisplayProgress((prev) => {
-        const target = isDoneRef.current ? 100 : targetRef.current
-        if (prev >= target) return prev
-        const diff = target - prev
-        const step = diff > 20 ? 1.8 : diff > 5 ? 0.9 : 0.35
-        const next = prev + step
-        return next >= target ? target : next
-      })
-    }, 30)
-
-    return () => {
-      clearInterval(crawlerInterval)
-      clearInterval(renderInterval)
-    }
-  }, [])
-
-  const rounded = Math.round(displayProgress)
-  const isExtracting = rounded >= 100
-
+function DownloadProgress({ progress }: { progress: number }) {
   return (
     <div className="w-full space-y-1.5 pt-1 text-left">
       <div className="flex items-center justify-between text-xs font-bold text-ink">
         <span className="text-ink-muted">
-          {isExtracting ? 'Memasang berkas & memuat ulang…' : 'Mengunduh pembaruan OTA…'}
+          {progress >= 100 ? 'Memasang berkas & memuat ulang…' : 'Mengunduh pembaruan OTA…'}
         </span>
-        <span className="tabular-nums font-mono text-primary">{rounded}%</span>
+        <span className="tabular-nums font-mono text-primary">{progress}%</span>
       </div>
       <div className="h-2.5 w-full overflow-hidden rounded-full bg-surface relative">
         <div
-          className="h-full rounded-full bg-gradient-to-r from-primary to-primary-deep transition-all duration-75 ease-out"
-          style={{ width: `${Math.min(100, Math.max(rounded, 3))}%` }}
+          className="h-full rounded-full bg-gradient-to-r from-primary to-primary-deep transition-all duration-150 ease-out"
+          style={{ width: `${Math.max(progress, 3)}%` }}
         />
-        {isExtracting && (
+        {progress >= 100 && (
           <div className="absolute inset-0 bg-white/30 animate-pulse rounded-full" />
         )}
       </div>
       <p className="caption text-ink-muted text-center">
-        {isExtracting
-          ? 'Memasang pembaruan. Doctoid akan segera dimuat ulang…'
-          : 'Jangan tutup aplikasi. Doctoid akan otomatis dimuat ulang setelah selesai.'}
+        Jangan tutup aplikasi. Doctoid akan otomatis dimuat ulang setelah selesai.
       </p>
     </div>
   )
 }
 
 export default function UpdaterAlert() {
-  const isDev = import.meta.env.DEV || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
   const [updateAvailable, setUpdateAvailable] = useState(false)
   const [manifest, setManifest] = useState<OtaManifest | null>(null)
-  const [dismissed, setDismissed] = useState(false)
   const [downloadProgress, setDownloadProgress] = useState<number | null>(null)
   const [errorMsg, setErrorMsg] = useState('')
 
   const currentVersion = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '0.1.0'
   const isNative = Capacitor.isNativePlatform()
-  const otaUrl = 'https://docto-id.web.app/ota/version.json'
 
   const checkUpdate = useCallback(async () => {
-    if (isDev) return
     try {
-      const controller = new AbortController()
-      const timeoutId = setTimeout(() => controller.abort(), 8000)
-      const res = await fetch(`${otaUrl}?t=${Date.now()}`, {
-        cache: 'no-store',
-        signal: controller.signal,
-      })
-      clearTimeout(timeoutId)
+      // Jalur pengecekan tunggal: Native membaca URL absolut, Web membaca relatif dengan fallback
+      const primaryUrl = isNative ? 'https://docto-id.web.app/ota/version.json' : '/ota/version.json'
+      let res: Response | null = null
 
-      if (!res.ok) return
+      try {
+        const controller = new AbortController()
+        const timeoutId = setTimeout(() => controller.abort(), 8000)
+        res = await fetch(`${primaryUrl}?t=${Date.now()}`, {
+          cache: 'no-store',
+          signal: controller.signal,
+        })
+        clearTimeout(timeoutId)
+      } catch {
+        // Fallback untuk dev/preview di localhost jika /ota belum ada di bundle lokal
+        if (!isNative) {
+          try {
+            const controller2 = new AbortController()
+            const timeoutId2 = setTimeout(() => controller2.abort(), 8000)
+            res = await fetch(`https://docto-id.web.app/ota/version.json?t=${Date.now()}`, {
+              cache: 'no-store',
+              signal: controller2.signal,
+            })
+            clearTimeout(timeoutId2)
+          } catch {
+            return
+          }
+        }
+      }
+
+      if (!res || !res.ok) return
       const contentType = res.headers.get('content-type')
-      if (contentType && !contentType.includes('application/json')) return
+      if (!contentType || !contentType.includes('application/json')) return
 
       const data = (await res.json()) as OtaManifest
-      
-      // Jika nomor versi berbeda dari versi saat ini
+
+      // Deteksi versi berbeda (mendukung upgrade maupun rollback, standar lomeal/darka)
       if (data.ota_version && data.ota_version !== currentVersion) {
         const storedDismiss = localStorage.getItem('doctoid_dismissed_ota')
         if (storedDismiss === data.ota_version && !data.is_forced) {
@@ -119,9 +95,9 @@ export default function UpdaterAlert() {
         setUpdateAvailable(false)
       }
     } catch {
-      // Offline atau version.json belum ter-deploy, abaikan
+      // Abaikan jika offline
     }
-  }, [currentVersion, otaUrl])
+  }, [currentVersion, isNative])
 
   useEffect(() => {
     checkUpdate()
@@ -134,7 +110,6 @@ export default function UpdaterAlert() {
       if (e.detail) {
         setManifest(e.detail)
         setUpdateAvailable(true)
-        setDismissed(false)
       } else {
         checkUpdate()
       }
@@ -153,7 +128,7 @@ export default function UpdaterAlert() {
     }
   }, [checkUpdate])
 
-  // Listener progres unduhan Capgo di native APK
+  // Listener progres Capgo di native APK
   useEffect(() => {
     if (!isNative) return
     let listener: any
@@ -171,13 +146,13 @@ export default function UpdaterAlert() {
     setErrorMsg('')
     localStorage.removeItem('doctoid_dismissed_ota')
 
-    // Jalur APK Langsung
+    // Jalur APK Mandiri
     if (manifest.is_apk || !manifest.ota_url.toLowerCase().endsWith('.zip')) {
       window.open(manifest.ota_url, '_blank')
       return
     }
 
-    // Web / PWA: Refresh halaman untuk memuat bundle assets baru
+    // Web / PWA: Refresh service worker dan reload
     if (!isNative) {
       setDownloadProgress(0)
       const reg = await navigator.serviceWorker?.getRegistration()
@@ -185,7 +160,7 @@ export default function UpdaterAlert() {
       setDownloadProgress(100)
       setTimeout(() => {
         window.location.reload()
-      }, 500)
+      }, 400)
       return
     }
 
@@ -197,7 +172,7 @@ export default function UpdaterAlert() {
         version: manifest.ota_version,
       })
       setDownloadProgress(100)
-      await new Promise((resolve) => setTimeout(resolve, 600))
+      await new Promise((resolve) => setTimeout(resolve, 500))
       await CapacitorUpdater.set(bundle)
     } catch (err: any) {
       console.error('OTA Update failed:', err)
@@ -210,75 +185,83 @@ export default function UpdaterAlert() {
     if (manifest?.ota_version) {
       localStorage.setItem('doctoid_dismissed_ota', manifest.ota_version)
     }
-    setDismissed(true)
+    setUpdateAvailable(false)
   }
 
-  if (isDev || !updateAvailable || !manifest || (dismissed && !manifest.is_forced)) {
+  if (!updateAvailable || !manifest) {
     return null
   }
 
   const isDownloading = downloadProgress !== null
+  const versionLine = currentVersion && manifest.ota_version
+    ? `v${currentVersion} → v${manifest.ota_version}`
+    : `v${manifest.ota_version}`
 
-  // Mode 1: FORCED UPDATE (Modal memblokir jika is_forced == true)
+  // Mode 1: FORCED UPDATE (Modal memblokir jika is_forced == true, tidak bisa ditutup)
   if (manifest.is_forced) {
     return (
-      <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4 backdrop-blur-md animate-in fade-in">
-        <div className="w-full max-w-sm rounded-3xl border border-surface bg-card p-6 shadow-2xl space-y-4">
-          <div className="flex items-center gap-3">
-            <span className="flex size-12 items-center justify-center rounded-2xl bg-gradient-to-br from-primary to-primary-deep text-white shadow-lg shadow-primary/30">
-              <Sparkles size={24} />
+      <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/75 p-4 backdrop-blur-md animate-in fade-in duration-300">
+        <div className="w-full max-w-sm rounded-3xl border border-white/20 bg-card p-6 shadow-2xl space-y-4 animate-in zoom-in-95 duration-300 text-center">
+          <div className="flex flex-col items-center gap-2 pt-2">
+            <span className="flex size-16 items-center justify-center rounded-3xl bg-gradient-to-br from-primary to-primary-deep text-white shadow-xl shadow-primary/30">
+              <Sparkles size={32} />
             </span>
-            <div>
-              <p className="text-xs font-bold uppercase tracking-wider text-primary">Pembaruan Wajib</p>
-              <h2 className="text-lg font-black text-ink">Doctoid v{manifest.ota_version}</h2>
-            </div>
+            <h2 className="text-xl font-black text-ink tracking-tight mt-1">Pembaruan Wajib!</h2>
+            <p className="caption text-xs text-ink-muted px-2">
+              Versi terbaru Doctoid telah tersedia. Dokter perlu memperbarui aplikasi untuk melanjutkan akses rekam medis.
+            </p>
+            <p className="text-xs font-bold text-primary tabular-nums mt-1">{versionLine}</p>
           </div>
 
-          <div className="rounded-2xl bg-surface/80 p-3.5 space-y-1.5 border border-primary-soft/20">
-            <p className="text-xs font-bold text-ink flex items-center gap-1.5">
-              <AlertCircle size={14} className="text-amber-500" />
-              Catatan Rilis:
-            </p>
-            <p className="text-xs text-ink-muted leading-relaxed">
-              {manifest.release_notes || 'Peningkatan performa, keamanan, dan perbaikan klinis.'}
-            </p>
-          </div>
+          {manifest.release_notes && (
+            <div className="rounded-2xl bg-surface/80 p-3.5 text-left border border-primary-soft/20 space-y-1">
+              <p className="text-xs font-bold text-primary uppercase tracking-wider flex items-center gap-1.5">
+                <AlertCircle size={14} />
+                Yang Baru:
+              </p>
+              <p className="text-xs text-ink whitespace-pre-wrap leading-relaxed">
+                {manifest.release_notes}
+              </p>
+            </div>
+          )}
 
           {errorMsg && (
-            <p className="text-center text-xs font-semibold text-rose-500">{errorMsg}</p>
+            <p className="text-center text-xs font-semibold text-rose-500 bg-rose-50 p-2.5 rounded-xl border border-rose-200">
+              {errorMsg}
+            </p>
           )}
 
-          {isDownloading ? (
-            <DownloadProgressBar progress={downloadProgress} />
-          ) : (
-            <button
-              onClick={handleUpdate}
-              className="flex w-full cursor-pointer items-center justify-center gap-2 rounded-2xl bg-gradient-to-br from-primary to-primary-deep py-3.5 text-sm font-bold text-white shadow-lg shadow-primary/30 hover:brightness-110 active:scale-95 transition-all"
-            >
-              <DownloadCloud size={18} />
-              <span>Update Sekarang (OTA)</span>
-            </button>
-          )}
+          <div className="pt-2">
+            {isDownloading ? (
+              <DownloadProgress progress={downloadProgress ?? 0} />
+            ) : (
+              <button
+                onClick={handleUpdate}
+                className="flex w-full cursor-pointer items-center justify-center gap-2 rounded-2xl bg-gradient-to-br from-primary to-primary-deep py-3.5 text-sm font-bold text-white shadow-lg shadow-primary/30 hover:brightness-110 active:scale-95 transition-all"
+              >
+                <DownloadCloud size={18} />
+                <span>Update Sekarang (OTA)</span>
+              </button>
+            )}
+          </div>
         </div>
       </div>
     )
   }
 
-  // Mode 2: NON-FORCED UPDATE (Floating Glass Banner yang nyaman)
+  // Mode 2: NON-FORCED UPDATE (Floating Glass Banner yang elegan di bagian bawah)
   return (
-    <aside aria-label="Notifikasi Pembaruan" className="fixed bottom-24 inset-x-4 z-[100] mx-auto max-w-md animate-in slide-in-from-bottom-4 duration-300">
-      <div className="flex flex-col gap-2.5 rounded-3xl border border-white/30 bg-card/95 p-4 shadow-2xl shadow-primary/10 backdrop-blur-xl">
+    <aside aria-label="Notifikasi Pembaruan" className="fixed bottom-24 inset-x-4 z-[9999] mx-auto max-w-md animate-in slide-in-from-bottom-6 fade-in duration-300">
+      <div className="flex flex-col gap-3 rounded-3xl border border-white/30 bg-card/95 p-4 shadow-2xl shadow-primary/10 backdrop-blur-xl relative overflow-hidden">
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-2.5 min-w-0 flex-1">
-            <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-primary-deep text-white shadow-md shadow-primary/20">
-              <Sparkles size={18} />
+            <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-primary-deep text-white shadow-md shadow-primary/20">
+              <Sparkles size={20} />
             </span>
             <div className="min-w-0 flex-1">
-              <p className="text-xs font-bold text-ink truncate">
-                Doctoid v{manifest.ota_version} Tersedia
-              </p>
-              <p className="caption text-ink-muted truncate">
-                {manifest.release_notes || 'Pembaruan fitur & peningkatan performa'}
+              <h3 className="text-sm font-bold text-ink leading-tight truncate">Update Tersedia</h3>
+              <p className="caption text-xs text-ink-muted mt-0.5 tabular-nums truncate">
+                {versionLine}
               </p>
             </div>
           </div>
@@ -287,26 +270,32 @@ export default function UpdaterAlert() {
             <button
               onClick={handleDismiss}
               aria-label="Tutup notifikasi update"
-              className="flex size-7 cursor-pointer items-center justify-center rounded-lg text-ink-muted hover:bg-surface transition-colors"
+              className="flex size-11 cursor-pointer items-center justify-center rounded-xl text-ink-muted hover:bg-surface hover:text-ink transition-colors"
             >
-              <X size={15} />
+              <X size={18} />
             </button>
           )}
         </div>
 
+        {manifest.release_notes && !isDownloading && (
+          <p className="text-xs text-ink-muted leading-relaxed whitespace-pre-wrap bg-surface/60 p-2.5 rounded-xl border border-surface">
+            {manifest.release_notes}
+          </p>
+        )}
+
         {errorMsg && (
-          <p className="text-xs font-semibold text-rose-500">{errorMsg}</p>
+          <p className="text-xs font-semibold text-rose-500 bg-rose-50 p-2 rounded-xl border border-rose-200">{errorMsg}</p>
         )}
 
         {isDownloading ? (
-          <DownloadProgressBar progress={downloadProgress} />
+          <DownloadProgress progress={downloadProgress ?? 0} />
         ) : (
           <button
             onClick={handleUpdate}
             className="flex w-full cursor-pointer items-center justify-center gap-1.5 rounded-2xl bg-gradient-to-br from-primary to-primary-deep py-2.5 text-xs font-bold text-white shadow-md shadow-primary/20 hover:brightness-110 active:scale-95 transition-all"
           >
-            <DownloadCloud size={15} />
-            <span>Update Sekarang (Instan)</span>
+            <DownloadCloud size={16} />
+            <span>Update Sekarang</span>
           </button>
         )}
       </div>

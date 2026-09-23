@@ -90,23 +90,19 @@ export default function App() {
     }
   }, [user])
 
-  if (authLoading) {
-    return (
-      <div className="mx-auto flex min-h-dvh max-w-md flex-col items-center justify-center gap-4 p-6">
-        <span className="flex size-16 items-center justify-center rounded-3xl bg-gradient-to-br from-primary to-primary-deep text-white shadow-xl shadow-primary/30 animate-pulse">
-          <Activity size={34} />
-        </span>
-        <div className="flex items-center gap-2 text-xs font-semibold text-ink-muted">
-          <Loader2 size={16} className="animate-spin text-primary" />
-          <span>Memeriksa sesi dokter...</span>
-        </div>
-      </div>
-    )
-  }
-
   return (
     <>
-      {!user || !isUnlocked ? (
+      {authLoading ? (
+        <div className="mx-auto flex min-h-dvh max-w-md flex-col items-center justify-center gap-4 p-6">
+          <span className="flex size-16 items-center justify-center rounded-3xl bg-gradient-to-br from-primary to-primary-deep text-white shadow-xl shadow-primary/30 animate-pulse">
+            <Activity size={34} />
+          </span>
+          <div className="flex items-center gap-2 text-xs font-semibold text-ink-muted">
+            <Loader2 size={16} className="animate-spin text-primary" />
+            <span>Memeriksa sesi dokter...</span>
+          </div>
+        </div>
+      ) : !user || !isUnlocked ? (
         <Lock />
       ) : (
         <BrowserRouter>
