@@ -99,6 +99,14 @@ const verifyDeploy = async (v) => {
     } else if (localZipSize > 0 && zipSize !== localZipSize) {
       problems.push(`${zipName(v)} di hosting ${zipSize} byte, lokal ${localZipSize} byte`);
     }
+
+    if (apk) {
+      const apkRes = await fetch(`https://docto-id.web.app/apk/doctoid-latest.apk?t=${Date.now()}`, { method: 'HEAD', cache: 'no-store' });
+      const apkType = apkRes.headers.get('content-type') || '';
+      if (!apkType.includes('package-archive') && !apkType.includes('octet-stream')) {
+        problems.push(`doctoid-latest.apk balik ${apkType || 'tanpa content-type'} (harusnya application/vnd.android.package-archive)`);
+      }
+    }
   } catch (err) {
     problems.push(`Gagal menghubungi server hosting: ${err.message}`);
   }
