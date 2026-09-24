@@ -37,7 +37,7 @@ ATURAN WAJIB (CONCISENESS):
 
 Balas HANYA JSON valid dengan skema persis:
 {
-  "title": string,              // "Ny." | "Tn." | "An." | "By." | "Sdr." | "Sdri." | ""
+  "title": string,              // "dr." | "Ny." | "Tn." | "An." | "By." | "Sdr." | "Sdri." | ""
   "nama_depan": string,         // mis. "Tumini"; "" jika tak ada
   "usia": string,               // mis. "54 th"; "" jika tak ada
   "no_rm": string,              // nomor rekam medis; "" jika tak ada

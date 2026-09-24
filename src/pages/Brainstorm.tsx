@@ -663,7 +663,7 @@ export default function Brainstorm() {
       )}
 
       {/* KARTU 1: IDENTITAS & LOKASI PASIEN */}
-      <div className="glass-card rounded-3xl p-5 shadow-sm space-y-4 animate-in fade-in slide-in-from-bottom-2 border border-slate-300/80">
+      <div className={`glass-card rounded-3xl p-5 shadow-sm space-y-4 animate-in fade-in slide-in-from-bottom-2 border border-slate-300/80 relative transition-all ${showFaskesMenu ? 'z-30' : 'z-10'}`}>
         <div className="flex items-center justify-between pb-2 border-b border-slate-200">
           <h2 className="text-xs font-extrabold text-slate-800 uppercase tracking-wider">
             {selectedPatient ? 'Identitas Pasien (Readmisi)' : 'Identitas Pasien'}
@@ -689,6 +689,7 @@ export default function Brainstorm() {
             className="w-20 rounded-2xl border border-slate-300 bg-slate-100/90 px-2 py-3 text-xs font-bold text-slate-900 outline-none focus:bg-white focus:border-primary shrink-0 cursor-pointer shadow-2xs"
           >
             <option value="">Gelar</option>
+            <option>dr.</option>
             <option>Tn.</option>
             <option>Ny.</option>
             <option>Sdr.</option>
@@ -700,7 +701,7 @@ export default function Brainstorm() {
             ref={namaRef}
             value={form.nama_depan}
             onChange={(e) => set({ nama_depan: e.target.value })}
-            placeholder="Nama Lengkap / Panggilan"
+            placeholder="Nama"
             className={inputCls + ' flex-1 min-w-0' + hl('nama_depan')}
           />
           <div className="relative w-20 shrink-0">
@@ -708,11 +709,13 @@ export default function Brainstorm() {
               value={form.usia}
               onChange={(e) => set({ usia: e.target.value })}
               placeholder="Usia"
-              className={inputCls + ' text-center pr-6'}
+              className={inputCls + ' text-center' + (form.usia ? ' pr-6' : '')}
             />
-            <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs font-bold text-ink-muted pointer-events-none">
-              th
-            </span>
+            {form.usia && (
+              <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs font-bold text-ink-muted pointer-events-none">
+                th
+              </span>
+            )}
           </div>
         </div>
 
@@ -721,7 +724,7 @@ export default function Brainstorm() {
           <input
             value={form.no_rm}
             onChange={(e) => set({ no_rm: e.target.value })}
-            placeholder="Nomor RM"
+            placeholder="No. RM"
             className={inputCls}
           />
           <select
@@ -773,34 +776,38 @@ export default function Brainstorm() {
         </div>
 
         {/* Baris 4: Faskes & Ruangan */}
-        <div>
-          <label className="block text-xs font-bold text-ink mb-1">Faskes & Ruang Rawat</label>
-          <div className="relative">
-            <button
-              ref={faskesRef}
-              type="button"
-              onClick={() => setShowFaskesMenu(!showFaskesMenu)}
-              className={inputCls + ' flex items-center justify-between text-left cursor-pointer' + hl('faskes')}
-            >
-              {hospitalId && wardId && hospitals && allWards ? (() => {
-                 const h = hospitals.find(x => x.id === hospitalId)
-                 const w = allWards.find(x => x.id === wardId)
-                 if (!h || !w) return <span className="text-ink-muted font-normal">— Pilih Faskes & Ruangan —</span>
-                 return (
-                   <div className="flex items-center gap-2 truncate">
-                     <span className="font-bold text-primary">{h.nama}</span>
-                     <span className="text-ink-muted">›</span>
-                     <span className="size-2.5 rounded-full shrink-0 shadow-xs" style={{ backgroundColor: w.kode_warna }} />
-                     <span className="font-bold text-primary-deep">{w.nama}</span>
-                   </div>
-                 )
-              })() : (
-                <span className="text-ink-muted font-normal">— Pilih Faskes & Ruangan —</span>
-              )}
-              <ChevronDown size={16} className="text-ink-muted shrink-0 ml-2" />
-            </button>
-            
-            {showFaskesMenu && (
+        <div className="relative">
+          <button
+            ref={faskesRef}
+            type="button"
+            onClick={() => setShowFaskesMenu(!showFaskesMenu)}
+            className={inputCls + ' flex items-center justify-between text-left cursor-pointer' + hl('faskes')}
+          >
+            {hospitalId && wardId && hospitals && allWards ? (() => {
+               const h = hospitals.find(x => x.id === hospitalId)
+               const w = allWards.find(x => x.id === wardId)
+               if (!h || !w) return <span className="text-slate-400 font-normal">Pilih Faskes & Ruangan</span>
+               return (
+                 <div className="flex items-center gap-2 truncate">
+                   <span className="font-bold text-primary">{h.nama}</span>
+                   <span className="text-ink-muted">›</span>
+                   <span className="size-2.5 rounded-full shrink-0 shadow-xs" style={{ backgroundColor: w.kode_warna }} />
+                   <span className="font-bold text-primary-deep">{w.nama}</span>
+                 </div>
+               )
+            })() : (
+              <span className="text-slate-400 font-normal">Pilih Faskes & Ruangan</span>
+            )}
+            <ChevronDown size={16} className="text-ink-muted shrink-0 ml-2" />
+          </button>
+          
+          {showFaskesMenu && (
+            <>
+              {/* Backdrop klik luar untuk menutup dropdown */}
+              <div
+                className="fixed inset-0 z-40"
+                onClick={() => setShowFaskesMenu(false)}
+              />
               <div className="absolute top-full left-0 right-0 z-50 mt-1 max-h-64 overflow-y-auto rounded-2xl bg-white border border-slate-300 shadow-2xl p-2 space-y-3 animate-in fade-in zoom-in-95">
                 {hospitals?.map(h => {
                    const hWards = allWards?.filter(w => w.hospital_id === h.id).sort((a, b) => (a.order ?? 0) - (b.order ?? 0)) || [];
@@ -830,13 +837,13 @@ export default function Brainstorm() {
                 })}
                 {!hospitals?.length && <p className="text-xs text-center text-slate-400 p-2">Belum ada faskes. Tambah di Pengaturan.</p>}
               </div>
-            )}
-          </div>
+            </>
+          )}
         </div>
       </div>
 
       {/* KARTU 2: SUBJEKTIF & OBJEKTIF (S & O) */}
-      <div className="glass-card rounded-3xl p-5 shadow-sm space-y-5 animate-in fade-in slide-in-from-bottom-2 border border-slate-300/80">
+      <div className="glass-card rounded-3xl p-5 shadow-sm space-y-5 animate-in fade-in slide-in-from-bottom-2 border border-slate-300/80 relative z-0">
         <div className="pb-2 border-b border-slate-200">
           <h2 className="text-xs font-extrabold text-slate-800 uppercase tracking-wider">
             Subjektif & Objektif (S & O)
@@ -949,7 +956,7 @@ export default function Brainstorm() {
       </div>
 
       {/* KARTU 3: A (ASSESSMENT / DIAGNOSIS) */}
-      <div className={'glass-card rounded-3xl p-5 shadow-sm space-y-4 animate-in fade-in slide-in-from-bottom-2 border border-slate-300/80 ' + hl('A')}>
+      <div className={'glass-card rounded-3xl p-5 shadow-sm space-y-4 animate-in fade-in slide-in-from-bottom-2 border border-slate-300/80 relative z-0 ' + hl('A')}>
         <div className="flex items-center justify-between pb-2 border-b border-slate-200">
           <h2 className="text-xs font-extrabold text-slate-800 uppercase tracking-wider">A (Assessment / Diagnosis)</h2>
           <span className="caption text-xs text-ink-muted">Utama otomatis teratas</span>
@@ -1043,7 +1050,7 @@ export default function Brainstorm() {
       </div>
 
       {/* KARTU 4: P (PLANNING KLINIS) */}
-      <div className="glass-card rounded-3xl p-5 shadow-sm space-y-6 animate-in fade-in slide-in-from-bottom-2 border border-slate-300/80">
+      <div className="glass-card rounded-3xl p-5 shadow-sm space-y-6 animate-in fade-in slide-in-from-bottom-2 border border-slate-300/80 relative z-0">
         <div className="pb-2 border-b border-slate-200">
           <h2 className="text-xs font-extrabold text-slate-800 uppercase tracking-wider">P (Planning Klinis)</h2>
         </div>

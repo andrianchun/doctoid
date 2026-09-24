@@ -263,20 +263,30 @@ export function extractDemografi(
   let title = ''
   let nama_depan = ''
 
-  // 1. Tangkap format nama dengan gelar: "*Tn. Farid/ 47 th/ BPJS 3*", "Tn. Farid, 47 th", "Nama: Tn. Farid"
-  const nameWithTitle = raw.match(/[*_~#]*[ \t]*\b(Tn|Ny|Sdr|Sdri|An|By)\.?[ \t]+([A-Za-z'.-]+(?:[ \t]+[A-Za-z'.-]+){0,3})/i)
+  // 1. Tangkap format nama dengan gelar: "*Tn. Farid/ 47 th/ BPJS 3*", "dr. Andi, 35 th", "Nama: Ny. Siti"
+  const nameWithTitle = raw.match(/[*_~#]*[ \t]*\b(dr|dok|dokter|Tn|Ny|Sdr|Sdri|An|By)\.?[ \t]+([A-Za-z'.-]+(?:[ \t]+[A-Za-z'.-]+){0,3})/i)
   if (nameWithTitle) {
-    const rawTitle = nameWithTitle[1].charAt(0).toUpperCase() + nameWithTitle[1].slice(1).toLowerCase()
-    title = rawTitle.endsWith('.') ? rawTitle : rawTitle + '.'
+    const rawMatch = nameWithTitle[1].toLowerCase()
+    if (rawMatch === 'dr' || rawMatch === 'dok' || rawMatch === 'dokter') {
+      title = 'dr.'
+    } else {
+      const cap = rawMatch.charAt(0).toUpperCase() + rawMatch.slice(1)
+      title = cap.endsWith('.') ? cap : cap + '.'
+    }
     nama_depan = nameWithTitle[2].replace(/[/,*_–—|]/g, '').trim()
   } else {
     const labelNama = raw.match(/(?:nama(?:\s*pasien)?|identitas|pasien)\s*[:-]\s*([A-Za-z][A-Za-z'.\s]{1,40}?)(?=\s*(?:,|\n|usia|umur|rm|\/|$))/i)
     if (labelNama) {
       nama_depan = labelNama[1].trim()
-      const checkTitle = nama_depan.match(/^(Tn|Ny|Sdr|Sdri|An|By)\.?\s+(.+)$/i)
+      const checkTitle = nama_depan.match(/^(dr|dok|dokter|Tn|Ny|Sdr|Sdri|An|By)\.?\s+(.+)$/i)
       if (checkTitle) {
-        const rawTitle = checkTitle[1].charAt(0).toUpperCase() + checkTitle[1].slice(1).toLowerCase()
-        title = rawTitle.endsWith('.') ? rawTitle : rawTitle + '.'
+        const rawMatch = checkTitle[1].toLowerCase()
+        if (rawMatch === 'dr' || rawMatch === 'dok' || rawMatch === 'dokter') {
+          title = 'dr.'
+        } else {
+          const cap = rawMatch.charAt(0).toUpperCase() + rawMatch.slice(1)
+          title = cap.endsWith('.') ? cap : cap + '.'
+        }
         nama_depan = checkTitle[2].trim()
       }
     } else {
