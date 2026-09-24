@@ -4,7 +4,7 @@ import { LayoutDashboard, Sparkles, FolderOpen, FileText } from 'lucide-react'
 
 const TABS = [
   { to: '/dasbor', label: 'Dasbor', Icon: LayoutDashboard },
-  { to: '/brainstorm', label: 'SOAP & AI', Icon: Sparkles },
+  { to: '/brainstorm', label: 'Catat Pasien', Icon: Sparkles },
   { to: '/rekammedis', label: 'Rekam Medis', Icon: FolderOpen },
   { to: '/template', label: 'Template', Icon: FileText },
 ]

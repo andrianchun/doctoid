@@ -60,7 +60,7 @@ run('npm run build:ota', {
 const deployHosting = () => {
   // Bersihkan cache unggahan Firebase agar manifest & ota zip terunggah segar (standar logym/lomeal/darka)
   fs.rmSync('.firebase', { recursive: true, force: true });
-  run('firebase deploy --only hosting,firestore:rules');
+  run('npx firebase deploy --only hosting,firestore:rules');
 };
 
 /**

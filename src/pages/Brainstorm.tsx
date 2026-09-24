@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState, useMemo } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import {
-  Plus, Camera, Image as ImageIcon, Mic, MicOff, Sparkles,
-  Trash2, Save, Loader2, X, FileText, ChevronDown, Send, Wand2,
-  UserCheck, History, RotateCcw, Search
+  Plus, Mic, MicOff,
+  Trash2, Loader2, X, FileText, ChevronDown, Send,
+  Search
 } from 'lucide-react'
 import { db, type Jaminan, type TerapiItem, type DiagnosisItem, type RegexField, type Patient, type RawatEpisode } from '../db'
 import Masked from '../components/Masked'
@@ -14,6 +14,12 @@ import { buatKonteks, catatTerapi, saranTerapi, type Suggestion } from '../style
 import { formatDate, hariKe } from '../utils/dateFormat'
 
 const today = () => new Date().toISOString().slice(0, 10)
+
+interface StagedAnalysis {
+  A: DiagnosisItem[]
+  P: TerapiItem[]
+  komentar: string
+}
 
 interface FormState {
   title: string
@@ -116,8 +122,7 @@ export default function Brainstorm() {
   const [dismissedPatientId, setDismissedPatientId] = useState<number | null>(null)
   const [showSearchModal, setShowSearchModal] = useState(false)
   const [patientSearchQ, setPatientSearchQ] = useState('')
-  const [showIcd10, setShowIcd10] = useState<Record<number, boolean>>({})
-  const [showIcd9, setShowIcd9] = useState<Record<number, boolean>>({})
+  const [stagedAnalysis, setStagedAnalysis] = useState<StagedAnalysis | null>(null)
 
   const [showFaskesMenu, setShowFaskesMenu] = useState(false)
   const [saranP, setSaranP] = useState<Suggestion[]>([])
@@ -271,7 +276,7 @@ export default function Brainstorm() {
         dataUrl,
         kategori,
       }])
-    } catch (err) {
+    } catch {
       notify('Gagal memproses file.')
     }
   }
@@ -290,8 +295,23 @@ export default function Brainstorm() {
     }
   }
 
+  const handleClearAll = async () => {
+    if (window.confirm('Kosongkan semua isian formulir?')) {
+      setForm(emptyForm())
+      setRaw('')
+      setAttachments([])
+      setKomentarAnalisis('')
+      setStagedAnalysis(null)
+      setSelectedPatient(null)
+      setDetectedPatient(null)
+      await db.brainstormDraft.delete(1)
+      notify('Formulir berhasil dikosongkan')
+    }
+  }
+
   const runAnalisis = async () => {
     setBusy('analisis')
+    setStagedAnalysis(null)
     setKomentarAnalisis('')
     try {
       const dataToAnalyze = JSON.stringify({
@@ -303,16 +323,17 @@ export default function Brainstorm() {
       }, null, 2)
       
       const r = await analisisKasus(dataToAnalyze)
-      set({ 
-        A: r.A, 
+      setStagedAnalysis({
+        A: r.A,
         P: r.P.map(p => ({
           ...p,
           tgl_mulai: today(),
-          tgl_stop: ''
-        }))
+          tgl_stop: null,
+          status: 'aktif' as const
+        })),
+        komentar: r.komentar || ''
       })
-      if (r.komentar) setKomentarAnalisis(r.komentar)
-      notify('Analisis selesai.')
+      notify('Analisis AI selesai. Silakan periksa usulan di bawah tombol Analisis.')
     } catch (e: any) {
       alert(e.message)
     } finally {
@@ -590,44 +611,47 @@ export default function Brainstorm() {
     <main className="space-y-5 p-5 pb-56">
 
       {/* Banner Utama — 1 Baris */}
-      <div className="glass-blue-hero rounded-3xl px-5 py-4 text-white shadow-xl">
-        <h1 className="h1 text-2xl font-black text-white">Brainstorm Klinis</h1>
+      <div className="glass-blue-hero rounded-3xl px-5 py-4 text-white shadow-xl flex items-center justify-between">
+        <h1 className="h1 text-2xl font-black text-white">Catat Pasien</h1>
+        <button
+          type="button"
+          onClick={handleClearAll}
+          className="rounded-xl bg-white/15 hover:bg-white/25 active:scale-95 px-3 py-1.5 text-xs font-bold text-white transition-all cursor-pointer border border-white/20"
+          title="Kosongkan seluruh isian formulir"
+        >
+          Clear All
+        </button>
       </div>
 
       {/* Banner Deteksi Pasien Lama Realtime */}
       {detectedPatient && !selectedPatient && (
         <div className="glass-card rounded-3xl border border-primary-soft/40 p-4 shadow-lg animate-in fade-in slide-in-from-top-2">
-          <div className="flex items-start gap-3">
-            <div className="rounded-2xl bg-primary/10 p-2.5 text-primary shrink-0 mt-0.5">
-              <History size={20} />
-            </div>
-            <div className="min-w-0 flex-1">
-              <p className="text-xs font-bold text-ink">Pasien Lama Terdeteksi di Rekam Medis</p>
-              <p className="caption text-ink-muted mt-0.5">
-                Ditemukan data <b>{detectedPatient.title} <Masked value={detectedPatient.nama_depan} type="name" /></b> (RM: <Masked value={detectedPatient.no_rm} type="rm" />)
-              </p>
-              <p className="caption text-ink-muted">
-                Terakhir dirawat: {formatDate(detectedPatient.tgl_mrs)} {detectedPatient.diagnosis_utama ? `· Dx: ${detectedPatient.diagnosis_utama}` : ''}
-              </p>
-              <div className="mt-2.5 flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => handleSelectExistingPatient(detectedPatient)}
-                  className="rounded-xl bg-gradient-to-br from-primary to-primary-deep px-3.5 py-1.5 text-xs font-bold text-white shadow-md shadow-primary/20 hover:brightness-110 active:scale-95 transition-all cursor-pointer"
-                >
-                  Jadikan Readmisi (Rawat Lagi)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setDismissedPatientId(detectedPatient.id!)
-                    setDetectedPatient(null)
-                  }}
-                  className="rounded-xl bg-surface px-3.5 py-1.5 text-xs font-semibold text-ink-muted hover:bg-surface/80 active:scale-95 transition-all cursor-pointer"
-                >
-                  Abaikan (Pasien Baru)
-                </button>
-              </div>
+          <div className="min-w-0 flex-1">
+            <p className="text-xs font-bold text-ink">Pasien Lama Terdeteksi di Rekam Medis</p>
+            <p className="caption text-ink-muted mt-0.5">
+              Ditemukan data <b>{detectedPatient.title} <Masked value={detectedPatient.nama_depan} type="name" /></b> (RM: <Masked value={detectedPatient.no_rm} type="rm" />)
+            </p>
+            <p className="caption text-ink-muted">
+              Terakhir dirawat: {formatDate(detectedPatient.tgl_mrs)} {detectedPatient.diagnosis_utama ? `· Dx: ${detectedPatient.diagnosis_utama}` : ''}
+            </p>
+            <div className="mt-2.5 flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => handleSelectExistingPatient(detectedPatient)}
+                className="rounded-xl bg-gradient-to-br from-primary to-primary-deep px-3.5 py-1.5 text-xs font-bold text-white shadow-md shadow-primary/20 hover:brightness-110 active:scale-95 transition-all cursor-pointer"
+              >
+                Jadikan Readmisi (Rawat Lagi)
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setDismissedPatientId(detectedPatient.id!)
+                  setDetectedPatient(null)
+                }}
+                className="rounded-xl bg-surface px-3.5 py-1.5 text-xs font-semibold text-ink-muted hover:bg-surface/80 active:scale-95 transition-all cursor-pointer"
+              >
+                Abaikan (Pasien Baru)
+              </button>
             </div>
           </div>
         </div>
@@ -638,8 +662,8 @@ export default function Brainstorm() {
         <div className="rounded-3xl border border-amber-300/40 bg-amber-500/20 backdrop-blur-sm p-4 text-white animate-in fade-in slide-in-from-top-1 shadow-sm">
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0 flex-1">
-              <p className="text-xs font-bold flex items-center gap-1.5 text-amber-200">
-                <RotateCcw size={14} className="shrink-0" /> Mode Readmisi (Rawat Inap Baru)
+              <p className="text-xs font-bold text-amber-200">
+                Mode Readmisi (Rawat Inap Baru)
               </p>
               <p className="mt-0.5 text-xs text-white/90 truncate">
                 Menyambung riwayat: <b>{selectedPatient.title} {selectedPatient.nama_depan}</b> · RM: <Masked value={selectedPatient.no_rm} type="rm" />
@@ -674,10 +698,9 @@ export default function Brainstorm() {
               setPatientSearchQ('')
               setShowSearchModal(true)
             }}
-            className="text-xs font-bold text-primary hover:underline cursor-pointer flex items-center gap-1"
+            className="text-xs font-bold text-primary hover:underline cursor-pointer"
           >
-            <UserCheck size={14} />
-            <span>Cari Pasien Lama</span>
+            Cari Pasien Lama
           </button>
         </div>
 
@@ -742,11 +765,11 @@ export default function Brainstorm() {
           </select>
         </div>
 
-        {/* Baris 3: Tanggal Onset & MRS */}
+        {/* Baris 3: Tgl Onset & Tgl MRS */}
         <div className="grid grid-cols-2 gap-2">
           <div>
             <div className="flex items-center justify-between mb-1">
-              <label className="block text-xs font-bold text-slate-700">Tanggal Onset</label>
+              <label className="block text-xs font-bold text-slate-700">Tgl Onset</label>
               {form.tgl_onset && (
                 <span className="caption text-xs font-extrabold text-amber-900 bg-amber-100 border border-amber-300/80 px-2 py-0.5 rounded-md shadow-2xs">
                   OH-{hariKe(form.tgl_onset)}
@@ -762,7 +785,7 @@ export default function Brainstorm() {
           </div>
           <div>
             <div className="flex items-center justify-between mb-1">
-              <label className="block text-xs font-bold text-slate-700">Tanggal MRS</label>
+              <label className="block text-xs font-bold text-slate-700">Tgl MRS</label>
               {form.tgl_mrs && (
                 <span className="caption text-xs font-extrabold text-emerald-900 bg-emerald-100 border border-emerald-300/80 px-2 py-0.5 rounded-md shadow-2xs">
                   P-{hariKe(form.tgl_mrs)}
@@ -845,43 +868,44 @@ export default function Brainstorm() {
         </div>
       </div>
 
-      {/* KARTU 2: SUBJEKTIF & OBJEKTIF (S & O) */}
+      {/* S (SUBJEKTIF) */}
+      <div className="glass-card rounded-3xl p-5 shadow-sm space-y-3 animate-in fade-in slide-in-from-bottom-2 border border-slate-300/80 relative z-0">
+        <div className="pb-2 border-b border-slate-200">
+          <h2 className="text-xs font-extrabold text-slate-800 uppercase tracking-wider">
+            S (Subjektif)
+          </h2>
+        </div>
+        <ResizableTextarea
+          textareaRef={sRef}
+          value={form.S}
+          onChange={(e) => set({ S: e.target.value })}
+          placeholder="Keluhan utama, RPS, RPD, RPO, RPK/Sosial, Alergi..."
+          rows={5}
+          className={textareaCls}
+          highlightClass={hl('S')}
+        />
+      </div>
+
+      {/* O (OBJEKTIF) */}
       <div className="glass-card rounded-3xl p-5 shadow-sm space-y-5 animate-in fade-in slide-in-from-bottom-2 border border-slate-300/80 relative z-0">
         <div className="pb-2 border-b border-slate-200">
           <h2 className="text-xs font-extrabold text-slate-800 uppercase tracking-wider">
-            Subjektif & Objektif (S & O)
+            O (Objektif)
           </h2>
         </div>
 
-        {/* S (Subjektif) */}
-        <div className="space-y-1.5">
-          <label className="block text-xs font-bold text-slate-700">
-            S (Subjektif) — Anamnesis
-          </label>
-          <ResizableTextarea
-            textareaRef={sRef}
-            value={form.S}
-            onChange={(e) => set({ S: e.target.value })}
-            placeholder="Keluhan utama, RPS, RPD, RPO, RPK/Sosial, Alergi..."
-            rows={5}
-            className={textareaCls}
-            highlightClass={hl('S')}
-          />
-        </div>
-
-        {/* O (Objektif) — Pemeriksaan Fisik */}
-        <div className="space-y-2 pt-3 border-t border-slate-200">
+        {/* Sub 1: Pemeriksaan Fisik */}
+        <div className="space-y-2">
           <div className="flex items-center justify-between">
             <label className="text-xs font-bold text-slate-700">
-              O (Objektif) — Pemeriksaan Fisik
+              Pemeriksaan Fisik
             </label>
             <button
               type="button"
               onClick={() => pemfisAttachRef.current?.click()}
-              className="text-xs font-bold text-primary hover:underline cursor-pointer flex items-center gap-1"
+              className="text-xs font-bold text-primary hover:underline cursor-pointer"
             >
-              <Camera size={14} />
-              <span>+ Lampiran Foto/Video</span>
+              + Lampiran Foto/Video
             </button>
           </div>
           <ResizableTextarea
@@ -913,19 +937,18 @@ export default function Brainstorm() {
           )}
         </div>
 
-        {/* O (Objektif) — Pemeriksaan Penunjang */}
+        {/* Sub 2: Penunjang */}
         <div className="space-y-2 pt-3 border-t border-slate-200">
           <div className="flex items-center justify-between">
             <label className="text-xs font-bold text-slate-700">
-              O (Objektif) — Pemeriksaan Penunjang
+              Penunjang
             </label>
             <button
               type="button"
               onClick={() => penunjangAttachRef.current?.click()}
-              className="text-xs font-bold text-primary hover:underline cursor-pointer flex items-center gap-1"
+              className="text-xs font-bold text-primary hover:underline cursor-pointer"
             >
-              <ImageIcon size={14} />
-              <span>+ Lampiran CT/Lab/EKG</span>
+              + Lampiran CT/Lab/EKG
             </button>
           </div>
           <ResizableTextarea
@@ -958,420 +981,262 @@ export default function Brainstorm() {
         </div>
       </div>
 
-      {/* KARTU 3: A (ASSESSMENT / DIAGNOSIS) */}
+      {/* KARTU 3: A (ASSESSMENT) */}
       <div className={'glass-card rounded-3xl p-5 shadow-sm space-y-4 animate-in fade-in slide-in-from-bottom-2 border border-slate-300/80 relative z-0 ' + hl('A')}>
-        <div className="flex items-center justify-between pb-2 border-b border-slate-200">
-          <h2 className="text-xs font-extrabold text-slate-800 uppercase tracking-wider">A (Assessment / Diagnosis)</h2>
-          <span className="caption text-xs text-ink-muted">Utama otomatis teratas</span>
+        <div className="pb-2 border-b border-slate-200">
+          <h2 className="text-xs font-extrabold text-slate-800 uppercase tracking-wider">A (Assessment)</h2>
         </div>
-        <div className="space-y-2">
-          {form.A.map((dx, i) => (
-            <div key={i} className="flex gap-2 items-center">
-              <select 
-                value={dx.kategori} 
-                onChange={(e) => {
-                  const newCat = e.target.value as 'Utama' | 'Sekunder'
-                  let newA = form.A.map((item, idx) => {
-                    if (newCat === 'Utama') {
-                      return idx === i ? { ...item, kategori: 'Utama' as const } : { ...item, kategori: 'Sekunder' as const }
-                    }
-                    return idx === i ? { ...item, kategori: newCat } : item
-                  })
-                  newA.sort((a, b) => (a.kategori === 'Utama' ? -1 : b.kategori === 'Utama' ? 1 : 0))
-                  set({ A: newA })
-                }} 
-                className={`rounded-xl px-3 py-2.5 outline-none font-bold text-xs cursor-pointer transition-colors shrink-0 shadow-2xs ${
-                  dx.kategori === 'Utama' ? 'bg-primary text-white border border-primary' : 'bg-slate-100 text-slate-800 hover:bg-slate-200 border border-slate-300'
-                }`}
-              >
-                <option value="Utama">Utama</option>
-                <option value="Sekunder">Sekunder</option>
-              </select>
 
-              <input
-                value={dx.nama_diagnosis}
-                onChange={(e) => {
-                  const newA = [...form.A]
-                  newA[i].nama_diagnosis = e.target.value
-                  set({ A: newA })
-                }}
-                placeholder="Nama Diagnosis..."
-                className="flex-1 min-w-0 rounded-xl bg-slate-100/90 border border-slate-300 px-3.5 py-2.5 outline-none font-bold text-slate-900 text-xs placeholder:text-slate-400 placeholder:font-normal focus:bg-white focus:border-primary focus:ring-2 focus:ring-primary/10 shadow-2xs transition-all"
-              />
+        {/* Subjudul 1: Diagnosis Utama (1 item) */}
+        <div className="space-y-1.5">
+          <label className="block text-xs font-extrabold text-primary uppercase tracking-wider">
+            Diagnosis Utama
+          </label>
+          <input
+            value={form.A[0]?.nama_diagnosis || ''}
+            onChange={(e) => {
+              const newA = [...form.A]
+              if (newA.length === 0) {
+                newA.push({ kategori: 'Utama', nama_diagnosis: e.target.value, icd10: '' })
+              } else {
+                newA[0] = { ...newA[0], kategori: 'Utama', nama_diagnosis: e.target.value }
+              }
+              set({ A: newA })
+            }}
+            placeholder="Diagnosis utama pasien..."
+            className="w-full rounded-xl bg-slate-100/90 border border-slate-300 px-3.5 py-2.5 outline-none font-bold text-slate-900 text-xs placeholder:text-slate-400 placeholder:font-normal focus:bg-white focus:border-primary focus:ring-2 focus:ring-primary/10 shadow-2xs transition-all"
+          />
+        </div>
 
-              {/* ICD-10 On-Demand: Tampil jika sudah terisi atau saat tombol [+ ICD] diklik */}
-              {showIcd10[i] || dx.icd10 ? (
-                <div className="relative shrink-0 flex items-center">
-                  <input 
-                    value={dx.icd10} 
-                    onChange={(e) => {
-                      const newA = [...form.A]
-                      newA[i].icd10 = e.target.value
-                      set({ A: newA })
-                    }} 
-                    placeholder="ICD-10" 
-                    className="w-20 rounded-xl bg-slate-100/90 border border-slate-300 px-2 py-2.5 outline-none text-center uppercase font-mono text-xs font-bold text-slate-900 placeholder:text-slate-400 focus:bg-white focus:border-primary focus:ring-2 focus:ring-primary/10 shadow-2xs transition-all" 
-                  />
-                </div>
-              ) : (
+        {/* Subjudul 2: Diagnosis Sekunder */}
+        <div className="space-y-2 pt-2 border-t border-slate-100">
+          <label className="block text-xs font-extrabold text-slate-600 uppercase tracking-wider">
+            Diagnosis Sekunder
+          </label>
+
+          {form.A.slice(1).map((dx, idx) => {
+            const actualIndex = idx + 1
+            return (
+              <div key={actualIndex} className="flex gap-2 items-center">
+                <input
+                  value={dx.nama_diagnosis}
+                  onChange={(e) => {
+                    const newA = [...form.A]
+                    newA[actualIndex] = { ...newA[actualIndex], nama_diagnosis: e.target.value }
+                    set({ A: newA })
+                  }}
+                  placeholder={`Diagnosis sekunder ${actualIndex}...`}
+                  className="flex-1 min-w-0 rounded-xl bg-slate-100/90 border border-slate-300 px-3.5 py-2.5 outline-none font-semibold text-slate-900 text-xs placeholder:text-slate-400 placeholder:font-normal focus:bg-white focus:border-primary focus:ring-2 focus:ring-primary/10 shadow-2xs transition-all"
+                />
                 <button
                   type="button"
-                  onClick={() => setShowIcd10((prev) => ({ ...prev, [i]: true }))}
-                  className="px-2.5 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 hover:text-primary font-bold text-xs border border-slate-300 shrink-0 transition-colors cursor-pointer"
-                  title="Tambah Kode ICD-10 (Opsional)"
-                >
-                  + ICD
-                </button>
-              )}
-
-              {form.A.length > 1 && (
-                <button
-                  aria-label="Hapus diagnosis"
+                  aria-label="Hapus diagnosis sekunder"
                   className="p-1.5 cursor-pointer text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-xl shrink-0 transition-colors"
                   onClick={() => {
-                    const newA = form.A.filter((_, j) => j !== i)
-                    if (!newA.some(d => d.kategori === 'Utama') && newA.length > 0) {
-                      newA[0].kategori = 'Utama'
-                    }
+                    const newA = form.A.filter((_, j) => j !== actualIndex)
                     set({ A: newA })
                   }}
                 >
                   <Trash2 size={16} />
                 </button>
-              )}
-            </div>
-          ))}
+              </div>
+            )
+          })}
 
           <button
             type="button"
-            onClick={() => set({ A: [...form.A, { kategori: 'Sekunder', nama_diagnosis: '', icd10: '' }] })}
-            className="text-xs font-bold text-primary hover:underline px-1 pt-1 cursor-pointer inline-flex items-center gap-1"
+            onClick={() => {
+              const newA = form.A.length === 0
+                ? [{ kategori: 'Utama' as const, nama_diagnosis: '', icd10: '' }, { kategori: 'Sekunder' as const, nama_diagnosis: '', icd10: '' }]
+                : [...form.A, { kategori: 'Sekunder' as const, nama_diagnosis: '', icd10: '' }]
+              set({ A: newA })
+            }}
+            className="text-xs font-bold text-primary hover:underline px-1 pt-1 cursor-pointer inline-flex items-center"
           >
-            <Plus size={14} /> Tambah Diagnosis Sekunder
+            + Tambah Diagnosis Sekunder
           </button>
         </div>
       </div>
 
-      {/* KARTU 4: P (PLANNING KLINIS) */}
-      <div className="glass-card rounded-3xl p-5 shadow-sm space-y-6 animate-in fade-in slide-in-from-bottom-2 border border-slate-300/80 relative z-0">
+      {/* KARTU 4: PLANNING DIAGNOSTIK */}
+      <div className="glass-card rounded-3xl p-5 shadow-sm space-y-3 animate-in fade-in slide-in-from-bottom-2 border border-slate-300/80 relative z-0">
         <div className="pb-2 border-b border-slate-200">
-          <h2 className="text-xs font-extrabold text-slate-800 uppercase tracking-wider">P (Planning Klinis)</h2>
+          <h2 className="text-xs font-extrabold text-slate-800 uppercase tracking-wider">Planning Diagnostik</h2>
         </div>
 
-        {/* 1. PDX */}
-        <div className="space-y-2.5">
-          <p className="text-xs font-extrabold text-slate-700 uppercase tracking-wider">
-            1. Plan Diagnostic (PDX)
-          </p>
+        <div className="space-y-2">
+          {form.P.filter(it => it.kategori === 'Diagnostik').map((it) => {
+            const originalIndex = form.P.indexOf(it)
+            return (
+              <div key={originalIndex} className="flex items-center gap-2">
+                <input
+                  value={it.nama_item}
+                  onChange={(e) => {
+                    const newP = [...form.P]
+                    newP[originalIndex] = { ...newP[originalIndex], nama_item: e.target.value }
+                    set({ P: newP })
+                  }}
+                  placeholder="Nama Prosedur / Lab"
+                  className="flex-1 min-w-0 rounded-xl bg-slate-100/90 border border-slate-300 px-3.5 py-2.5 outline-none font-bold text-slate-900 text-xs placeholder:text-slate-400 placeholder:font-normal focus:bg-white focus:border-primary focus:ring-2 focus:ring-primary/10 shadow-2xs transition-all"
+                />
 
-          <div className="space-y-2">
-            {form.P.filter(it => it.kategori === 'Diagnostik').map((it) => {
-              const originalIndex = form.P.indexOf(it)
-              return (
-                <div key={originalIndex} className="flex items-center gap-2">
-                  <input
-                    value={it.nama_item}
-                    onChange={(e) => {
-                      const newP = [...form.P]
-                      newP[originalIndex] = { ...newP[originalIndex], nama_item: e.target.value }
-                      set({ P: newP })
-                    }}
-                    placeholder="Nama Prosedur / Lab"
-                    className="flex-1 min-w-0 rounded-xl bg-slate-100/90 border border-slate-300 px-3.5 py-2.5 outline-none font-bold text-slate-900 text-xs placeholder:text-slate-400 placeholder:font-normal focus:bg-white focus:border-primary focus:ring-2 focus:ring-primary/10 shadow-2xs transition-all"
-                  />
+                <input
+                  value={it.dosis_keterangan}
+                  onChange={(e) => {
+                    const newP = [...form.P]
+                    newP[originalIndex] = { ...newP[originalIndex], dosis_keterangan: e.target.value }
+                    set({ P: newP })
+                  }}
+                  placeholder="Keterangan"
+                  className="w-28 sm:w-36 rounded-xl bg-slate-100/90 border border-slate-300 px-3 py-2.5 outline-none text-xs text-slate-800 font-semibold placeholder:text-slate-400 placeholder:font-normal focus:bg-white focus:border-primary shadow-2xs transition-all"
+                />
 
-                  <input
-                    value={it.dosis_keterangan}
-                    onChange={(e) => {
-                      const newP = [...form.P]
-                      newP[originalIndex] = { ...newP[originalIndex], dosis_keterangan: e.target.value }
-                      set({ P: newP })
-                    }}
-                    placeholder="Keterangan"
-                    className="w-28 rounded-xl bg-slate-100/90 border border-slate-300 px-3 py-2.5 outline-none text-xs text-slate-800 font-semibold placeholder:text-slate-400 placeholder:font-normal focus:bg-white focus:border-primary shadow-2xs transition-all"
-                  />
-
-                  {/* ICD-9 On-Demand: Tampil jika sudah terisi atau saat tombol [+ ICD] diklik */}
-                  {showIcd9[originalIndex] || it.icd9 ? (
-                    <input
-                      value={it.icd9 ?? ''}
-                      onChange={(e) => {
-                        const newP = [...form.P]
-                        newP[originalIndex] = { ...newP[originalIndex], icd9: e.target.value }
-                        set({ P: newP })
-                      }}
-                      placeholder="ICD-9"
-                      className="w-20 rounded-xl bg-slate-100/90 border border-slate-300 px-2 py-2.5 outline-none text-center font-mono text-xs uppercase font-bold text-slate-900 shrink-0 placeholder:text-slate-400 focus:bg-white focus:border-primary shadow-2xs transition-all"
-                    />
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => setShowIcd9((prev) => ({ ...prev, [originalIndex]: true }))}
-                      className="px-2.5 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 hover:text-primary font-bold text-xs border border-slate-300 shrink-0 transition-colors cursor-pointer"
-                      title="Tambah Kode ICD-9 (Opsional)"
-                    >
-                      + ICD
-                    </button>
-                  )}
-
-                  <button
-                    className="text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-xl cursor-pointer p-1.5 shrink-0 transition-colors"
-                    onClick={() => set({ P: form.P.filter((_, j) => j !== originalIndex) })}
-                  >
-                    <Trash2 size={16} />
-                  </button>
-                </div>
-              )
-            })}
-          </div>
-
-          <input
-            placeholder="+ Tambahkan PDx (mis. CT Scan Kepala Non Kontras, EKG, DL)"
-            className={inputCls}
-            onKeyDown={(e) => {
-              const v = (e.target as HTMLInputElement).value.trim()
-              if (e.key === 'Enter' && v) {
-                const icdMatch = v.match(/\b(\d{2}\.\d{1,2})\b$/)
-                const icd9 = icdMatch ? icdMatch[1] : undefined
-                const cleanName = icdMatch ? v.replace(icdMatch[0], '').trim() : v
-                set({ P: [...form.P, { ...lineToTerapi(cleanName, today()), kategori: 'Diagnostik', icd9 }] })
-                ;(e.target as HTMLInputElement).value = ''
-              }
-            }}
-          />
-        </div>
-
-        {/* 2. PTX */}
-        <div className={'border-t border-slate-200 pt-4 space-y-2.5 ' + hl('P')}>
-          <p className="text-xs font-extrabold text-slate-700 uppercase tracking-wider">
-            2. Plan Terapi (PTX) — Farmakologi & Non-Farmako
-          </p>
-
-          <div className="space-y-2">
-            {form.P
-              .filter(it => it.kategori === 'Farmakologi' || it.kategori === 'Non-Farmakologi')
-              .map((it) => {
-                const originalIndex = form.P.indexOf(it)
-                return (
-                  <div key={originalIndex} className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const newP = [...form.P]
-                        newP[originalIndex].kategori = it.kategori === 'Farmakologi' ? 'Non-Farmakologi' : 'Farmakologi'
-                        set({ P: newP })
-                      }}
-                      className={`rounded-xl px-2.5 py-2.5 caption font-bold transition-colors cursor-pointer shrink-0 shadow-2xs ${
-                        it.kategori === 'Farmakologi'
-                          ? 'bg-primary text-white'
-                          : 'bg-emerald-600 text-white'
-                      }`}
-                      title="Klik untuk ubah Farmako / Non-Farmako"
-                    >
-                      {it.kategori === 'Farmakologi' ? 'Farmako' : 'Non-Farmako'}
-                    </button>
-
-                    <input
-                      value={it.nama_item}
-                      onChange={(e) => {
-                        const newP = [...form.P]
-                        newP[originalIndex] = { ...newP[originalIndex], nama_item: e.target.value }
-                        set({ P: newP })
-                      }}
-                      placeholder="Nama Obat / Terapi"
-                      className="flex-1 min-w-0 rounded-xl bg-slate-100/90 border border-slate-300 px-3.5 py-2.5 outline-none font-bold text-slate-900 text-xs placeholder:text-slate-400 placeholder:font-normal focus:bg-white focus:border-primary focus:ring-2 focus:ring-primary/10 shadow-2xs transition-all"
-                    />
-
-                    <input
-                      value={it.dosis_keterangan}
-                      onChange={(e) => {
-                        const newP = [...form.P]
-                        newP[originalIndex] = { ...newP[originalIndex], dosis_keterangan: e.target.value }
-                        set({ P: newP })
-                      }}
-                      placeholder="Dosis & Rute (mis. 1x80mg PO)"
-                      className="w-36 rounded-xl bg-slate-100/90 border border-slate-300 px-3 py-2.5 outline-none text-xs text-slate-800 font-semibold placeholder:text-slate-400 placeholder:font-normal focus:bg-white focus:border-primary shadow-2xs transition-all"
-                    />
-
-                    <button
-                      className="text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-xl cursor-pointer p-1.5 shrink-0 transition-colors"
-                      onClick={() => set({ P: form.P.filter((_, j) => j !== originalIndex) })}
-                    >
-                      <Trash2 size={16} />
-                    </button>
-                  </div>
-                )
-              })}
-          </div>
-
-          {saranP.length > 0 && (
-            <div className="flex flex-wrap gap-1.5 pt-1">
-              {saranP.map((s) => (
                 <button
-                  key={s.nama_item}
-                  onClick={() => tambahSaran(s)}
-                  className="flex cursor-pointer items-center gap-1 rounded-full bg-primary-soft/20 px-2.5 py-1 caption font-bold text-primary hover:bg-primary-soft/30 transition-all"
-                  title={`Sering ditambahkan pada kasus serupa (${s.dosis_keterangan || 'lihat riwayat'})`}
+                  type="button"
+                  aria-label="Hapus planning diagnostik"
+                  className="text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-xl cursor-pointer p-1.5 shrink-0 transition-colors"
+                  onClick={() => set({ P: form.P.filter((_, j) => j !== originalIndex) })}
                 >
-                  <Wand2 size={11} /> + {s.nama_item}
+                  <Trash2 size={16} />
                 </button>
-              ))}
-            </div>
-          )}
-
-          <input
-            placeholder="+ Tambahkan Terapi (mis. Citicoline 2x500mg IV, Head up 30°)"
-            className={inputCls}
-            onKeyDown={(e) => {
-              const v = (e.target as HTMLInputElement).value.trim()
-              if (e.key === 'Enter' && v) {
-                const isNonFarmako = /head\s*up|posisi|tirah\s*baring|diet|o2|oksigen|fisioterapi|mobilisasi|edukasi/i.test(v)
-                set({
-                  P: [
-                    ...form.P,
-                    {
-                      ...lineToTerapi(v, today()),
-                      kategori: isNonFarmako ? 'Non-Farmakologi' : 'Farmakologi',
-                    },
-                  ],
-                })
-                ;(e.target as HTMLInputElement).value = ''
-              }
-            }}
-          />
+              </div>
+            )
+          })}
         </div>
 
-        {/* 3. PMX */}
-        <div className="border-t border-slate-200 pt-4 space-y-2.5">
-          <p className="text-xs font-extrabold text-slate-700 uppercase tracking-wider">
-            3. Plan Monitoring (PMX)
-          </p>
-
-          <div className="space-y-2">
-            {form.P.filter(it => it.kategori === 'Monitoring').map((it) => {
-              const originalIndex = form.P.indexOf(it)
-              return (
-                <div key={originalIndex} className="flex items-center gap-2">
-                  <input
-                    value={it.nama_item}
-                    onChange={(e) => {
-                      const newP = [...form.P]
-                      newP[originalIndex] = { ...newP[originalIndex], nama_item: e.target.value }
-                      set({ P: newP })
-                    }}
-                    placeholder="Item Monitoring"
-                    className="flex-1 min-w-0 rounded-xl bg-slate-100/90 border border-slate-300 px-3.5 py-2.5 outline-none font-bold text-slate-900 text-xs placeholder:text-slate-400 placeholder:font-normal focus:bg-white focus:border-primary focus:ring-2 focus:ring-primary/10 shadow-2xs transition-all"
-                  />
-
-                  <input
-                    value={it.dosis_keterangan}
-                    onChange={(e) => {
-                      const newP = [...form.P]
-                      newP[originalIndex] = { ...newP[originalIndex], dosis_keterangan: e.target.value }
-                      set({ P: newP })
-                    }}
-                    placeholder="Target / Frekuensi"
-                    className="w-36 rounded-xl bg-slate-100/90 border border-slate-300 px-3 py-2.5 outline-none text-xs text-slate-800 font-semibold placeholder:text-slate-400 focus:bg-white focus:border-primary shadow-2xs transition-all"
-                  />
-
-                  <button
-                    className="text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-xl cursor-pointer p-1.5 shrink-0 transition-colors"
-                    onClick={() => set({ P: form.P.filter((_, j) => j !== originalIndex) })}
-                  >
-                    <Trash2 size={16} />
-                  </button>
-                </div>
-              )
-            })}
-          </div>
-
-          <input
-            placeholder="+ Tambahkan PMx (mis. Observasi TTV dan GCS tiap 1 jam, Balans cairan)"
-            className={inputCls}
-            onKeyDown={(e) => {
-              const v = (e.target as HTMLInputElement).value.trim()
-              if (e.key === 'Enter' && v) {
-                set({ P: [...form.P, { ...lineToTerapi(v, today()), kategori: 'Monitoring' }] })
-                ;(e.target as HTMLInputElement).value = ''
-              }
-            }}
-          />
-        </div>
-
-        {/* 4. PEX */}
-        <div className="border-t border-slate-200 pt-4 space-y-2.5">
-          <p className="text-xs font-extrabold text-slate-700 uppercase tracking-wider">
-            4. Plan Edukasi (PEX)
-          </p>
-
-          <div className="space-y-2">
-            {form.P.filter(it => it.kategori === 'Edukasi').map((it) => {
-              const originalIndex = form.P.indexOf(it)
-              return (
-                <div key={originalIndex} className="flex items-center gap-2">
-                  <input
-                    value={it.nama_item}
-                    onChange={(e) => {
-                      const newP = [...form.P]
-                      newP[originalIndex] = { ...newP[originalIndex], nama_item: e.target.value }
-                      set({ P: newP })
-                    }}
-                    placeholder="Materi Edukasi Pasien / Keluarga"
-                    className="flex-1 min-w-0 rounded-xl bg-slate-100/90 border border-slate-300 px-3.5 py-2.5 outline-none font-bold text-slate-900 text-xs placeholder:text-slate-400 placeholder:font-normal focus:bg-white focus:border-primary focus:ring-2 focus:ring-primary/10 shadow-2xs transition-all"
-                  />
-
-                  <input
-                    value={it.dosis_keterangan}
-                    onChange={(e) => {
-                      const newP = [...form.P]
-                      newP[originalIndex] = { ...newP[originalIndex], dosis_keterangan: e.target.value }
-                      set({ P: newP })
-                    }}
-                    placeholder="Sasaran"
-                    className="w-32 rounded-xl bg-slate-100/90 border border-slate-300 px-3 py-2.5 outline-none text-xs text-slate-800 font-semibold placeholder:text-slate-400 focus:bg-white focus:border-primary shadow-2xs transition-all"
-                  />
-
-                  <button
-                    className="text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-xl cursor-pointer p-1.5 shrink-0 transition-colors"
-                    onClick={() => set({ P: form.P.filter((_, j) => j !== originalIndex) })}
-                  >
-                    <Trash2 size={16} />
-                  </button>
-                </div>
-              )
-            })}
-          </div>
-
-          <input
-            placeholder="+ Tambahkan PEx (mis. Edukasi faktor risiko stroke & kepatuhan obat)"
-            className={inputCls}
-            onKeyDown={(e) => {
-              const v = (e.target as HTMLInputElement).value.trim()
-              if (e.key === 'Enter' && v) {
-                set({ P: [...form.P, { ...lineToTerapi(v, today()), kategori: 'Edukasi' }] })
-                ;(e.target as HTMLInputElement).value = ''
-              }
-            }}
-          />
-        </div>
+        <input
+          placeholder="+ Tambahkan PDx (mis. CT Scan Kepala Non Kontras, EKG, DL)"
+          className={inputCls}
+          onKeyDown={(e) => {
+            const v = (e.target as HTMLInputElement).value.trim()
+            if (e.key === 'Enter' && v) {
+              set({ P: [...form.P, { ...lineToTerapi(v, today()), kategori: 'Diagnostik' }] })
+              ;(e.target as HTMLInputElement).value = ''
+            }
+          }}
+        />
       </div>
 
-      {komentarAnalisis && (
+      {/* KARTU 5: PLANNING TERAPI */}
+      <div className={'glass-card rounded-3xl p-5 shadow-sm space-y-3 animate-in fade-in slide-in-from-bottom-2 border border-slate-300/80 relative z-0 ' + hl('P')}>
+        <div className="pb-2 border-b border-slate-200">
+          <h2 className="text-xs font-extrabold text-slate-800 uppercase tracking-wider">Planning Terapi</h2>
+        </div>
+
+        <div className="space-y-2">
+          {form.P
+            .filter(it => it.kategori !== 'Diagnostik')
+            .map((it) => {
+              const originalIndex = form.P.indexOf(it)
+              return (
+                <div key={originalIndex} className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const newP = [...form.P]
+                      newP[originalIndex].kategori = it.kategori === 'Farmakologi' ? 'Non-Farmakologi' : 'Farmakologi'
+                      set({ P: newP })
+                    }}
+                    className={`rounded-xl px-2.5 py-2.5 caption font-bold transition-colors cursor-pointer shrink-0 shadow-2xs ${
+                      it.kategori === 'Farmakologi'
+                        ? 'bg-primary text-white'
+                        : 'bg-emerald-600 text-white'
+                    }`}
+                    title="Klik untuk ubah Farmako / Non-Farmako"
+                  >
+                    {it.kategori === 'Farmakologi' ? 'Farmako' : 'Non-Farmako'}
+                  </button>
+
+                  <input
+                    value={it.nama_item}
+                    onChange={(e) => {
+                      const newP = [...form.P]
+                      newP[originalIndex] = { ...newP[originalIndex], nama_item: e.target.value }
+                      set({ P: newP })
+                    }}
+                    placeholder="Nama Obat / Terapi"
+                    className="flex-1 min-w-0 rounded-xl bg-slate-100/90 border border-slate-300 px-3.5 py-2.5 outline-none font-bold text-slate-900 text-xs placeholder:text-slate-400 placeholder:font-normal focus:bg-white focus:border-primary focus:ring-2 focus:ring-primary/10 shadow-2xs transition-all"
+                  />
+
+                  <input
+                    value={it.dosis_keterangan}
+                    onChange={(e) => {
+                      const newP = [...form.P]
+                      newP[originalIndex] = { ...newP[originalIndex], dosis_keterangan: e.target.value }
+                      set({ P: newP })
+                    }}
+                    placeholder="Dosis & Rute (mis. 1x80mg PO)"
+                    className="w-32 sm:w-36 rounded-xl bg-slate-100/90 border border-slate-300 px-3 py-2.5 outline-none text-xs text-slate-800 font-semibold placeholder:text-slate-400 placeholder:font-normal focus:bg-white focus:border-primary shadow-2xs transition-all"
+                  />
+
+                  <button
+                    type="button"
+                    aria-label="Hapus planning terapi"
+                    className="text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-xl cursor-pointer p-1.5 shrink-0 transition-colors"
+                    onClick={() => set({ P: form.P.filter((_, j) => j !== originalIndex) })}
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                </div>
+              )
+            })}
+        </div>
+
+        {saranP.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 pt-1">
+            {saranP.map((s) => (
+              <button
+                key={s.nama_item}
+                type="button"
+                onClick={() => tambahSaran(s)}
+                className="cursor-pointer rounded-full bg-primary-soft/20 px-2.5 py-1 caption font-bold text-primary hover:bg-primary-soft/30 transition-all"
+                title={`Sering ditambahkan pada kasus serupa (${s.dosis_keterangan || 'lihat riwayat'})`}
+              >
+                + {s.nama_item}
+              </button>
+            ))}
+          </div>
+        )}
+
+        <input
+          placeholder="+ Tambahkan Terapi (mis. Citicoline 2x500mg IV, Head up 30°)"
+          className={inputCls}
+          onKeyDown={(e) => {
+            const v = (e.target as HTMLInputElement).value.trim()
+            if (e.key === 'Enter' && v) {
+              const isNonFarmako = /head\s*up|posisi|tirah\s*baring|diet|o2|oksigen|fisioterapi|mobilisasi|edukasi/i.test(v)
+              set({
+                P: [
+                  ...form.P,
+                  {
+                    ...lineToTerapi(v, today()),
+                    kategori: isNonFarmako ? 'Non-Farmakologi' : 'Farmakologi',
+                  },
+                ],
+              })
+              ;(e.target as HTMLInputElement).value = ''
+            }
+          }}
+        />
+      </div>
+
+      {komentarAnalisis && !stagedAnalysis && (
         <div className="rounded-2xl bg-blue-50/80 p-3.5 border border-blue-100">
-          <div className="flex items-center gap-1.5 mb-1 text-blue-700 font-bold text-xs">
-            <Sparkles size={14} /> Analisis AI
+          <div className="mb-1 text-blue-700 font-bold text-xs">
+            Analisis AI
           </div>
           <p className="text-xs text-blue-900 leading-relaxed">{komentarAnalisis}</p>
         </div>
       )}
 
+      {/* Tombol Aksi Form */}
       <div className="flex gap-2 w-full pt-2">
         <button
           onClick={handleAnalisisClick}
           disabled={busy === 'analisis'}
           className={`flex-1 flex cursor-pointer items-center justify-center gap-1.5 rounded-2xl bg-blue-100 px-4 py-3 text-xs font-bold text-blue-700 transition-all hover:bg-blue-200 active:scale-95 disabled:active:scale-100 ${busy === 'analisis' || (!form.S.trim() && !form.O_pemfis.trim()) ? 'opacity-50' : ''}`}
         >
-          {busy === 'analisis' ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
+          {busy === 'analisis' && <Loader2 size={16} className="animate-spin" />}
           <span>Analisis</span>
         </button>
         <button
@@ -1379,9 +1244,185 @@ export default function Brainstorm() {
           disabled={busy === 'analisis'}
           className={`flex-[2] flex cursor-pointer items-center justify-center gap-1.5 rounded-2xl bg-gradient-to-br from-primary to-primary-deep px-5 py-3 text-xs font-bold text-white shadow-md shadow-primary/30 transition-all hover:brightness-110 active:scale-95 disabled:active:scale-100 ${busy === 'analisis' || !form.nama_depan.trim() ? 'opacity-50' : ''}`}
         >
-          <Save size={16} /> <span>Simpan Pasien</span>
+          <span>Simpan Pasien</span>
         </button>
       </div>
+
+      {/* Review Usulan Analisis AI (Staging) */}
+      {stagedAnalysis && (
+        <div className="glass-card rounded-3xl p-5 shadow-md space-y-4 border-2 border-blue-300 bg-blue-50/30 animate-in fade-in slide-in-from-bottom-2">
+          <div className="pb-2 border-b border-blue-200">
+            <h3 className="text-xs font-extrabold text-blue-900 uppercase tracking-wider">
+              Usulan Analisis AI (Periksa & Edit Sebelum ACC)
+            </h3>
+            <p className="caption text-blue-700 mt-0.5">
+              Koreksi atau sesuaikan usulan diagnosis dan terapi di bawah ini sebelum diterapkan ke formulir.
+            </p>
+          </div>
+
+          {/* Komentar Analisis */}
+          {stagedAnalysis.komentar && (
+            <div className="rounded-2xl bg-blue-100/70 p-3.5 border border-blue-200 text-xs text-blue-950 leading-relaxed font-medium">
+              {stagedAnalysis.komentar}
+            </div>
+          )}
+
+          {/* Staged Diagnoses */}
+          <div className="space-y-2">
+            <label className="block text-xs font-extrabold text-slate-700 uppercase tracking-wider">
+              Usulan Diagnosis
+            </label>
+            {stagedAnalysis.A.map((dx, idx) => (
+              <div key={idx} className="flex gap-2 items-center">
+                <span className="text-xs font-bold text-slate-500 w-5 text-right shrink-0">{idx + 1}.</span>
+                <input
+                  value={dx.nama_diagnosis}
+                  onChange={(e) => {
+                    const newA = [...stagedAnalysis.A]
+                    newA[idx] = { ...newA[idx], nama_diagnosis: e.target.value }
+                    setStagedAnalysis({ ...stagedAnalysis, A: newA })
+                  }}
+                  placeholder="Nama diagnosis..."
+                  className="flex-1 min-w-0 rounded-xl bg-white border border-slate-300 px-3.5 py-2 outline-none font-bold text-slate-900 text-xs focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-all shadow-2xs"
+                />
+                <button
+                  type="button"
+                  aria-label="Hapus diagnosis"
+                  className="p-1.5 cursor-pointer text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-xl shrink-0 transition-colors"
+                  onClick={() => {
+                    const newA = stagedAnalysis.A.filter((_, j) => j !== idx)
+                    setStagedAnalysis({ ...stagedAnalysis, A: newA })
+                  }}
+                >
+                  <Trash2 size={16} />
+                </button>
+              </div>
+            ))}
+            <button
+              type="button"
+              onClick={() => {
+                setStagedAnalysis({
+                  ...stagedAnalysis,
+                  A: [...stagedAnalysis.A, { kategori: 'Sekunder', nama_diagnosis: '', icd10: '' }]
+                })
+              }}
+              className="text-xs font-bold text-blue-600 hover:underline px-1 pt-1 cursor-pointer inline-flex items-center"
+            >
+              + Tambah Usulan Diagnosis
+            </button>
+          </div>
+
+          {/* Staged Terapi */}
+          <div className="space-y-2 pt-2 border-t border-blue-200">
+            <label className="block text-xs font-extrabold text-slate-700 uppercase tracking-wider">
+              Usulan Terapi & Prosedur
+            </label>
+            {stagedAnalysis.P.map((item, idx) => (
+              <div key={idx} className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const newP = [...stagedAnalysis.P]
+                    newP[idx].kategori = item.kategori === 'Farmakologi' ? 'Non-Farmakologi' : 'Farmakologi'
+                    setStagedAnalysis({ ...stagedAnalysis, P: newP })
+                  }}
+                  className={`rounded-xl px-2.5 py-2 caption font-bold transition-colors cursor-pointer shrink-0 shadow-2xs ${
+                    item.kategori === 'Farmakologi'
+                      ? 'bg-primary text-white'
+                      : 'bg-emerald-600 text-white'
+                  }`}
+                  title="Klik untuk ganti jenis"
+                >
+                  {item.kategori === 'Farmakologi' ? 'Farmako' : 'Non-Farmako'}
+                </button>
+
+                <input
+                  value={item.nama_item}
+                  onChange={(e) => {
+                    const newP = [...stagedAnalysis.P]
+                    newP[idx] = { ...newP[idx], nama_item: e.target.value }
+                    setStagedAnalysis({ ...stagedAnalysis, P: newP })
+                  }}
+                  placeholder="Nama item..."
+                  className="flex-1 min-w-0 rounded-xl bg-white border border-slate-300 px-3.5 py-2 outline-none font-bold text-slate-900 text-xs focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-all shadow-2xs"
+                />
+
+                <input
+                  value={item.dosis_keterangan}
+                  onChange={(e) => {
+                    const newP = [...stagedAnalysis.P]
+                    newP[idx] = { ...newP[idx], dosis_keterangan: e.target.value }
+                    setStagedAnalysis({ ...stagedAnalysis, P: newP })
+                  }}
+                  placeholder="Dosis / Keterangan"
+                  className="w-32 sm:w-36 rounded-xl bg-white border border-slate-300 px-3 py-2 outline-none text-xs text-slate-800 font-semibold focus:border-blue-500 shadow-2xs transition-all"
+                />
+
+                <button
+                  type="button"
+                  aria-label="Hapus terapi"
+                  className="text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-xl cursor-pointer p-1.5 shrink-0 transition-colors"
+                  onClick={() => {
+                    const newP = stagedAnalysis.P.filter((_, j) => j !== idx)
+                    setStagedAnalysis({ ...stagedAnalysis, P: newP })
+                  }}
+                >
+                  <Trash2 size={16} />
+                </button>
+              </div>
+            ))}
+            <button
+              type="button"
+              onClick={() => {
+                setStagedAnalysis({
+                  ...stagedAnalysis,
+                  P: [
+                    ...stagedAnalysis.P,
+                    {
+                      nama_item: '',
+                      kategori: 'Farmakologi',
+                      dosis_keterangan: '',
+                      tgl_mulai: today(),
+                      tgl_stop: null,
+                      status: 'aktif'
+                    }
+                  ]
+                })
+              }}
+              className="text-xs font-bold text-blue-600 hover:underline px-1 pt-1 cursor-pointer inline-flex items-center"
+            >
+              + Tambah Usulan Terapi
+            </button>
+          </div>
+
+          {/* Action Buttons Staging: Batal & ACC */}
+          <div className="flex gap-2 pt-2">
+            <button
+              type="button"
+              onClick={() => setStagedAnalysis(null)}
+              className="flex-1 py-3 px-4 rounded-2xl border border-slate-300 bg-white hover:bg-slate-100 text-slate-700 font-bold text-xs cursor-pointer transition-colors shadow-2xs"
+            >
+              Batal
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                set({
+                  A: stagedAnalysis.A.filter(a => a.nama_diagnosis.trim()),
+                  P: stagedAnalysis.P.filter(p => p.nama_item.trim()),
+                })
+                setKomentarAnalisis(stagedAnalysis.komentar)
+                setStagedAnalysis(null)
+                notify('Usulan AI telah diterapkan ke formulir!')
+                window.scrollTo({ top: 350, behavior: 'smooth' })
+              }}
+              className="flex-[2] py-3 px-4 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs cursor-pointer shadow-md shadow-blue-500/20 transition-all active:scale-95"
+            >
+              ACC & Terapkan ke Form
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* hidden inputs */}
       <input ref={pemfisAttachRef} type="file" accept="image/*,video/*" hidden onChange={(e) => e.target.files?.[0] && handleAttachFile(e.target.files[0], 'pemfis')} />
@@ -1401,8 +1442,8 @@ export default function Brainstorm() {
               </button>
               <div className="absolute bottom-full left-0 mb-2 hidden flex-col gap-2 rounded-2xl bg-white p-2 shadow-xl border border-slate-300 group-hover:flex group-focus-within:flex w-max">
                 <p className="caption font-bold text-slate-500 uppercase tracking-wider px-2 pt-1">Alat AI</p>
-                <button onClick={() => ocrCameraRef.current?.click()} className="flex items-center gap-2 whitespace-nowrap rounded-xl p-2 text-xs font-semibold hover:bg-slate-100 text-slate-800"><Camera size={16}/> Ekstrak Teks (Kamera)</button>
-                <button onClick={() => ocrGalleryRef.current?.click()} className="flex items-center gap-2 whitespace-nowrap rounded-xl p-2 text-xs font-semibold hover:bg-slate-100 text-slate-800"><ImageIcon size={16}/> Ekstrak Teks (Galeri)</button>
+                <button onClick={() => ocrCameraRef.current?.click()} className="flex items-center gap-2 whitespace-nowrap rounded-xl p-2 text-xs font-semibold hover:bg-slate-100 text-slate-800">Ekstrak Teks (Kamera)</button>
+                <button onClick={() => ocrGalleryRef.current?.click()} className="flex items-center gap-2 whitespace-nowrap rounded-xl p-2 text-xs font-semibold hover:bg-slate-100 text-slate-800">Ekstrak Teks (Galeri)</button>
               </div>
             </div>
 
@@ -1506,8 +1547,8 @@ export default function Brainstorm() {
                           </span>
                         </div>
                       </div>
-                      <div className="shrink-0 pt-1 text-primary group-hover:translate-x-0.5 transition-transform">
-                        <UserCheck size={18} />
+                      <div className="shrink-0 pt-1">
+                        <span className="caption font-bold text-primary group-hover:underline">Pilih</span>
                       </div>
                     </div>
                   </button>
