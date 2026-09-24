@@ -114,12 +114,9 @@ export default function App() {
   return (
     <>
       {authLoading ? (
-        <div className="mx-auto flex min-h-dvh max-w-md flex-col items-center justify-center gap-5 p-6">
-          <img src="/logo.png" alt="Doctoid" className="h-24 w-auto object-contain animate-pulse drop-shadow-sm" />
-          <div className="flex items-center gap-2 text-xs font-semibold text-ink-muted">
-            <Loader2 size={16} className="animate-spin text-primary" />
-            <span>Memeriksa sesi dokter...</span>
-          </div>
+        <div className="mx-auto flex min-h-dvh max-w-md flex-col items-center justify-center gap-3 p-6 animate-in fade-in duration-300">
+          <img src="/logo.png" alt="Doctoid" className="h-36 sm:h-44 w-auto object-contain animate-pulse drop-shadow-md" />
+          <Loader2 size={22} className="animate-spin text-primary/70 mt-1" />
         </div>
       ) : !user || !isUnlocked ? (
         <Lock />

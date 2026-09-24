@@ -1457,19 +1457,35 @@ export default function Brainstorm() {
       <input ref={ocrCameraRef} type="file" accept="image/*" capture="environment" hidden onChange={(e) => e.target.files?.[0] && runOcr(e.target.files[0])} />
       <input ref={ocrGalleryRef} type="file" accept="image/*" hidden onChange={(e) => e.target.files?.[0] && runOcr(e.target.files[0])} />
 
-      {/* Floating AI Input Bar */}
-      <div className="fixed bottom-14 left-0 right-0 z-40 p-4 pointer-events-none flex flex-col items-center">
+      {/* Floating AI Input Bar — Desain Biru Nyembul Harmonis dengan Nav Bar */}
+      <div className="fixed bottom-[calc(4.75rem+env(safe-area-inset-bottom,0px))] left-0 right-0 z-40 px-4 pointer-events-none flex flex-col items-center">
         <div className="w-full max-w-lg pointer-events-auto">
-          <div className="flex items-end gap-2 rounded-3xl bg-white/95 backdrop-blur-xl border border-slate-300 shadow-2xl p-2.5">
+          <div className="flex items-end gap-2 rounded-3xl bg-gradient-to-br from-primary via-primary to-primary-deep text-white shadow-2xl shadow-primary/35 border border-white/25 backdrop-blur-xl p-2.5 transition-all">
             {/* Menu Plus */}
             <div className="relative group shrink-0">
-              <button className="flex size-10 cursor-pointer items-center justify-center rounded-full bg-slate-100 border border-slate-300 text-slate-700 hover:bg-primary/10 hover:text-primary transition-colors">
+              <button
+                type="button"
+                aria-label="Alat AI"
+                className="flex size-10 cursor-pointer items-center justify-center rounded-full bg-white/20 border border-white/25 text-white hover:bg-white/30 active:scale-95 transition-all"
+              >
                 <Plus size={22} />
               </button>
-              <div className="absolute bottom-full left-0 mb-2 hidden flex-col gap-2 rounded-2xl bg-white p-2 shadow-xl border border-slate-300 group-hover:flex group-focus-within:flex w-max">
-                <p className="caption font-bold text-slate-500 uppercase tracking-wider px-2 pt-1">Alat AI</p>
-                <button onClick={() => ocrCameraRef.current?.click()} className="flex items-center gap-2 whitespace-nowrap rounded-xl p-2 text-xs font-semibold hover:bg-slate-100 text-slate-800">Ekstrak Teks (Kamera)</button>
-                <button onClick={() => ocrGalleryRef.current?.click()} className="flex items-center gap-2 whitespace-nowrap rounded-xl p-2 text-xs font-semibold hover:bg-slate-100 text-slate-800">Ekstrak Teks (Galeri)</button>
+              <div className="absolute bottom-full left-0 mb-2.5 hidden flex-col gap-1.5 rounded-2xl bg-card border border-primary/20 p-2 shadow-2xl group-hover:flex group-focus-within:flex w-max z-50 text-ink animate-in fade-in zoom-in-95 duration-150">
+                <p className="caption font-bold text-ink-muted uppercase tracking-wider px-2 pt-1">Alat AI</p>
+                <button
+                  type="button"
+                  onClick={() => ocrCameraRef.current?.click()}
+                  className="flex items-center gap-2 whitespace-nowrap rounded-xl px-3 py-2 text-xs font-semibold hover:bg-primary-soft/20 text-ink cursor-pointer transition-colors"
+                >
+                  Ekstrak Teks (Kamera)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => ocrGalleryRef.current?.click()}
+                  className="flex items-center gap-2 whitespace-nowrap rounded-xl px-3 py-2 text-xs font-semibold hover:bg-primary-soft/20 text-ink cursor-pointer transition-colors"
+                >
+                  Ekstrak Teks (Galeri)
+                </button>
               </div>
             </div>
 
@@ -1480,35 +1496,43 @@ export default function Brainstorm() {
               placeholder="Ketik / dikte konsultasi... (tarik pojok untuk perbesar)"
               rows={2}
               maxLength={10000}
-              className="min-h-[50px] max-h-[260px] flex-1 resize-y bg-slate-100/90 border border-slate-300 rounded-2xl p-3 text-xs outline-none text-slate-900 font-medium placeholder:text-slate-400 placeholder:font-normal focus:bg-white focus:border-primary transition-all"
+              className="min-h-[50px] max-h-[260px] flex-1 resize-y bg-white/15 border border-white/25 rounded-2xl p-3 text-xs outline-none text-white font-medium placeholder:text-white/60 placeholder:font-normal focus:bg-white/25 focus:border-white/50 focus:ring-2 focus:ring-white/20 transition-all leading-relaxed"
             />
 
-            <div className="shrink-0 flex items-center gap-1 mb-1 mr-1">
+            <div className="shrink-0 flex items-center gap-1.5 mb-1 mr-0.5">
               <button
+                type="button"
                 onClick={toggleMic}
-                className={`flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-full transition-colors ${listening ? 'bg-red-500 text-white animate-pulse shadow-md shadow-red-500/30' : 'bg-slate-100 border border-slate-300 text-slate-700 hover:bg-slate-200 hover:text-slate-900'}`}
+                aria-label={listening ? 'Matikan Dikte' : 'Mulai Dikte Suara'}
+                className={`flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-full transition-all active:scale-95 ${
+                  listening
+                    ? 'bg-rose-500 text-white animate-pulse shadow-lg shadow-rose-500/50'
+                    : 'bg-white/20 border border-white/25 text-white hover:bg-white/30'
+                }`}
               >
                 {listening ? <MicOff size={18} /> : <Mic size={18} />}
               </button>
               {(raw.trim() || attachments.length > 0) && (
                 <button
+                  type="button"
                   onClick={parseAi}
                   disabled={busy === 'ai'}
-                  className="flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-full bg-gradient-to-br from-primary to-primary-deep text-white shadow-md shadow-primary/30 disabled:opacity-50"
+                  aria-label="Kirim ke AI"
+                  className="flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-full bg-white text-primary shadow-lg shadow-black/20 hover:bg-white/90 active:scale-95 transition-all disabled:opacity-50"
                 >
-                  {busy === 'ai' ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} />}
+                  {busy === 'ai' ? <Loader2 size={18} className="animate-spin text-primary" /> : <Send size={18} />}
                 </button>
               )}
             </div>
           </div>
 
           {/* Helper status text beneath chat bar */}
-          {(busy === 'ocr' || listening || busy === 'ai') && (
-            <div className="mt-1 flex items-center justify-center gap-2 caption font-medium">
-              {busy === 'ocr' && <><Loader2 size={14} className="animate-spin text-primary" /> <span className="text-primary font-bold">Mengekstrak teks...</span></>}
-              {busy === 'ai' && <><Loader2 size={14} className="animate-spin text-primary" /> <span className="text-primary font-bold">AI sedang merapikan...</span></>}
-              {busy === 'analisis' && <><Loader2 size={14} className="animate-spin text-blue-600" /> <span className="text-blue-600 font-bold">AI sedang menganalisis...</span></>}
-              {listening && <><Mic size={14} className="animate-pulse text-red-500" /> <span className="text-red-500 font-bold">Mendengarkan...</span></>}
+          {(busy === 'ocr' || listening || busy === 'ai' || busy === 'analisis') && (
+            <div className="mt-1.5 flex items-center justify-center gap-2 caption font-medium text-ink bg-card/90 backdrop-blur-md px-3 py-1 rounded-full shadow-md border border-primary/20 w-max mx-auto animate-in fade-in">
+              {busy === 'ocr' && <><Loader2 size={13} className="animate-spin text-primary" /> <span className="text-primary font-bold">Mengekstrak teks...</span></>}
+              {busy === 'ai' && <><Loader2 size={13} className="animate-spin text-primary" /> <span className="text-primary font-bold">AI sedang merapikan...</span></>}
+              {busy === 'analisis' && <><Loader2 size={13} className="animate-spin text-blue-600" /> <span className="text-blue-600 font-bold">AI sedang menganalisis...</span></>}
+              {listening && <><Mic size={13} className="animate-pulse text-rose-500" /> <span className="text-rose-500 font-bold">Mendengarkan...</span></>}
             </div>
           )}
         </div>

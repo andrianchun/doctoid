@@ -41,7 +41,7 @@ async function removeBackground(srcPath, outPath) {
     } else {
       const cleanR = Math.min(255, Math.max(0, Math.round((r - (1 - alpha) * bgR) / alpha)));
       const cleanG = Math.min(255, Math.max(0, Math.round((g - (1 - alpha) * bgG) / alpha)));
-      const cleanB = Math.min(255, Math.max(0, Math.round((b - (1 - alpha) * bgB) / alpha)));
+      const cleanB = Math.min(255, Math.max(0, Math.round((b - (1 - alpha) * bgG) / alpha)));
       
       outBuf[j] = cleanR;
       outBuf[j + 1] = cleanG;
@@ -65,26 +65,51 @@ async function main() {
   fs.copyFileSync(SRC_BANNER, 'public/banner.png');
 
   console.log('2. Membuat salinan transparan (tanpa background)...');
-  await removeBackground(SRC_ICON, 'public/icon.png');
-  fs.copyFileSync('public/icon.png', 'public/icon-transparent.png');
-
+  const tempRawIcon = 'public/icon-raw-trans.png';
+  await removeBackground(SRC_ICON, tempRawIcon);
   await removeBackground(SRC_LOGO, 'public/logo.png');
   fs.copyFileSync('public/logo.png', 'public/logo-transparent.png');
-
   await removeBackground(SRC_BANNER, 'public/banner-transparent.png');
 
-  console.log('3. Membuat aset PWA & Favicon...');
-  // Favicon (32x32, 64x64)
+  console.log('3. Melakukan presisi Centering & Zoom-out ikon "D" agar aman dari cropping lingkaran Android...');
+  // Trim pixel transparan berlebih untuk mendapatkan batas simbol murni
+  const trimmedIconBuf = await sharp(tempRawIcon).trim().toBuffer();
+  
+  // Skala simbol ke 560x560 (sekitar 54.6% dari kanvas 1024x1024)
+  // Menjamin safe zone 100% pada adaptive icon Android & maskable PWA
+  const symbolSize = 560;
+  const resizedSymbol = await sharp(trimmedIconBuf)
+    .resize(symbolSize, symbolSize, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
+    .toBuffer();
+
+  // Simpan master icon yang benar-benar simetris & centered
+  await sharp({
+    create: {
+      width: 1024,
+      height: 1024,
+      channels: 4,
+      background: { r: 0, g: 0, b: 0, alpha: 0 }
+    }
+  })
+    .composite([{ input: resizedSymbol, gravity: 'center' }])
+    .png()
+    .toFile('public/icon.png');
+
+  fs.copyFileSync('public/icon.png', 'public/icon-transparent.png');
+  if (fs.existsSync(tempRawIcon)) fs.unlinkSync(tempRawIcon);
+
+  console.log('4. Membuat aset PWA & Favicon...');
+  // Favicon (64x64)
   await sharp('public/icon.png')
     .resize(64, 64, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
     .png()
     .toFile('public/favicon.png');
 
   // Apple touch icon (180x180) dengan background putih bersih
-  await sharp('public/icon.png')
-    .resize(150, 150, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
+  await sharp(trimmedIconBuf)
+    .resize(110, 110, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
     .extend({
-      top: 15, bottom: 15, left: 15, right: 15,
+      top: 35, bottom: 35, left: 35, right: 35,
       background: { r: 255, g: 255, b: 255, alpha: 1 }
     })
     .png()
@@ -102,17 +127,25 @@ async function main() {
     .png()
     .toFile('public/icon-512.png');
 
-  // PWA Maskable Icon 512x512 (icon di dalam safe zone ~75% dengan background putih)
-  await sharp('public/icon.png')
-    .resize(384, 384, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
-    .extend({
-      top: 64, bottom: 64, left: 64, right: 64,
+  // PWA Maskable Icon 512x512 (simbol D aman di tengah dengan safe zone ~58%)
+  const maskableSymbol = await sharp(trimmedIconBuf)
+    .resize(290, 290, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
+    .toBuffer();
+
+  const maskPad = Math.round((512 - 290) / 2);
+  await sharp({
+    create: {
+      width: 512,
+      height: 512,
+      channels: 4,
       background: { r: 255, g: 255, b: 255, alpha: 1 }
-    })
+    }
+  })
+    .composite([{ input: maskableSymbol, gravity: 'center' }])
     .png()
     .toFile('public/icon-maskable-512.png');
 
-  console.log('4. Membuat Android Launcher Icons (mipmap)...');
+  console.log('5. Membuat Android Launcher Icons (mipmap)...');
   const mipmaps = [
     { dir: 'mipmap-mdpi', launcher: 48, fg: 108 },
     { dir: 'mipmap-hdpi', launcher: 72, fg: 162 },
@@ -125,33 +158,40 @@ async function main() {
     const targetDir = path.join('android/app/src/main/res', m.dir);
     if (!fs.existsSync(targetDir)) continue;
 
-    // 1. ic_launcher_foreground.png (108dp canvas, icon inside ~72dp safe zone)
-    const iconSizeInFg = Math.round(m.fg * (72 / 108));
-    const pad = Math.round((m.fg - iconSizeInFg) / 2);
-    await sharp('public/icon.png')
+    // 1. ic_launcher_foreground.png (108dp canvas, icon inside ~54dp safe zone diameter)
+    // Sesuai standar Android Adaptive Icons: safe zone adalah lingkaran 66dp, kita pakai 54dp agar aman dari pemotongan launcher vendor mana pun
+    const iconSizeInFg = Math.round(m.fg * (54 / 108));
+    const fgSymbol = await sharp(trimmedIconBuf)
       .resize(iconSizeInFg, iconSizeInFg, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
-      .extend({
-        top: pad,
-        bottom: m.fg - iconSizeInFg - pad,
-        left: pad,
-        right: m.fg - iconSizeInFg - pad,
+      .toBuffer();
+
+    await sharp({
+      create: {
+        width: m.fg,
+        height: m.fg,
+        channels: 4,
         background: { r: 0, g: 0, b: 0, alpha: 0 }
-      })
+      }
+    })
+      .composite([{ input: fgSymbol, gravity: 'center' }])
       .png()
       .toFile(path.join(targetDir, 'ic_launcher_foreground.png'));
 
     // 2. ic_launcher.png (legacy launcher icon)
-    const iconSizeInLauncher = Math.round(m.launcher * 0.88);
-    const padLauncher = Math.round((m.launcher - iconSizeInLauncher) / 2);
-    await sharp('public/icon.png')
+    const iconSizeInLauncher = Math.round(m.launcher * 0.65);
+    const launcherSymbol = await sharp(trimmedIconBuf)
       .resize(iconSizeInLauncher, iconSizeInLauncher, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
-      .extend({
-        top: padLauncher,
-        bottom: m.launcher - iconSizeInLauncher - padLauncher,
-        left: padLauncher,
-        right: m.launcher - iconSizeInLauncher - padLauncher,
+      .toBuffer();
+
+    await sharp({
+      create: {
+        width: m.launcher,
+        height: m.launcher,
+        channels: 4,
         background: { r: 255, g: 255, b: 255, alpha: 1 }
-      })
+      }
+    })
+      .composite([{ input: launcherSymbol, gravity: 'center' }])
       .png()
       .toFile(path.join(targetDir, 'ic_launcher.png'));
 
@@ -162,8 +202,8 @@ async function main() {
       </svg>`
     );
     const roundBg = await sharp(roundSvg).png().toBuffer();
-    const roundIcon = await sharp('public/icon.png')
-      .resize(Math.round(m.launcher * 0.72), Math.round(m.launcher * 0.72), { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
+    const roundIcon = await sharp(trimmedIconBuf)
+      .resize(Math.round(m.launcher * 0.58), Math.round(m.launcher * 0.58), { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
       .toBuffer();
 
     await sharp(roundBg)
@@ -172,7 +212,7 @@ async function main() {
       .toFile(path.join(targetDir, 'ic_launcher_round.png'));
   }
 
-  console.log('5. Membuat Android Splash Screens (drawable)...');
+  console.log('6. Membuat Android Splash Screens (drawable)...');
   const splashSizes = [
     { dir: 'drawable', w: 480, h: 320 },
     { dir: 'drawable-port-mdpi', w: 320, h: 480 },
@@ -191,16 +231,15 @@ async function main() {
     const targetDir = path.join('android/app/src/main/res', s.dir);
     if (!fs.existsSync(targetDir)) continue;
 
-    // Logo size: ~45% of width in portrait, ~45% of height in landscape
+    // Logo size: ~55% of width in portrait, ~55% of height in landscape
     const isPort = s.h >= s.w;
-    const maxLogoW = Math.round(isPort ? s.w * 0.50 : s.h * 0.55);
-    const maxLogoH = Math.round(isPort ? s.h * 0.35 : s.h * 0.55);
+    const maxLogoW = Math.round(isPort ? s.w * 0.58 : s.h * 0.60);
+    const maxLogoH = Math.round(isPort ? s.h * 0.40 : s.h * 0.60);
 
     const logoResized = await sharp('public/logo.png')
       .resize(maxLogoW, maxLogoH, { fit: 'inside', background: { r: 0, g: 0, b: 0, alpha: 0 } })
       .toBuffer();
 
-    // Canvas warna putih / #FFFFFF (matching Android SplashScreen background)
     await sharp({
       create: {
         width: s.w,
@@ -214,7 +253,7 @@ async function main() {
       .toFile(path.join(targetDir, 'splash.png'));
   }
 
-  console.log('\n✅ Seluruh aset icon, logo, splash screen, dan banner berhasil dibuat!');
+  console.log('\n✅ Seluruh aset icon (centered & zoomed-out), logo, splash screen, dan banner berhasil diperbarui!');
 }
 
 main().catch(console.error);
