@@ -130,6 +130,27 @@ export default function Brainstorm() {
   const highlightTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const draftLoaded = useRef(false)
 
+  const isFormFilled = useMemo(() => {
+    return Boolean(
+      raw.trim() ||
+      form.nama_depan.trim() ||
+      form.title.trim() ||
+      form.usia.trim() ||
+      form.no_rm.trim() ||
+      form.tgl_onset.trim() ||
+      form.S.trim() ||
+      form.O_pemfis.trim() ||
+      form.O_penunjang.trim() ||
+      form.A.some(a => a.nama_diagnosis.trim()) ||
+      form.P.some(p => p.nama_item.trim()) ||
+      attachments.length > 0 ||
+      selectedPatient !== null ||
+      hospitalId > 0 ||
+      wardId > 0 ||
+      stagedAnalysis !== null
+    )
+  }, [raw, form, attachments, selectedPatient, hospitalId, wardId, stagedAnalysis])
+
   const notify = (msg: string) => {
     setToast(msg)
     setTimeout(() => setToast(''), 4000)
@@ -304,6 +325,8 @@ export default function Brainstorm() {
       setStagedAnalysis(null)
       setSelectedPatient(null)
       setDetectedPatient(null)
+      setHospitalId(0)
+      setWardId(0)
       await db.brainstormDraft.delete(1)
       notify('Formulir berhasil dikosongkan')
     }
@@ -613,14 +636,17 @@ export default function Brainstorm() {
       {/* Banner Utama — 1 Baris */}
       <div className="glass-blue-hero rounded-3xl px-5 py-4 text-white shadow-xl flex items-center justify-between">
         <h1 className="h1 text-2xl font-black text-white">Catat Pasien</h1>
-        <button
-          type="button"
-          onClick={handleClearAll}
-          className="rounded-xl bg-white/15 hover:bg-white/25 active:scale-95 px-3 py-1.5 text-xs font-bold text-white transition-all cursor-pointer border border-white/20"
-          title="Kosongkan seluruh isian formulir"
-        >
-          Clear All
-        </button>
+        {isFormFilled && (
+          <button
+            type="button"
+            onClick={handleClearAll}
+            className="rounded-xl bg-rose-500 hover:bg-rose-600 active:scale-95 px-3 py-1.5 text-xs font-bold text-white transition-all cursor-pointer border border-rose-400/40 shadow-sm shadow-rose-950/20 flex items-center gap-1.5 animate-in fade-in zoom-in-95 duration-200"
+            title="Kosongkan seluruh isian formulir"
+          >
+            <Trash2 size={13} />
+            Hapus
+          </button>
+        )}
       </div>
 
       {/* Banner Deteksi Pasien Lama Realtime */}
