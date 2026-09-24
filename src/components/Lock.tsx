@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Activity, Fingerprint, KeyRound, Loader2, LogOut, ShieldCheck, CheckCircle2 } from 'lucide-react'
+import { Fingerprint, KeyRound, Loader2, LogOut, ShieldCheck, CheckCircle2 } from 'lucide-react'
 import { useUi } from '../store'
 import { loginWithGoogle, logoutUser } from '../auth'
 import { verifyBiometric } from '../webauthn'
@@ -82,14 +82,13 @@ export default function Lock() {
   return (
     <div className="mx-auto flex min-h-dvh max-w-md flex-col items-center justify-center gap-6 p-6 pt-safe pb-safe">
       {/* Brand Header */}
-      <div className="flex flex-col items-center gap-3 text-center">
-        <span className="flex size-16 items-center justify-center rounded-3xl bg-gradient-to-br from-primary to-primary-deep text-white shadow-xl shadow-primary/30 animate-in zoom-in-95">
-          <Activity size={34} />
-        </span>
-        <div>
-          <h1 className="h1 text-2xl font-black text-ink">Doctoid</h1>
-          <p className="caption text-xs text-ink-muted mt-0.5">Asisten Klinis & Rekam Medis Dokter</p>
-        </div>
+      <div className="flex flex-col items-center gap-1.5 text-center">
+        <img
+          src="/logo.png"
+          alt="Doctoid"
+          className="h-24 w-auto object-contain drop-shadow-sm animate-in zoom-in-95"
+        />
+        <p className="caption text-xs text-ink-muted">Asisten Klinis & Rekam Medis Dokter</p>
       </div>
 
       {/* Main Card */}

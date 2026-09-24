@@ -3,7 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { Capacitor } from '@capacitor/core'
 import { CapacitorUpdater } from '@capgo/capacitor-updater'
 import { StatusBar, Style } from '@capacitor/status-bar'
-import { Activity, Loader2 } from 'lucide-react'
+import { Loader2 } from 'lucide-react'
 import { useUi } from './store'
 import Lock from './components/Lock'
 import Layout from './components/Layout'
@@ -93,10 +93,8 @@ export default function App() {
   return (
     <>
       {authLoading ? (
-        <div className="mx-auto flex min-h-dvh max-w-md flex-col items-center justify-center gap-4 p-6">
-          <span className="flex size-16 items-center justify-center rounded-3xl bg-gradient-to-br from-primary to-primary-deep text-white shadow-xl shadow-primary/30 animate-pulse">
-            <Activity size={34} />
-          </span>
+        <div className="mx-auto flex min-h-dvh max-w-md flex-col items-center justify-center gap-5 p-6">
+          <img src="/logo.png" alt="Doctoid" className="h-24 w-auto object-contain animate-pulse drop-shadow-sm" />
           <div className="flex items-center gap-2 text-xs font-semibold text-ink-muted">
             <Loader2 size={16} className="animate-spin text-primary" />
             <span>Memeriksa sesi dokter...</span>
