@@ -423,7 +423,7 @@ export default function Brainstorm() {
             no_rm: data.no_rm || (isNamaBeda ? '' : form.no_rm),
             jaminan: data.jaminan || form.jaminan || 'BPJS',
             tgl_mrs: data.tgl_mrs || today(),
-            tgl_onset: data.tgl_onset || (isNamaBeda ? '' : form.tgl_onset),
+            tgl_onset: data.tgl_onset || data.tgl_mrs || today(),
             S: data.S,
             O_pemfis: data.O_pemfis,
             O_penunjang: data.O_penunjang,
@@ -447,10 +447,13 @@ export default function Brainstorm() {
     setBusy('ai')
     try {
       const r = await rapikan(raw, attachments, false)
+      const tglMrs = r.tgl_mrs || today()
+      const tglOnset = r.tgl_onset || tglMrs
       set({
         ...r,
         jaminan: r.jaminan || 'BPJS',
-        tgl_mrs: r.tgl_mrs || today(),
+        tgl_mrs: tglMrs,
+        tgl_onset: tglOnset,
         P: r.P.map((it) => ({ ...it, tgl_mulai: today(), tgl_stop: null, status: 'aktif' as const })),
       })
       await simpanRegexBaru(r.regex_baru)

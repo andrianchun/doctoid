@@ -98,6 +98,12 @@ function parseIndoDate(str: string): string | null {
     const [, d, m, y] = dmyMatch
     return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`
   }
+  const dmy2Match = str.match(/\b(\d{1,2})[-/](\d{1,2})[-/](\d{2})\b/)
+  if (dmy2Match) {
+    const [, d, m, yy] = dmy2Match
+    const fullYear = parseInt(yy, 10) < 50 ? `20${yy}` : `19${yy}`
+    return `${fullYear}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`
+  }
 
   const BULAN: Record<string, string> = {
     jan: '01', januari: '01', feb: '02', februari: '02', mar: '03', maret: '03',
@@ -105,72 +111,138 @@ function parseIndoDate(str: string): string | null {
     agu: '08', agt: '08', agustus: '08', sep: '09', september: '09', okt: '10', oktober: '10',
     nov: '11', november: '11', des: '12', desember: '12'
   }
-  const textDateMatch = str.match(/\b(\d{1,2})\s+([A-Za-z]{3,10})\s+(\d{4})\b/)
+  const textDateMatch = str.match(/\b(\d{1,2})\s+([A-Za-z]{3,10})\s+(\d{2,4})\b/)
   if (textDateMatch) {
     const d = textDateMatch[1].padStart(2, '0')
     const b = BULAN[textDateMatch[2].toLowerCase()]
-    const y = textDateMatch[3]
+    let y = textDateMatch[3]
+    if (y.length === 2) y = parseInt(y, 10) < 50 ? `20${y}` : `19${y}`
     if (b) return `${y}-${b}-${d}`
   }
 
   return null
 }
 
+function parseIsoDateToLocal(isoStr: string): Date {
+  const [y, m, d] = isoStr.split('-').map(Number)
+  return new Date(y, (m || 1) - 1, d || 1)
+}
+
+function formatDateToIso(d: Date): string {
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
+function addDaysToIso(isoStr: string, days: number): string {
+  const d = parseIsoDateToLocal(isoStr)
+  d.setDate(d.getDate() + days)
+  return formatDateToIso(d)
+}
+
 function extractDates(raw: string): { tgl_mrs: string; tgl_onset: string } {
   const now = new Date()
-  const todayIso = now.toISOString().slice(0, 10)
+  const todayIso = formatDateToIso(now)
   let tgl_mrs = todayIso
   let tgl_onset = ''
 
   // A. Cari Tgl MRS eksplisit
-  const mrsMatch = raw.match(/(?:tgl\s*mrs|mrs|tgl\s*masuk|masuk\s*rs)\s*[:-]?\s*([^\n,]+)/i)
+  const mrsMatch = raw.match(/(?:tgl\s*mrs|mrs|tgl\s*masuk|masuk\s*rs)\s*[:-]?\s*([^\n,]+)/i) ||
+                   raw.match(/masuk\s*(?:rs|rumah\s*sakit)?\s*(?:pada\s*tanggal|tgl)?\s*[:-]?\s*([^\n,]+)/i)
   if (mrsMatch) {
     const parsed = parseIndoDate(mrsMatch[1])
-    if (parsed) tgl_mrs = parsed
-    else if (/kemarin/i.test(mrsMatch[1])) {
-      const d = new Date(now)
-      d.setDate(d.getDate() - 1)
-      tgl_mrs = d.toISOString().slice(0, 10)
+    if (parsed) {
+      tgl_mrs = parsed
+    } else if (/kemarin/i.test(mrsMatch[1])) {
+      tgl_mrs = addDaysToIso(todayIso, -1)
     }
   }
 
   // B. Cari Tgl Onset eksplisit
   const onsetExplicit = raw.match(/(?:tgl\s*onset|onset|awitan|kejadian)\s*[:-]?\s*([^\n,]+)/i)
   if (onsetExplicit) {
-    const parsed = parseIndoDate(onsetExplicit[1])
-    if (parsed) tgl_onset = parsed
-    else if (/kemarin/i.test(onsetExplicit[1])) {
-      const d = new Date(now)
-      d.setDate(d.getDate() - 1)
-      tgl_onset = d.toISOString().slice(0, 10)
-    } else if (/hari\s*ini|tadi\s*pagi|tadi\s*malam|tadi\s*siang/i.test(onsetExplicit[1])) {
-      tgl_onset = todayIso
+    const content = onsetExplicit[1].trim()
+    const parsed = parseIndoDate(content)
+    if (parsed) {
+      tgl_onset = parsed
+    } else if (/kemarin/i.test(content)) {
+      tgl_onset = addDaysToIso(tgl_mrs, -1)
     } else {
-      const daysMatch = onsetExplicit[1].match(/(\d+)\s*(?:hari|hr)\s*(?:yang\s*lalu|yll|smrs|lalu|sebelum)?/i)
-      if (daysMatch) {
-        const d = new Date(now)
-        d.setDate(d.getDate() - parseInt(daysMatch[1], 10))
-        tgl_onset = d.toISOString().slice(0, 10)
+      // 1. Cek jam / menit / waktu akut di onset eksplisit (misal: "3 jam SMRS", "3 jam sebelum MRS", "tadi pagi")
+      const hoursMatch = content.match(/(\d+(?:[.,]\d+)?)\s*(?:jam|jm)\s*(?:yang\s*lalu|yll|smrs|lalu|sebelum(?:\s*mrs|\s*masuk\s*rs)?)?/i) ||
+                         content.match(/^(\d+(?:[.,]\d+)?)\s*(?:jam|jm)$/i)
+      const minutesMatch = content.match(/(\d+)\s*(?:menit|mnt)\s*(?:yang\s*lalu|yll|smrs|lalu|sebelum(?:\s*mrs|\s*masuk\s*rs)?)?/i) ||
+                           content.match(/^(\d+)\s*(?:menit|mnt)$/i)
+      const tadiMatch = /hari\s*ini|tadi\s*pagi|tadi\s*malam|tadi\s*siang|tadi\s*sore|beberapa\s*jam/i.test(content)
+
+      if (hoursMatch) {
+        const hours = parseFloat(hoursMatch[1].replace(',', '.'))
+        tgl_onset = hours >= 24 ? addDaysToIso(tgl_mrs, -Math.round(hours / 24)) : tgl_mrs
+      } else if (minutesMatch || tadiMatch) {
+        tgl_onset = tgl_mrs
+      } else {
+        // 2. Cek hari (misal: "3 hari yang lalu", "3 hari SMRS", "3 hari sebelum MRS")
+        const daysMatch = content.match(/(\d+)\s*(?:hari|hr)\s*(?:yang\s*lalu|yll|smrs|lalu|sebelum(?:\s*mrs|\s*masuk\s*rs)?)?/i) ||
+                          content.match(/^(\d+)\s*(?:hari|hr)$/i)
+        // 3. Cek minggu
+        const weeksMatch = content.match(/(\d+)\s*(?:minggu|mgg)\s*(?:yang\s*lalu|yll|smrs|lalu|sebelum(?:\s*mrs|\s*masuk\s*rs)?)?/i)
+        // 4. Cek bulan
+        const monthsMatch = content.match(/(\d+)\s*(?:bulan|bln)\s*(?:yang\s*lalu|yll|smrs|lalu|sebelum(?:\s*mrs|\s*masuk\s*rs)?)?/i)
+
+        if (daysMatch) {
+          tgl_onset = addDaysToIso(tgl_mrs, -parseInt(daysMatch[1], 10))
+        } else if (weeksMatch) {
+          tgl_onset = addDaysToIso(tgl_mrs, -parseInt(weeksMatch[1], 10) * 7)
+        } else if (monthsMatch) {
+          tgl_onset = addDaysToIso(tgl_mrs, -parseInt(monthsMatch[1], 10) * 30)
+        }
       }
     }
   }
 
   // C. Jika belum ketemu onset eksplisit, deteksi dari narasi di Subjektif / RPS
   if (!tgl_onset) {
-    if (/\b(?:sejak\s*kemarin|kemarin\s*(?:pagi|siang|sore|malam|jam|\d|sekitar))\b/i.test(raw)) {
-      const d = new Date(now)
-      d.setDate(d.getDate() - 1)
-      tgl_onset = d.toISOString().slice(0, 10)
-    } else if (/\b(?:sejak\s*tadi\s*(?:pagi|siang|sore|malam)|tadi\s*pagi|beberapa\s*jam\s*(?:lalu|smrs))\b/i.test(raw)) {
-      tgl_onset = todayIso
+    // 1. Durasi jam atau menit (misal: "3 jam sebelum MRS", "3 jam SMRS", "bicara pelo sejak 2 jam yll", "onset 4.5 jam")
+    const narrativeHours = raw.match(/(?:sejak|\b)(\d+(?:[.,]\d+)?)\s*(?:jam|jm)\s*(?:yang\s*lalu|yll|smrs|lalu|sebelum(?:\s*mrs|\s*masuk\s*rs)?)/i) ||
+                           raw.match(/\bonset\s*[:<>=~]?\s*(\d+(?:[.,]\d+)?)\s*(?:jam|jm)\b/i) ||
+                           raw.match(/(?:tiba-tiba|mendadak).*?(\d+(?:[.,]\d+)?)\s*(?:jam|jm)\s*(?:yang\s*lalu|yll|smrs|lalu|sebelum(?:\s*mrs|\s*masuk\s*rs)?)/i)
+
+    const narrativeMinutes = raw.match(/(?:sejak|\b)(\d+)\s*(?:menit|mnt)\s*(?:yang\s*lalu|yll|smrs|lalu|sebelum(?:\s*mrs|\s*masuk\s*rs)?)/i)
+
+    const narrativeTadi = /\b(?:sejak\s*tadi\s*(?:pagi|siang|sore|malam)|tadi\s*pagi|tadi\s*siang|tadi\s*sore|tadi\s*malam|beberapa\s*jam\s*(?:yang\s*lalu|yll|smrs|lalu|sebelum(?:\s*mrs|\s*masuk\s*rs)?))\b/i.test(raw)
+
+    if (narrativeHours) {
+      const hours = parseFloat(narrativeHours[1].replace(',', '.'))
+      tgl_onset = hours >= 24 ? addDaysToIso(tgl_mrs, -Math.round(hours / 24)) : tgl_mrs
+    } else if (narrativeMinutes || narrativeTadi) {
+      tgl_onset = tgl_mrs
     } else {
-      const daysNarrative = raw.match(/(?:sejak|\b)(\d+)\s*(?:hari|hr)\s*(?:yang\s*lalu|yll|smrs|lalu|sebelum)/i) || raw.match(/sejak\s*(\d+)\s*(?:hari|hr)\b/i)
+      // 2. Durasi hari (misal: "sejak 3 hari yang lalu", "3 hari SMRS", "3 hari sebelum MRS", "H-3 SMRS")
+      const daysNarrative = raw.match(/(?:sejak|\b)(\d+)\s*(?:hari|hr)\s*(?:yang\s*lalu|yll|smrs|lalu|sebelum(?:\s*mrs|\s*masuk\s*rs)?)/i) ||
+                            raw.match(/sejak\s*(\d+)\s*(?:hari|hr)\b/i) ||
+                            raw.match(/\bH[-+]?(\d+)\s*(?:smrs|mrs|sebelum\s*mrs)\b/i)
+
+      // 3. Durasi minggu
+      const weeksNarrative = raw.match(/(?:sejak|\b)(\d+)\s*(?:minggu|mgg)\s*(?:yang\s*lalu|yll|smrs|lalu|sebelum(?:\s*mrs|\s*masuk\s*rs)?)/i) ||
+                             raw.match(/sejak\s*(\d+)\s*(?:minggu|mgg)\b/i)
+
+      // 4. Kemarin
+      const kemarinNarrative = /\b(?:sejak\s*kemarin|kemarin\s*(?:pagi|siang|sore|malam|jam|\d|sekitar|smrs)|1\s*hari\s*(?:smrs|sebelum\s*mrs))\b/i.test(raw)
+
       if (daysNarrative) {
-        const d = new Date(now)
-        d.setDate(d.getDate() - parseInt(daysNarrative[1], 10))
-        tgl_onset = d.toISOString().slice(0, 10)
+        tgl_onset = addDaysToIso(tgl_mrs, -parseInt(daysNarrative[1], 10))
+      } else if (weeksNarrative) {
+        tgl_onset = addDaysToIso(tgl_mrs, -parseInt(weeksNarrative[1], 10) * 7)
+      } else if (kemarinNarrative) {
+        tgl_onset = addDaysToIso(tgl_mrs, -1)
       }
     }
+  }
+
+  // D. Fallback: jika terpaksa tidak ada keterangan onset sama sekali -> tgl_onset = tgl_mrs
+  if (!tgl_onset) {
+    tgl_onset = tgl_mrs
   }
 
   return { tgl_mrs, tgl_onset }
