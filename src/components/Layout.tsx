@@ -71,33 +71,82 @@ export default function Layout() {
         <Outlet />
       </div>
 
-      {/* Floating Frosted Glass Navigation Bar (4 Tab Baku - Icon Only) */}
-      <nav
-        aria-label="Navigasi Utama"
-        className="fixed inset-x-4 bottom-[max(1rem,env(safe-area-inset-bottom,0px))] z-40 mx-auto max-w-sm"
+      {/* Floating Unified Dock Container */}
+      <div
+        id="bottom-dock-container"
+        className="fixed inset-x-4 bottom-[max(1rem,env(safe-area-inset-bottom,0px))] z-40 mx-auto max-w-sm pointer-events-none flex flex-col items-center"
       >
-        <div className="glass-nav rounded-3xl p-1.5 shadow-2xl">
-          <div className="flex items-center justify-around">
-            {TABS.map(({ to, label, Icon }) => (
-              <NavLink
-                key={to}
-                to={to}
-                title={label}
-                aria-label={label}
-                className={({ isActive }) =>
-                  `flex h-12 flex-1 items-center justify-center rounded-2xl transition-all active:scale-90 ${
-                    isActive
-                      ? 'bg-gradient-to-br from-primary to-primary-deep text-white shadow-lg shadow-primary/30'
-                      : 'text-ink-muted hover:text-ink hover:bg-surface/50'
-                  }`
-                }
-              >
-                <Icon size={24} strokeWidth={2.2} />
-              </NavLink>
-            ))}
+        {/* Slot Input AI di bagian atas (hanya saat di Brainstorm) */}
+        <div id="bottom-dock-addon" className="w-full pointer-events-auto" />
+
+        {/* Floating Blue Navigation Bar (Konsisten di Semua Tab) */}
+        <nav
+          aria-label="Navigasi Utama"
+          className="w-full pointer-events-auto"
+        >
+          <div
+            className={`bg-gradient-to-br from-primary via-primary to-primary-deep text-white p-1.5 shadow-2xl shadow-primary/35 backdrop-blur-xl transition-all ${
+              isBrainstorm
+                ? 'rounded-b-3xl rounded-t-none border-b border-x border-white/25'
+                : 'rounded-3xl border border-white/25'
+            }`}
+          >
+            <div className="flex items-center justify-around">
+              {TABS.map(({ to, label, Icon }) => (
+                <NavLink
+                  key={to}
+                  to={to}
+                  title={label}
+                  aria-label={label}
+                  className={({ isActive }) =>
+                    `relative flex h-12 flex-1 items-center justify-center transition-all active:scale-90 ${
+                      isActive
+                        ? isBrainstorm && to === '/brainstorm'
+                          ? 'text-primary font-bold z-20'
+                          : 'bg-white text-primary shadow-lg shadow-black/15 font-bold rounded-2xl'
+                        : 'text-white/70 hover:text-white hover:bg-white/10 rounded-2xl'
+                    }`
+                  }
+                >
+                  {({ isActive }) => (
+                    <>
+                      {isActive && isBrainstorm && to === '/brainstorm' && (
+                        <span
+                          aria-hidden="true"
+                          className="absolute -top-1.5 inset-x-0 bottom-0 bg-white rounded-b-2xl pointer-events-none"
+                        >
+                          {/* Lengkungan sudut kiri (inverted concave fillet) */}
+                          <svg
+                            width="14"
+                            height="14"
+                            viewBox="0 0 14 14"
+                            className="absolute right-full top-0 w-3.5 h-3.5 fill-white pointer-events-none -mr-[0.5px]"
+                            aria-hidden="true"
+                          >
+                            <path d="M 0 0 L 14 0 L 14 14 A 14 14 0 0 0 0 0 Z" />
+                          </svg>
+
+                          {/* Lengkungan sudut kanan (inverted concave fillet) */}
+                          <svg
+                            width="14"
+                            height="14"
+                            viewBox="0 0 14 14"
+                            className="absolute left-full top-0 w-3.5 h-3.5 fill-white pointer-events-none -ml-[0.5px]"
+                            aria-hidden="true"
+                          >
+                            <path d="M 14 0 L 0 0 L 0 14 A 14 14 0 0 1 14 0 Z" />
+                          </svg>
+                        </span>
+                      )}
+                      <Icon size={24} strokeWidth={2.2} className="relative z-10" />
+                    </>
+                  )}
+                </NavLink>
+              ))}
+            </div>
           </div>
-        </div>
-      </nav>
+        </nav>
+      </div>
     </div>
   )
 }

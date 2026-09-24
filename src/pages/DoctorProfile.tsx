@@ -4,6 +4,7 @@ import { ChevronLeft, Camera, LogOut } from 'lucide-react'
 import { useUi } from '../store'
 import { logoutUser, saveUserProfileCloud, getDoctorSpecialty, type UserProfile } from '../auth'
 import { convertToWebP } from '../utils/mediaCompress'
+import CustomSelect, { type SelectOption } from '../components/CustomSelect'
 
 export interface SpecialtyGroup {
   category: string
@@ -90,6 +91,11 @@ export const SPECIALTY_GROUPS: SpecialtyGroup[] = [
 ]
 
 const ALL_ROLES = SPECIALTY_GROUPS.flatMap((g) => g.roles)
+
+const SPECIALTY_OPTIONS: SelectOption[] = SPECIALTY_GROUPS.flatMap((g) => [
+  { value: `header-${g.category}`, label: g.category, isHeader: true },
+  ...g.roles.map((r) => ({ value: r, label: r })),
+])
 
 export default function DoctorProfile() {
   const navigate = useNavigate()
@@ -255,21 +261,12 @@ export default function DoctorProfile() {
             <label className="block text-xs font-bold text-ink">
               Peran / Spesialisasi
             </label>
-            <select
+            <CustomSelect
               value={selectedPreset}
-              onChange={(e) => setSelectedPreset(e.target.value)}
-              className="w-full rounded-2xl border border-surface bg-surface/80 px-4 py-3 text-xs font-bold text-ink outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all cursor-pointer"
-            >
-              {SPECIALTY_GROUPS.map((group) => (
-                <optgroup key={group.category} label={group.category}>
-                  {group.roles.map((role) => (
-                    <option key={role} value={role}>
-                      {role}
-                    </option>
-                  ))}
-                </optgroup>
-              ))}
-            </select>
+              onChange={(val) => setSelectedPreset(val)}
+              options={SPECIALTY_OPTIONS}
+              placeholder="Pilih spesialisasi"
+            />
 
             {selectedPreset === 'Lainnya (Kustom)' && (
               <input

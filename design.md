@@ -1,113 +1,142 @@
 # Doctoid Design System & UI/UX Guidelines (`design.md`)
 
-> **ATURAN MUTLAK**: Seluruh antarmuka, komponen, modal, dan pembaruan visual di **Doctoid** **WAJIB** mematuhi spesifikasi warna klinis, tipografi rasio emas (3 tingkat), tema *Modern Clinical Glassmorphism*, dan prinsip anti-bloat dalam dokumen ini.
+> **ATURAN MUTLAK & SAKLEK**: 
+> Seluruh antarmuka, komponen, modal, dropdown, palet warna, tipografi, dan copywriting di **Doctoid** — baik yang sudah ada maupun yang akan digenerate nanti — **WAJIB 100% MENGACU PADA DOKUMEN INI**.
+> Aturan ini bersifat **SAKLEK DAN TIDAK BOLEH DIUBAH-UBAH ATAU DIIMPROVISASI SENDIRI**.
 
 ---
 
-## 1. Filosofi Desain & Karakter Visual
+## 1. Aturan Larangan Ikon (Strict No-Icon Policy)
 
-Doctoid dirancang khusus untuk dokter spesialis dengan tema **Modern Clinical Glassmorphism & Futurism**:
-- **Permukaan Kaca Bersih (*Crystal Glass Surfaces*)**: Latar belakang tembus pandang dengan efek *blur* halus (`backdrop-blur-xl`), saturasi lembut, dan garis tepi berkilau (*subtle frosted borders*).
-- **Aksen Biru Elektrik Klinis (*Electric Medical Blue & Deep Cobalt*)**: Memberi kesan presisi, higienis, berteknologi tinggi (*futuristic medical tech*), dan fokus tinggi dalam pengambilan keputusan klinis.
-- **Ramah Jari (*Ergonomic Touch Targets*)**: Area sentuh minimal **44px – 48px** untuk tombol dan kontrol agar input cepat di bangsal rumah sakit bebas salah pencet.
-- **Single-Surface Hierarchy**: Tidak ada "kotak di dalam kotak". Satu kartu utama dengan pembatas halus (*hairline dividers*) menjaga layar tetap luas dan bersih.
+> **"GA BOLEH ADA ICON! TITIK! AKU GA SUKA ADA ICON ANEH ANEH!"**
 
----
-
-## 2. Palet Warna Resmi (*Color Palette*)
-
-### A. Warna Utama & Aksen Brand
-| Token | Hex / Kelas CSS | Penggunaan Baku |
-| :--- | :--- | :--- |
-| **Medical Blue (Primary)** | `#3B82F6` (`blue-500` / `primary`) | Warna aksen utama, tombol aksi primer, indikator klinis |
-| **Cobalt Deep** | `#1D4ED8` (`blue-700` / `primary-deep`) | Gradien akhir tombol primer, header banner, bayangan glow |
-| **Sky Bright** | `#38BDF8` (`sky-400` / `primary-soft`) | Aksen teks terang, highlight penunjang, border fokus input |
-| **Primary Gradient** | `from-[#3B82F6] to-[#1D4ED8]` | Tombol Simpan SOAP, Tombol Kirim Micro-Update, Header Dasbor |
-
-### B. Warna Latar Belakang (*Canvas*) & Hierarki Gradasi Kontras
-| Tingkat | Peran Elemen | Token / Warna | Spesifikasi & Border |
-| :--- | :--- | :--- | :--- |
-| **Level 0** | **Canvas (Latar Belakang Dasar)** | `#E5EBF4` (Cool Clinical Slate) | `radial-gradient` biru elektrik halus di sudut atas & bawah |
-| **Level 1** | **Glass Card (Kartu Kontainer)** | `#FFFFFF` (Solid Pure White) | `border: 1px solid rgba(203, 213, 225, 0.85)` (`border-slate-300`), `shadow-md` |
-| **Level 2** | **Form Inputs & Textarea** | `bg-slate-100/90` | `border border-slate-300`, `text-slate-900 font-semibold`, `focus:bg-white focus:border-primary` |
-| **Level 3** | **Dividers & Status Badges** | `border-slate-200` | Chip Onset (`amber-100`/`border-amber-300`), Chip MRS (`emerald-100`/`border-emerald-300`) |
-| **Level 4** | **Floating Bar & Navigasi** | `bg-white/96` (`glass-nav`) | `border-slate-300`, `backdrop-blur-2xl`, `shadow-2xl` |
-
-### C. Permukaan Kaca (*Glassmorphism Surfaces*)
-| Elemen | Tema Terang (*Light*) | Tema Gelap (*Dark*) | Border & Efek Blur |
-| :--- | :--- | :--- | :--- |
-| **Glass Card** | `#FFFFFF` solid | `bg-[#0D1527]/90` | `border-slate-300` (`rgba(203, 213, 225, 0.85)`), `backdrop-blur-xl`, `shadow-md` |
-| **Glass Nav (Floating Bar)** | `bg-white/96` | `bg-[#0D1527]/95` | `border-slate-300`, `backdrop-blur-2xl`, `shadow-2xl` |
-| **Input / Search Bar** | `bg-slate-100/90` | `bg-white/5` | `border-slate-300`, `focus:bg-white focus:border-primary focus:ring-4 focus:ring-primary/20` |
-
-### D. Warna Status Semantik Klinis
-| Status / Fitur | Hex / Utility | Penerapan Klinis |
-| :--- | :--- | :--- |
-| **Emerald / Selesai / KRS** | `#10B981` (`emerald-500`) | Pasien KRS / Pulih, Terapi Baru Disetujui, Sinkronisasi Sukses |
-| **Amber / Perhatian / Rawat Lama** | `#F59E0B` (`amber-500`) | Rawat H->7, Pasien Baru MRS, Peringatan Klinis / Dosis Obat |
-| **Rose / Darurat / Stop** | `#F43F5E` (`rose-500`) | Terapi Dihentikan (Stop/Aff), Alergi Obat, Tombol Hapus Pasien |
-| **Violet / AI Brainstorm** | `#8B5CF6` (`violet-500`) | Fitur AI Rapikan SOAP, Analisis Kasus, Ringkasan Klinis |
-
----
-
-## 3. Standar Tipografi (3 Tingkat Ukuran Berbasis Golden Ratio)
-
-Menggunakan **1 jenis font seragam untuk seluruh aplikasi: `Inter`** (`font-sans`) dengan sistem **3 Tingkat Ukuran Baku berbasis `rem`** agar otomatis beradaptasi dengan setelan aksesibilitas layar smartphone:
-
-| Tingkat | Kelas Token | Ukuran REM (Default PX) | Bobot & Tracking | Penggunaan Wajib |
-| :--- | :--- | :--- | :--- | :--- |
-| **Tier 1: Display & Header Layar** | `.h1` (`text-2xl`) | **2.0625rem** (~33px) | `font-black tracking-tight leading-tight` | • Judul Halaman Utama (Dasbor, Rekap, Brainstorm) |
-| **Tier 2: Judul Kartu, Nama & Metrik** | `.h2` (`text-md`) | **1.3125rem** (~21px) | `font-bold leading-snug` | • Nama Pasien, Judul Modal, Diagnosis Utama, Tombol Utama |
-| **Tier 3: Teks Isi, Label & Badge** | `.h3`, `.body-md`, `.caption` | **1.0000rem** (~16px) | `font-medium / font-semibold leading-relaxed` | • Isi SOAP, No. RM, Dosis Terapi, Label Input, Chip Status |
+Pengguna sangat menentang dekorasi visual yang tidak perlu. Antarmuka Doctoid harus bersih, tenang, berwibawa, dan fokus pada data klinis pasien.
 
 ### ⛔ DILARANG KERAS:
-- **JANGAN PERNAH** menggunakan ukuran font arbitrer seperti `text-[9px]`, `text-[10px]`, `text-[11px]`, `text-[12px]`, `text-[13px]`. Ukuran arbitrer mematikan penskalaan font sistem Android dan membuat teks kerdil tidak terbaca.
-- Variasi hierarki teks kecil dibedakan melalui **warna** (`text-ink-muted`), **bobot** (`font-bold`), atau `uppercase tracking-wider` — **BUKAN** dengan mengecilkan ukuran font di bawah 16px.
+- **DILARANG** menambahkan ikon dekoratif/pemanis di dalam opsi dropdown atau menu pilihan.
+- **DILARANG** menaruh ikon penghias di form input, label kolom, atau placeholder (misal: ikon user di input nama, ikon stetoskop di anamnesis, ikon kalender di tanggal, ikon dokumen di RM).
+- **DILARANG** menaruh ikon di header kartu (*card title*), kartu metrik dasbor, maupun judul section.
+- **DILARANG** menambahkan ikon di tombol teks biasa (misal tombol "Batal", "Simpan", "ACC", "Terapkan").
+- **DILARANG KERAS** menggunakan emoji di seluruh UI maupun teks copywriting / toast / pesan aplikasi.
+
+### ✅ Pengecualian Ikon yang HANYA Diperbolehkan (Mutlak Fungsional Saja):
+1. **4 Ikon Navigasi Utama** di bilah bawah: Dasbor (`LayoutDashboard`), Catat Pasien (`Sparkles`), Rekam Medis (`FolderOpen`), Template (`FileText`).
+2. **Indikator Dropdown**: Panah chevron minimalis (`ChevronDown`) untuk menunjukkan elemen dapat dibuka.
+3. **Tombol Aksi Media & Input**: Kamera, Galeri, Mikrofon pada *Attachment Menu* dan tombol Kirim (`Send`).
+4. **Indikator Loading**: Spinner minimalis (`Loader2`) hanya saat proses latar belakang aktif.
+5. **Aksi Destruktif/Tutup**: Ikon Hapus (`Trash2`) dan Tutup Modal (`X`) jika ruang tidak memungkinkan teks.
 
 ---
 
-## 4. Tata Letak & Komponen Baku
+## 2. Standar Dropdown & Pemilihan (No Native `<select>`)
 
-### A. Larangan "Kotak di dalam Kotak" (*No Nested Cards*)
-- **Salah**: Menaruh kartu ber-border di dalam kartu ber-border lain untuk setiap butir data pasien.
-- **Benar**: Gunakan **satu kartu berlatar kaca (*single surface*)** dengan garis pemisah halus (*divider line* `border-t border-primary-soft/20`).
+> **DILARANG KERAS menggunakan elemen native browser `<select>`**. Native dropdown menghasilkan tampilan kotak abu-abu kaku dengan highlight biru kuno era 90-an yang merusak estetika aplikasi.
 
-### B. Bottom Navigation Bar & Badge Notifikasi
-- Bilah navigasi bawah berbentuk **kapsul melayang (*floating glass bar*)** berisi icon murni tanpa teks label.
-- **Badge Notifikasi**: Menggunakan titik putih bersih tanpa angka raksasa untuk menjaga estetika minimalis.
-
-### C. Target Sentuh (*Touch Targets*) & Safe Area
-- Tinggi tombol utama dan kotak input: minimal **44px – 48px** (`h-11` s/d `h-12`).
-- Safe Area Notch / Navigation Bar:
-  ```css
-  padding-top: max(1rem, env(safe-area-inset-top, 20px));
-  padding-bottom: max(1rem, env(safe-area-inset-bottom, 16px));
-  ```
-
----
-
-## 5. Animasi & Gestur Sentuh (*Horizontal Swipe Navigation*)
-
-Untuk memberikan sensasi aplikasi native yang mulus (*high-performance 60fps*):
-- **Gestur Swipe Tab**: Menggunakan `PointerEvents` (`onPointerDown`, `onPointerUp`) untuk berpindah antar tab (`/dasbor` ⇄ `/brainstorm` ⇄ `/rekap`) secara natural di HP, mouse desktop, maupun stylus tablet.
-- **`user-select: none`**: Mencegah teks terpilih/terblokir secara tidak sengaja saat melakukan gestur geser pada elemen non-input.
+### ✅ Standar Baku Dropdown: Komponen `CustomSelect`
+Seluruh pilihan daftar (Gelar, Jaminan, Faskes, Ruangan, Template, GCS, dsb.) **WAJIB** menggunakan custom dropdown popover:
+- **Trigger Input**:
+  - Bentuk: `rounded-2xl border border-slate-300 bg-slate-100/90 px-3 py-3 text-xs font-bold text-slate-900`.
+  - Fokus / Terbuka: `bg-white border-primary ring-2 ring-primary/20 shadow-xs`.
+  - Indikator: Chevron kecil minimalis (`ChevronDown size={16}`) yang berputar halus 180° saat terbuka.
+- **Floating Popover Panel**:
+  - Kontainer: `bg-white rounded-2xl border border-slate-200/90 shadow-xl backdrop-blur-xl p-1.5 z-50 animate-in fade-in zoom-in-95 duration-100`.
+  - Scroll: `max-h-60 overflow-y-auto hide-scrollbar`.
+- **Item Opsi (List Item)**:
+  - Gaya Normal: `rounded-xl px-3 py-2 text-xs font-bold text-slate-800 hover:bg-primary/10 hover:text-primary transition-colors cursor-pointer`.
+  - Gaya Terpilih (*Active*): `bg-primary text-white shadow-xs font-bold`.
+  - **MURNI TEKS BERSIH** tanpa ikon di samping teks pilihan!
 
 ---
 
-## 6. Prinsip Anti-Bloat & Larangan Dekorasi Berlebihan (*Crucial*)
+## 3. Palet Warna Resmi (Strict Color Whitelist)
 
-1. **Dilarang Menulis Penjelasan Panjang / Seabrek Teks**:
-   - Dokter menggunakan aplikasi ini untuk efisiensi tinggi dan kecepatan di bangsal rumah sakit.
-   - Dilarang membuat paragraf penjelasan bertele-tele, kalimat panduan yang tidak diminta, atau banner keterangan yang memakan ruang layar.
-   - Gunakan label pendek dan jelas langsung ke intinya.
+Hanya warna-warna berikut yang **DIIZINKAN** di dalam aplikasi. Dilarang memakai warna arbitrer di luar whitelist ini:
 
-2. **Dilarang Spam Ikon / Emoji (*No Excessive Icons*)**:
-   - Jangan menaruh ikon di setiap tombol, label input, judul section, atau badge.
-   - Gunakan ikon HANYA jika benar-benar memiliki fungsi aksi langsung (seperti tombol Kembali, Kamera, Sensor Biometrik, Pengaturan, atau Keluar).
-   - Jangan menyertakan emoji dekoratif di dalam UI maupun output respon percakapan.
+### A. Brand & Warna Utama
+| Token | Hex / Utility Tailwind | Peran & Penggunaan |
+| :--- | :--- | :--- |
+| **Primary (Medical Blue)** | `#3B82F6` (`blue-500` / `primary`) | Aksen aktif utama, tombol aksi primer, tab terpilih, ring fokus |
+| **Primary Deep (Cobalt)** | `#1D4ED8` (`blue-700` / `primary-deep`) | Gradien akhir tombol primer, header dasbor, aksen gelap |
+| **Primary Soft (Sky)** | `#38BDF8` (`sky-400` / `primary-soft`) | Highlight halus, border fokus aktif |
+| **Primary Gradient** | `bg-gradient-to-br from-primary to-primary-deep` | Tombol Kirim AI, Tombol Simpan SOAP, Tab Bar Navigasi |
 
-3. **Pilihan Sederhana & Langsung**:
-   - Untuk pilihan daftar (seperti spesialisasi / faskes / format), gunakan dropdown standar `<select>` atau input bersih, bukan tumpukan chip/banner yang berantakan.
+### B. Warna Netral & Permukaan (*Canvas & Surfaces*)
+| Token | Hex / Utility Tailwind | Penggunaan Wajib |
+| :--- | :--- | :--- |
+| **Pure White** | `#FFFFFF` (`bg-white`) | Kartu konten utama, modal popover, kotak input AI, panel dropdown |
+| **Canvas Slate** | `#F8FAFC` s/d `#E5EBF4` (`slate-50` / `surface`) | Latar belakang dasar seluruh halaman |
+| **Input Surface** | `bg-slate-100/90` atau `bg-slate-50` | Input form, textarea non-fokus, tombol netral |
+| **Border Divider** | `border-slate-200` | Garis pemisah kartu, pembatas section, border popover |
+| **Border Input** | `border-slate-300` | Border form input dan dropdown trigger saat idle |
+
+### C. Tipografi & Kontras Teks (*Ink*)
+| Token | Utility Tailwind | Penggunaan |
+| :--- | :--- | :--- |
+| **Ink Bold** | `text-slate-900` | Teks utama, judul, nilai data, input teks pengguna (kontras tinggi) |
+| **Ink Muted** | `text-slate-500` / `text-slate-600` | Keterangan, label sekunder, tanggal, timestamp |
+| **Placeholder** | `text-slate-400 font-normal` | Teks panduan saat input masih kosong |
+
+### D. Warna Status Semantik Klinis (HANYA 3 WARNA INI)
+| Kategori | Token / Utility | Penggunaan Klinis Spesifik |
+| :--- | :--- | :--- |
+| **Sukses / Selesai / KRS** | `#10B981` (`emerald-500`, `bg-emerald-50`, `border-emerald-200`) | Pasien KRS / Pulih, Terapi Baru Disetujui, Tombol ACC Form |
+| **Perhatian / Rawat Lama** | `#F59E0B` (`amber-500`, `bg-amber-50`, `border-amber-200`) | Rawat H->7, Pasien Baru MRS, Peringatan Klinis / Dosis |
+| **Darurat / Stop / Hapus** | `#F43F5E` (`rose-500`, `bg-rose-50`, `border-rose-200`) | Terapi Dihentikan (Stop/Aff), Alergi Obat, Dikte Aktif, Tombol Batal/Hapus |
+
+> ⛔ **DILARANG**: Menggunakan warna ungu liar, oranye neon, pink cerah, kuning silau, atau variasi warna pelangi sembarangan.
 
 ---
-*Dokumen ini merupakan panduan resmi UI/UX Doctoid App v0.1+.*
+
+## 4. Standar Tipografi (3 Tingkat Ukuran Berbasis Golden Ratio)
+
+Menggunakan **1 jenis font seragam untuk seluruh aplikasi: `Inter`** (`font-sans`) dengan sistem **3 Tingkat Ukuran Baku**:
+
+| Tingkat | Kelas Token | Ukuran REM (PX) | Bobot & Karakter | Penggunaan Wajib |
+| :--- | :--- | :--- | :--- | :--- |
+| **Tier 1: Display & Header Utama** | `.h1` (`text-2xl`) | **2.0625rem** (~33px) | `font-black tracking-tight leading-tight` | • Judul Halaman Utama (Dasbor, Rekap, Brainstorm) |
+| **Tier 2: Judul Kartu & Nama Pasien** | `.h2` (`text-xl` / `text-md`) | **1.3125rem** (~21px) | `font-bold leading-snug` | • Nama Pasien, Judul Modal Dialog, Diagnosis Utama |
+| **Tier 3: Teks Isi, Form & Label** | `.body-md` / `text-xs` | **1.0000rem** (~16px) / **0.75rem** (~12px) | `font-bold` / `font-semibold leading-relaxed` | • Isi SOAP, No. RM, Dosis Terapi, Label Input, Isi Dropdown |
+
+### ⛔ DILARANG KERAS:
+- Menggunakan ukuran font arbitrer seperti `text-[9px]`, `text-[10px]`, `text-[11px]`. Ukuran arbitrer merusak penskalaan aksesibilitas sistem operasi.
+- Pembedaan hierarki dilakukan melalui **bobot** (`font-bold` vs `font-normal`) dan **warna** (`text-slate-900` vs `text-slate-500`), **BUKAN** dengan mengecilkan teks menjadi kerdil.
+
+---
+
+## 5. Bentuk & Geometri Baku (Shapes & Geometry)
+
+- **`rounded-2xl` (16px)**: Standar mutlak untuk seluruh Kartu Utama, Form Input, Dropdown Popover, Modal Dialog, dan Tombol Persegi Panjang.
+- **`rounded-3xl` (24px)**: Standar untuk Kontainer Navigasi Bawah (*Floating Unified Dock*) dan Wadah Kotak Input AI.
+- **`rounded-full` (Lingkaran)**: HANYA untuk tombol aksi cepat melayang berukuran seragam (Kamera, Galeri, Mic, Send) dan Badge Status.
+- **Single-Surface Hierarchy**: Dilarang membuat "kotak di dalam kotak". Satu permukaan putih bersih dengan garis pemisah tipis (`border-t border-slate-200`).
+- **Elevasi & Shadow Halus**:
+  - Kartu & Input: `shadow-xs` atau `shadow-sm`.
+  - Dropdown Popover: `shadow-xl`.
+  - Floating Bottom Dock: `shadow-[0_-12px_30px_-4px_rgba(15,23,42,0.16)]`.
+
+---
+
+## 6. Standar Copywriting & Komunikasi Manusiawi (Human & Effective)
+
+> **"Manusia itu HARUS EFEKTIF DAN EFISIEN komunikasi harus bener!"**
+
+Dokter spesialis bekerja dengan intensitas tinggi di bangsal rumah sakit dan poliklinik. Copywriting harus menghargai waktu dokter:
+
+### A. Prinsip Komunikasi:
+1. **Lugas & Langsung ke Intinya (*To-The-Point*)**: Hilangkan semua basa-basi, kalimat pengantar kosong, atau tutorial yang tidak diminta.
+2. **Bahasa Indonesia Medis Profesional**: Gunakan istilah klinis baku yang lazim di rumah sakit Indonesia (misal: "No. RM", "Jaminan", "Keluhan Utama", "Pemeriksaan Fisik", "Usulan Terapi", "KRS", "Readmisi").
+3. **Hindari Bahasa Robotik / AI Klise**: Jangan gunakan frasa seperti *"Sebagai asisten cerdas, saya telah merapikan..."* atau *"Halo Dok, silakan pilih..."*.
+
+### B. Panduan Contoh Copywriting:
+| Konteks | ❌ SALAH (Bertele-tele / Robotik) | ✅ BENAR (Lugas, Efektif & Manusiawi) |
+| :--- | :--- | :--- |
+| **Placeholder Input** | `"Ketik atau dikte konsultasi Anda di sini (tarik pojok untuk perbesar)"` | `"Masukkan laporan pasien..."` |
+| **Dropdown Jaminan** | `"Silakan tentukan jenis pembayaran pasien untuk penagihan klaim"` | `"Pilih Jaminan"` |
+| **Status Proses AI** | `"Harap tunggu sejenak, kecerdasan buatan kami sedang menganalisis SOAP..."` | `"AI sedang merapikan..."` / `"Menganalisis..."` |
+| **Konfirmasi Hapus** | `"Apakah Anda benar-benar yakin ingin menghapus data rekam medis pasien ini?"` | `"Hapus pasien dari daftar?"` |
+| **Notifikasi Sukses** | `"Berhasil! Data konsultasi Anda telah berhasil disimpan dengan sukses ke sistem"` | `"Laporan tersimpan"` |
+| **Tombol Staging** | `"Klik di sini untuk menyetujui dan menerapkan hasil analisis ke formulir"` | `"ACC & Terapkan ke Form"` |
+
+---
+
+*Dokumen ini merupakan hukum baku UI/UX & Copywriting resmi Doctoid App.*

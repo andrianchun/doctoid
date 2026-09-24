@@ -4,6 +4,7 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { Search, FileText, Plus, Trash2, ClipboardCopy, ChevronRight, Calculator } from 'lucide-react'
 import { db, type Patient, type ProgressNote } from '../db'
 import Masked from '../components/Masked'
+import CustomSelect from '../components/CustomSelect'
 
 const hariKe = (iso: string) =>
   Math.max(1, Math.floor((Date.now() - new Date(iso).getTime()) / 86400000) + 1)
@@ -33,6 +34,30 @@ function renderTemplate(fmt: string, p: Patient, latest?: ProgressNote): string 
   return fmt.replace(/\{\{(\w+)\}\}/g, (_, k) => vars[k] ?? `{{${k}}}`)
 }
 
+const GCS_E_OPTIONS = [
+  { value: '4', label: '4 - Spontan' },
+  { value: '3', label: '3 - Suara' },
+  { value: '2', label: '2 - Nyeri' },
+  { value: '1', label: '1 - Tidak ada' },
+]
+
+const GCS_V_OPTIONS = [
+  { value: '5', label: '5 - Orientasi baik' },
+  { value: '4', label: '4 - Bingung' },
+  { value: '3', label: '3 - Kata tak tepat' },
+  { value: '2', label: '2 - Suara mengerang' },
+  { value: '1', label: '1 - Tidak ada' },
+]
+
+const GCS_M_OPTIONS = [
+  { value: '6', label: '6 - Mengikuti perintah' },
+  { value: '5', label: '5 - Melokalisir nyeri' },
+  { value: '4', label: '4 - Menghindar nyeri' },
+  { value: '3', label: '3 - Fleksi abnormal' },
+  { value: '2', label: '2 - Ekstensi abnormal' },
+  { value: '1', label: '1 - Tidak ada' },
+]
+
 export default function Rekap() {
   const [activeTab, setActiveTab] = useState<'pasien' | 'template' | 'kalkulator'>('pasien')
   const [q, setQ] = useState('')
@@ -45,6 +70,25 @@ export default function Rekap() {
   const patients = useLiveQuery(() => db.patients.toArray(), [], [])
   const templates = useLiveQuery(() => db.templates.toArray(), [], [])
   const wards = useLiveQuery(() => db.wards.toArray(), [], [])
+
+  const templateOptions = useMemo(
+    () => [
+      { value: '0', label: '— Pilih Template —' },
+      ...(templates?.map((t) => ({ value: String(t.id), label: t.nama_template })) || []),
+    ],
+    [templates]
+  )
+
+  const patientOptions = useMemo(
+    () => [
+      { value: '0', label: '— Pilih Pasien —' },
+      ...(patients?.map((p) => ({
+        value: String(p.id),
+        label: `${p.nama_depan || (p as any).inisial || 'Pasien'} (${p.no_rm})`,
+      })) || []),
+    ],
+    [patients]
+  )
 
   const wardMap = useMemo(() => {
     const map = new Map<number, string>()
@@ -202,14 +246,18 @@ export default function Rekap() {
           </p>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-            <select value={tplId} onChange={(e) => setTplId(+e.target.value)} className={inputCls + ' h-11'}>
-              <option value={0}>— Pilih Template —</option>
-              {templates?.map((t) => <option key={t.id} value={t.id}>{t.nama_template}</option>)}
-            </select>
-            <select value={tplPasienId} onChange={(e) => setTplPasienId(+e.target.value)} className={inputCls + ' h-11'}>
-              <option value={0}>— Pilih Pasien —</option>
-              {patients?.map((p) => <option key={p.id} value={p.id}>{p.nama_depan || (p as any).inisial} ({p.no_rm})</option>)}
-            </select>
+            <CustomSelect
+              value={String(tplId)}
+              onChange={(v) => setTplId(Number(v))}
+              options={templateOptions}
+              placeholder="— Pilih Template —"
+            />
+            <CustomSelect
+              value={String(tplPasienId)}
+              onChange={(v) => setTplPasienId(Number(v))}
+              options={patientOptions}
+              placeholder="— Pilih Pasien —"
+            />
           </div>
 
           <div className="flex flex-wrap gap-2">
@@ -307,36 +355,30 @@ export default function Rekap() {
               </span>
             </div>
 
-            <div className="grid grid-cols-3 gap-2 pt-1">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1">
               <div>
                 <label className="caption block font-bold mb-1">Eye (E)</label>
-                <select value={gcsE} onChange={(e) => setGcsE(+e.target.value)} className={inputCls}>
-                  <option value={4}>4 - Spontan</option>
-                  <option value={3}>3 - Suara</option>
-                  <option value={2}>2 - Nyeri</option>
-                  <option value={1}>1 - Tidak ada</option>
-                </select>
+                <CustomSelect
+                  value={String(gcsE)}
+                  onChange={(v) => setGcsE(Number(v))}
+                  options={GCS_E_OPTIONS}
+                />
               </div>
               <div>
                 <label className="caption block font-bold mb-1">Verbal (V)</label>
-                <select value={gcsV} onChange={(e) => setGcsV(+e.target.value)} className={inputCls}>
-                  <option value={5}>5 - Orientasi baik</option>
-                  <option value={4}>4 - Bingung</option>
-                  <option value={3}>3 - Kata tak tepat</option>
-                  <option value={2}>2 - Suara mengerang</option>
-                  <option value={1}>1 - Tidak ada</option>
-                </select>
+                <CustomSelect
+                  value={String(gcsV)}
+                  onChange={(v) => setGcsV(Number(v))}
+                  options={GCS_V_OPTIONS}
+                />
               </div>
               <div>
                 <label className="caption block font-bold mb-1">Motorik (M)</label>
-                <select value={gcsM} onChange={(e) => setGcsM(+e.target.value)} className={inputCls}>
-                  <option value={6}>6 - Mengikuti perintah</option>
-                  <option value={5}>5 - Melokalisir nyeri</option>
-                  <option value={4}>4 - Menghindar nyeri</option>
-                  <option value={3}>3 - Fleksi abnormal</option>
-                  <option value={2}>2 - Ekstensi abnormal</option>
-                  <option value={1}>1 - Tidak ada</option>
-                </select>
+                <CustomSelect
+                  value={String(gcsM)}
+                  onChange={(v) => setGcsM(Number(v))}
+                  options={GCS_M_OPTIONS}
+                />
               </div>
             </div>
           </div>

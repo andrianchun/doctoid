@@ -3,6 +3,7 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { Plus, Trash2, ClipboardCopy, Check, Edit3 } from 'lucide-react'
 import { db, type Patient, type ProgressNote, type DiagnosisItem } from '../db'
 import { formatDate, hariKe } from '../utils/dateFormat'
+import CustomSelect from '../components/CustomSelect'
 
 const inputCls =
   'w-full rounded-2xl border border-slate-300 bg-slate-100/90 px-4 py-3 text-xs font-semibold text-slate-900 placeholder:text-slate-400 placeholder:font-normal outline-none focus:bg-white focus:border-primary focus:ring-4 focus:ring-primary/20 transition-all shadow-2xs'
@@ -97,6 +98,25 @@ export default function TemplateTab() {
   const [newNama, setNewNama] = useState('')
   const [newFmt, setNewFmt] = useState('')
 
+  const templateOptions = useMemo(
+    () => [
+      { value: '0', label: '— Pilih Template —' },
+      ...(templates?.map((t) => ({ value: String(t.id), label: t.nama_template })) || []),
+    ],
+    [templates]
+  )
+
+  const patientOptions = useMemo(
+    () => [
+      { value: '0', label: '— Pilih Pasien —' },
+      ...(patients?.map((p) => ({
+        value: String(p.id),
+        label: `${p.title ? p.title + ' ' : ''}${p.nama_depan || (p as any).inisial || 'Pasien'} (RM: ${p.no_rm})`,
+      })) || []),
+    ],
+    [patients]
+  )
+
   // Seed default clinical templates if empty
   useMemo(async () => {
     const count = await db.templates.count()
@@ -161,34 +181,22 @@ export default function TemplateTab() {
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <label className="caption font-bold block mb-1">Pilih Format Template</label>
-            <select
-              value={tplId}
-              onChange={(e) => setTplId(+e.target.value)}
-              className={inputCls + ' h-11'}
-            >
-              <option value={0}>— Pilih Template —</option>
-              {templates?.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.nama_template}
-                </option>
-              ))}
-            </select>
+            <CustomSelect
+              value={String(tplId)}
+              onChange={(val) => setTplId(Number(val))}
+              options={templateOptions}
+              placeholder="— Pilih Template —"
+            />
           </div>
 
           <div>
             <label className="caption font-bold block mb-1">Pilih Data Pasien</label>
-            <select
-              value={tplPasienId}
-              onChange={(e) => setTplPasienId(+e.target.value)}
-              className={inputCls + ' h-11'}
-            >
-              <option value={0}>— Pilih Pasien —</option>
-              {patients?.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.title} {p.nama_depan || (p as any).inisial} (RM: {p.no_rm})
-                </option>
-              ))}
-            </select>
+            <CustomSelect
+              value={String(tplPasienId)}
+              onChange={(val) => setTplPasienId(Number(val))}
+              options={patientOptions}
+              placeholder="— Pilih Pasien —"
+            />
           </div>
         </div>
 

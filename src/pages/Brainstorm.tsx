@@ -1,13 +1,16 @@
-import { useEffect, useRef, useState, useMemo } from 'react'
+import { useEffect, useRef, useState, useMemo, useCallback } from 'react'
+import { createPortal } from 'react-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
 import {
-  Plus, Mic, MicOff,
+  Mic,
   Trash2, Loader2, X, FileText, ChevronDown, Send,
   Search
 } from 'lucide-react'
 import { db, type Jaminan, type TerapiItem, type DiagnosisItem, type RegexField, type Patient, type RawatEpisode } from '../db'
 import Masked from '../components/Masked'
 import ResizableTextarea from '../components/ResizableTextarea'
+import AttachmentMenu from '../components/AttachmentMenu'
+import CustomSelect from '../components/CustomSelect'
 import { lineToTerapi, localParse, classifyFragment, type LocalParseResult } from '../parser'
 import { rapikan, analisisKasus } from '../ai'
 import { buatKonteks, catatTerapi, saranTerapi, type Suggestion } from '../styleLearning'
@@ -93,6 +96,7 @@ export default function Brainstorm() {
   const [form, setForm] = useState<FormState>(emptyForm())
   const [busy, setBusy] = useState<'' | 'ocr' | 'ai' | 'analisis'>('')
   const [listening, setListening] = useState(false)
+  const [isTextFocused, setIsTextFocused] = useState(false)
   const [toast, setToast] = useState('')
   const [komentarAnalisis, setKomentarAnalisis] = useState('')
 
@@ -129,6 +133,31 @@ export default function Brainstorm() {
   const [highlight, setHighlight] = useState<{ fields: Set<string>; variant: 'amber' | 'red' }>({ fields: new Set(), variant: 'amber' })
   const highlightTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const draftLoaded = useRef(false)
+  const [dockSlot, setDockSlot] = useState<HTMLElement | null>(() =>
+    typeof document !== 'undefined' ? document.getElementById('bottom-dock-addon') : null
+  )
+
+  useEffect(() => {
+    if (!dockSlot) {
+      setDockSlot(document.getElementById('bottom-dock-addon'))
+    }
+  }, [dockSlot])
+
+  // Melebarkan textarea otomatis saat mengetik/fokus (maksimal 6 baris ~145px)
+  const adjustTextHeight = useCallback(() => {
+    const el = textRef.current
+    if (!el) return
+    el.style.height = 'auto'
+    const isExpanded = isTextFocused || raw.length > 0
+    const minH = isExpanded ? 70 : 42 // 3 baris saat aktif mengetik / ada teks, 1 baris saat kosong
+    const maxH = 145 // Maksimal 6 baris agar ergonomis di layar ponsel
+    const nextH = Math.min(Math.max(el.scrollHeight, minH), maxH)
+    el.style.height = `${nextH}px`
+  }, [isTextFocused, raw])
+
+  useEffect(() => {
+    adjustTextHeight()
+  }, [adjustTextHeight])
 
   const isFormFilled = useMemo(() => {
     return Boolean(
@@ -732,20 +761,13 @@ export default function Brainstorm() {
 
         {/* Baris 1: Gelar, Nama, Usia */}
         <div className="flex gap-2">
-          <select
+          <CustomSelect
             value={form.title}
-            onChange={(e) => set({ title: e.target.value })}
-            className="w-20 rounded-2xl border border-slate-300 bg-slate-100/90 px-2 py-3 text-xs font-bold text-slate-900 outline-none focus:bg-white focus:border-primary shrink-0 cursor-pointer shadow-2xs"
-          >
-            <option value="">Gelar</option>
-            <option>dr.</option>
-            <option>Tn.</option>
-            <option>Ny.</option>
-            <option>Sdr.</option>
-            <option>Sdri.</option>
-            <option>An.</option>
-            <option>By.</option>
-          </select>
+            onChange={(val) => set({ title: val })}
+            options={['dr.', 'Tn.', 'Ny.', 'Sdr.', 'Sdri.', 'An.', 'By.']}
+            placeholder="Gelar"
+            className="w-24 shrink-0"
+          />
           <input
             ref={namaRef}
             value={form.nama_depan}
@@ -779,16 +801,12 @@ export default function Brainstorm() {
             placeholder="No. RM"
             className={inputCls}
           />
-          <select
+          <CustomSelect
             value={form.jaminan}
-            onChange={(e) => set({ jaminan: e.target.value as Jaminan })}
-            className={inputCls + ' cursor-pointer'}
-          >
-            <option value="">Pilih Jaminan</option>
-            <option value="BPJS">BPJS</option>
-            <option value="Umum">Umum</option>
-            <option value="Asuransi">Asuransi</option>
-          </select>
+            onChange={(val) => set({ jaminan: val as Jaminan })}
+            options={['BPJS', 'Umum', 'Asuransi']}
+            placeholder="Pilih Jaminan"
+          />
         </div>
 
         {/* Baris 3: Tgl Onset & Tgl MRS */}
@@ -1457,86 +1475,94 @@ export default function Brainstorm() {
       <input ref={ocrCameraRef} type="file" accept="image/*" capture="environment" hidden onChange={(e) => e.target.files?.[0] && runOcr(e.target.files[0])} />
       <input ref={ocrGalleryRef} type="file" accept="image/*" hidden onChange={(e) => e.target.files?.[0] && runOcr(e.target.files[0])} />
 
-      {/* Floating AI Input Bar — Desain Biru Nyembul Harmonis dengan Nav Bar */}
-      <div className="fixed bottom-[calc(4.75rem+env(safe-area-inset-bottom,0px))] left-0 right-0 z-40 px-4 pointer-events-none flex flex-col items-center">
-        <div className="w-full max-w-lg pointer-events-auto">
-          <div className="flex items-end gap-2 rounded-3xl bg-gradient-to-br from-primary via-primary to-primary-deep text-white shadow-2xl shadow-primary/35 border border-white/25 backdrop-blur-xl p-2.5 transition-all">
-            {/* Menu Plus */}
-            <div className="relative group shrink-0">
-              <button
-                type="button"
-                aria-label="Alat AI"
-                className="flex size-10 cursor-pointer items-center justify-center rounded-full bg-white/20 border border-white/25 text-white hover:bg-white/30 active:scale-95 transition-all"
-              >
-                <Plus size={22} />
-              </button>
-              <div className="absolute bottom-full left-0 mb-2.5 hidden flex-col gap-1.5 rounded-2xl bg-card border border-primary/20 p-2 shadow-2xl group-hover:flex group-focus-within:flex w-max z-50 text-ink animate-in fade-in zoom-in-95 duration-150">
-                <p className="caption font-bold text-ink-muted uppercase tracking-wider px-2 pt-1">Alat AI</p>
-                <button
-                  type="button"
-                  onClick={() => ocrCameraRef.current?.click()}
-                  className="flex items-center gap-2 whitespace-nowrap rounded-xl px-3 py-2 text-xs font-semibold hover:bg-primary-soft/20 text-ink cursor-pointer transition-colors"
-                >
-                  Ekstrak Teks (Kamera)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => ocrGalleryRef.current?.click()}
-                  className="flex items-center gap-2 whitespace-nowrap rounded-xl px-3 py-2 text-xs font-semibold hover:bg-primary-soft/20 text-ink cursor-pointer transition-colors"
-                >
-                  Ekstrak Teks (Galeri)
-                </button>
+      {/* Floating AI Input Bar — Tetap Putih Bersih, Menyambung dengan Highlight Tab Nav Bar */}
+      {(() => {
+        const inputBarJsx = (
+          <div className="w-full flex flex-col items-center pointer-events-auto">
+            {/* Helper status text — Mengambang elegan di atas kotak input */}
+            {(busy === 'ocr' || listening || busy === 'ai' || busy === 'analisis') && (
+              <div className="mb-2 flex items-center justify-center gap-2 caption font-medium text-ink bg-white/95 backdrop-blur-md px-3.5 py-1.5 rounded-full shadow-lg border border-primary/25 w-max mx-auto animate-in fade-in zoom-in-95 duration-150">
+                {busy === 'ocr' && <><Loader2 size={13} className="animate-spin text-primary" /> <span className="text-primary font-bold">Mengekstrak teks...</span></>}
+                {busy === 'ai' && <><Loader2 size={13} className="animate-spin text-primary" /> <span className="text-primary font-bold">AI sedang merapikan...</span></>}
+                {busy === 'analisis' && <><Loader2 size={13} className="animate-spin text-blue-600" /> <span className="text-blue-600 font-bold">AI sedang menganalisis...</span></>}
+                {listening && <><Mic size={13} className="animate-pulse text-rose-500" /> <span className="text-rose-500 font-bold">Mendengarkan...</span></>}
               </div>
-            </div>
+            )}
 
-            <textarea
-              ref={textRef}
-              value={raw}
-              onChange={(e) => setRaw(e.target.value)}
-              placeholder="Ketik / dikte konsultasi... (tarik pojok untuk perbesar)"
-              rows={2}
-              maxLength={10000}
-              className="min-h-[50px] max-h-[260px] flex-1 resize-y bg-white/15 border border-white/25 rounded-2xl p-3 text-xs outline-none text-white font-medium placeholder:text-white/60 placeholder:font-normal focus:bg-white/25 focus:border-white/50 focus:ring-2 focus:ring-white/20 transition-all leading-relaxed"
-            />
+            {/* Kotak Input Putih Bersih — Menyambung Mulus dengan Tab Highlight Putih */}
+            <div className="flex items-end gap-2 rounded-t-3xl rounded-b-none bg-white border-t border-x border-slate-200/80 border-b-0 shadow-[0_-12px_30px_-4px_rgba(15,23,42,0.16),0_-4px_10px_-2px_rgba(15,23,42,0.08),-4px_0_16px_-4px_rgba(15,23,42,0.1),4px_0_16px_-4px_rgba(15,23,42,0.1)] p-2.5 transition-all w-full -mb-[1px]">
+              {/* Radial Fan Attachment Menu (Kamera, Galeri, Dikte ala Lomeal) */}
+              <AttachmentMenu
+                disabled={busy === 'ai'}
+                isListening={listening}
+                onSelectCamera={() => ocrCameraRef.current?.click()}
+                onSelectGallery={() => ocrGalleryRef.current?.click()}
+                onSelectMic={toggleMic}
+              />
 
-            <div className="shrink-0 flex items-center gap-1.5 mb-1 mr-0.5">
-              <button
-                type="button"
-                onClick={toggleMic}
-                aria-label={listening ? 'Matikan Dikte' : 'Mulai Dikte Suara'}
-                className={`flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-full transition-all active:scale-95 ${
-                  listening
-                    ? 'bg-rose-500 text-white animate-pulse shadow-lg shadow-rose-500/50'
-                    : 'bg-white/20 border border-white/25 text-white hover:bg-white/30'
-                }`}
-              >
-                {listening ? <MicOff size={18} /> : <Mic size={18} />}
-              </button>
-              {(raw.trim() || attachments.length > 0) && (
+              {/* Textarea Auto-Expand tanpa resize handle */}
+              <textarea
+                ref={textRef}
+                value={raw}
+                onChange={(e) => {
+                  setRaw(e.target.value)
+                  adjustTextHeight()
+                }}
+                onFocus={() => setIsTextFocused(true)}
+                onBlur={() => setIsTextFocused(false)}
+                onKeyDown={(e) => {
+                  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                    e.preventDefault()
+                    if ((raw.trim() || attachments.length > 0) && busy !== 'ai') {
+                      parseAi()
+                    }
+                  }
+                }}
+                placeholder="Masukkan laporan pasien..."
+                rows={isTextFocused || raw ? 3 : 1}
+                maxLength={10000}
+                style={{
+                  height: (isTextFocused || raw) ? '70px' : '42px',
+                  minHeight: (isTextFocused || raw) ? '70px' : '42px',
+                  maxHeight: '145px'
+                }}
+                className="flex-1 resize-none bg-slate-50 border border-slate-200 rounded-2xl p-2.5 px-3 text-xs outline-none text-slate-900 font-medium placeholder:text-slate-400 placeholder:font-normal focus:bg-white focus:border-primary focus:ring-2 focus:ring-primary/20 transition-colors leading-relaxed overflow-y-auto hide-scrollbar"
+              />
+
+              {/* Murni Tombol Send di sebelah kanan */}
+              <div className="shrink-0 flex items-center mb-0.5">
                 <button
                   type="button"
                   onClick={parseAi}
-                  disabled={busy === 'ai'}
+                  disabled={busy === 'ai' || (!raw.trim() && attachments.length === 0)}
                   aria-label="Kirim ke AI"
-                  className="flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-full bg-white text-primary shadow-lg shadow-black/20 hover:bg-white/90 active:scale-95 transition-all disabled:opacity-50"
+                  className={`flex size-10 shrink-0 items-center justify-center rounded-full transition-all ${
+                    raw.trim() || attachments.length > 0
+                      ? 'bg-gradient-to-br from-primary to-primary-deep text-white shadow-md shadow-primary/30 active:scale-95 cursor-pointer'
+                      : 'bg-slate-100 border border-slate-200 text-slate-300 cursor-not-allowed'
+                  } ${busy === 'ai' ? 'opacity-70 cursor-wait' : ''}`}
                 >
-                  {busy === 'ai' ? <Loader2 size={18} className="animate-spin text-primary" /> : <Send size={18} />}
+                  {busy === 'ai' ? (
+                    <Loader2 size={18} className="animate-spin text-white" />
+                  ) : (
+                    <Send size={18} className={raw.trim() || attachments.length > 0 ? 'translate-x-0.5' : ''} />
+                  )}
                 </button>
-              )}
+              </div>
             </div>
           </div>
+        )
 
-          {/* Helper status text beneath chat bar */}
-          {(busy === 'ocr' || listening || busy === 'ai' || busy === 'analisis') && (
-            <div className="mt-1.5 flex items-center justify-center gap-2 caption font-medium text-ink bg-card/90 backdrop-blur-md px-3 py-1 rounded-full shadow-md border border-primary/20 w-max mx-auto animate-in fade-in">
-              {busy === 'ocr' && <><Loader2 size={13} className="animate-spin text-primary" /> <span className="text-primary font-bold">Mengekstrak teks...</span></>}
-              {busy === 'ai' && <><Loader2 size={13} className="animate-spin text-primary" /> <span className="text-primary font-bold">AI sedang merapikan...</span></>}
-              {busy === 'analisis' && <><Loader2 size={13} className="animate-spin text-blue-600" /> <span className="text-blue-600 font-bold">AI sedang menganalisis...</span></>}
-              {listening && <><Mic size={13} className="animate-pulse text-rose-500" /> <span className="text-rose-500 font-bold">Mendengarkan...</span></>}
+        return dockSlot ? (
+          createPortal(inputBarJsx, dockSlot)
+        ) : (
+          <div className="fixed bottom-[calc(4.75rem+env(safe-area-inset-bottom,0px))] left-0 right-0 z-40 px-4 pointer-events-none flex flex-col items-center">
+            <div className="w-full max-w-sm pointer-events-auto">
+              {inputBarJsx}
             </div>
-          )}
-        </div>
-      </div>
+          </div>
+        )
+      })()}
 
       {/* Modal Pilih Pasien Lama / Readmisi */}
       {showSearchModal && (

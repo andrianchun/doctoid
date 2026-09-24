@@ -4,6 +4,7 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { Search, ChevronRight, Pill, Clock } from 'lucide-react'
 import { db } from '../db'
 import Masked from '../components/Masked'
+import CustomSelect from '../components/CustomSelect'
 import { formatDate } from '../utils/dateFormat'
 
 const hariKe = (iso: string) =>
@@ -75,27 +76,29 @@ export default function RekamMedis() {
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <div className="flex items-center gap-1.5 flex-wrap">
           {/* Filter Status */}
-          <select
+          <CustomSelect
             value={filterStatus}
-            onChange={(e) => setFilterStatus(e.target.value)}
-            className="rounded-xl border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-bold text-slate-800 outline-none focus:border-primary shadow-2xs cursor-pointer"
-          >
-            <option value="semua">Semua Status</option>
-            <option value="aktif">Rawat Aktif</option>
-            <option value="krs">Sudah KRS</option>
-          </select>
+            onChange={(val) => setFilterStatus(val)}
+            options={[
+              { value: 'semua', label: 'Semua Status' },
+              { value: 'aktif', label: 'Rawat Aktif' },
+              { value: 'krs', label: 'Sudah KRS' }
+            ]}
+            className="w-36"
+          />
 
           {/* Filter Jaminan */}
-          <select
+          <CustomSelect
             value={filterJaminan}
-            onChange={(e) => setFilterJaminan(e.target.value)}
-            className="rounded-xl border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-bold text-slate-800 outline-none focus:border-primary shadow-2xs cursor-pointer"
-          >
-            <option value="semua">Semua Jaminan</option>
-            <option value="BPJS">BPJS</option>
-            <option value="Umum">Umum</option>
-            <option value="Asuransi">Asuransi</option>
-          </select>
+            onChange={(val) => setFilterJaminan(val)}
+            options={[
+              { value: 'semua', label: 'Semua Jaminan' },
+              { value: 'BPJS', label: 'BPJS' },
+              { value: 'Umum', label: 'Umum' },
+              { value: 'Asuransi', label: 'Asuransi' }
+            ]}
+            className="w-36"
+          />
         </div>
 
         {/* Toggle Lengkap / Ringkas */}
