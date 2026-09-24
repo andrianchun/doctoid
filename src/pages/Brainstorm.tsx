@@ -38,10 +38,10 @@ const emptyForm = (): FormState => ({
 })
 
 const inputCls =
-  'w-full rounded-2xl border border-slate-200/90 bg-slate-50/80 px-4 py-3 text-xs font-semibold text-slate-900 placeholder:text-slate-400 placeholder:font-normal outline-none focus:bg-white focus:border-primary focus:ring-4 focus:ring-primary/15 transition-all shadow-2xs'
+  'w-full rounded-2xl border border-slate-300 bg-slate-100/90 px-4 py-3 text-xs font-semibold text-slate-900 placeholder:text-slate-400 placeholder:font-normal outline-none focus:bg-white focus:border-primary focus:ring-4 focus:ring-primary/20 transition-all shadow-2xs'
 
 const textareaCls =
-  'w-full min-h-[140px] rounded-2xl border border-slate-200/90 bg-slate-50/80 p-4 text-xs font-medium text-slate-900 placeholder:text-slate-400 placeholder:font-normal outline-none focus:bg-white focus:border-primary focus:ring-4 focus:ring-primary/15 transition-all shadow-2xs resize-y leading-relaxed'
+  'w-full min-h-[140px] rounded-2xl border border-slate-300 bg-slate-100/90 p-4 text-xs font-medium text-slate-900 placeholder:text-slate-400 placeholder:font-normal outline-none focus:bg-white focus:border-primary focus:ring-4 focus:ring-primary/20 transition-all shadow-2xs resize-y leading-relaxed'
 
 const compressImage = async (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
@@ -663,8 +663,8 @@ export default function Brainstorm() {
       )}
 
       {/* KARTU 1: IDENTITAS & LOKASI PASIEN */}
-      <div className="glass-card rounded-3xl p-5 shadow-sm space-y-4 animate-in fade-in slide-in-from-bottom-2 border border-slate-100">
-        <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+      <div className="glass-card rounded-3xl p-5 shadow-sm space-y-4 animate-in fade-in slide-in-from-bottom-2 border border-slate-300/80">
+        <div className="flex items-center justify-between pb-2 border-b border-slate-200">
           <h2 className="text-xs font-extrabold text-slate-800 uppercase tracking-wider">
             {selectedPatient ? 'Identitas Pasien (Readmisi)' : 'Identitas Pasien'}
           </h2>
@@ -686,7 +686,7 @@ export default function Brainstorm() {
           <select
             value={form.title}
             onChange={(e) => set({ title: e.target.value })}
-            className="w-20 rounded-2xl border border-slate-200/90 bg-slate-50/80 px-2 py-3 text-xs font-bold text-slate-900 outline-none focus:bg-white focus:border-primary shrink-0 cursor-pointer shadow-2xs"
+            className="w-20 rounded-2xl border border-slate-300 bg-slate-100/90 px-2 py-3 text-xs font-bold text-slate-900 outline-none focus:bg-white focus:border-primary shrink-0 cursor-pointer shadow-2xs"
           >
             <option value="">Gelar</option>
             <option>Tn.</option>
@@ -742,7 +742,7 @@ export default function Brainstorm() {
             <div className="flex items-center justify-between mb-1">
               <label className="block text-xs font-bold text-slate-700">Tanggal Onset</label>
               {form.tgl_onset && (
-                <span className="caption text-xs font-extrabold text-amber-800 bg-amber-50 border border-amber-200/70 px-1.5 py-0.5 rounded-md shadow-2xs">
+                <span className="caption text-xs font-extrabold text-amber-900 bg-amber-100 border border-amber-300/80 px-2 py-0.5 rounded-md shadow-2xs">
                   OH-{hariKe(form.tgl_onset)}
                 </span>
               )}
@@ -758,7 +758,7 @@ export default function Brainstorm() {
             <div className="flex items-center justify-between mb-1">
               <label className="block text-xs font-bold text-slate-700">Tanggal MRS</label>
               {form.tgl_mrs && (
-                <span className="caption text-xs font-extrabold text-emerald-800 bg-emerald-50 border border-emerald-200/70 px-1.5 py-0.5 rounded-md shadow-2xs">
+                <span className="caption text-xs font-extrabold text-emerald-900 bg-emerald-100 border border-emerald-300/80 px-2 py-0.5 rounded-md shadow-2xs">
                   P-{hariKe(form.tgl_mrs)}
                 </span>
               )}
@@ -801,20 +801,20 @@ export default function Brainstorm() {
             </button>
             
             {showFaskesMenu && (
-              <div className="absolute top-full left-0 right-0 z-50 mt-1 max-h-64 overflow-y-auto rounded-2xl bg-card border border-surface shadow-2xl p-2 space-y-3 animate-in fade-in zoom-in-95">
+              <div className="absolute top-full left-0 right-0 z-50 mt-1 max-h-64 overflow-y-auto rounded-2xl bg-white border border-slate-300 shadow-2xl p-2 space-y-3 animate-in fade-in zoom-in-95">
                 {hospitals?.map(h => {
                    const hWards = allWards?.filter(w => w.hospital_id === h.id).sort((a, b) => (a.order ?? 0) - (b.order ?? 0)) || [];
                    if (hWards.length === 0) return null;
                    return (
                      <div key={h.id} className="space-y-1">
-                       <div className="flex items-center gap-2 px-2 py-1 bg-surface/50 rounded-xl">
-                         <span className="text-xs font-bold text-ink-muted">{h.nama}</span>
+                       <div className="flex items-center gap-2 px-2 py-1 bg-slate-100 rounded-xl">
+                         <span className="text-xs font-bold text-slate-700">{h.nama}</span>
                        </div>
                        {hWards.map(w => (
                          <button 
                            key={w.id} 
                            type="button"
-                           className="flex items-center gap-2 w-full px-2 py-2 hover:bg-surface rounded-xl text-left pl-4 cursor-pointer transition-colors"
+                           className="flex items-center gap-2 w-full px-2 py-2 hover:bg-slate-100 rounded-xl text-left pl-4 cursor-pointer transition-colors"
                            onClick={() => {
                              setHospitalId(h.id!);
                              setWardId(w.id!);
@@ -822,13 +822,13 @@ export default function Brainstorm() {
                            }}
                          >
                            <span className="size-2.5 rounded-full shadow-xs shrink-0" style={{ backgroundColor: w.kode_warna }} />
-                           <span className="text-xs font-semibold text-ink">{w.nama}</span>
+                           <span className="text-xs font-semibold text-slate-800">{w.nama}</span>
                          </button>
                        ))}
                      </div>
                    )
                 })}
-                {!hospitals?.length && <p className="text-xs text-center text-ink-muted p-2">Belum ada faskes. Tambah di Pengaturan.</p>}
+                {!hospitals?.length && <p className="text-xs text-center text-slate-400 p-2">Belum ada faskes. Tambah di Pengaturan.</p>}
               </div>
             )}
           </div>
@@ -836,8 +836,8 @@ export default function Brainstorm() {
       </div>
 
       {/* KARTU 2: SUBJEKTIF & OBJEKTIF (S & O) */}
-      <div className="glass-card rounded-3xl p-5 shadow-sm space-y-5 animate-in fade-in slide-in-from-bottom-2 border border-slate-100">
-        <div className="pb-2 border-b border-slate-100">
+      <div className="glass-card rounded-3xl p-5 shadow-sm space-y-5 animate-in fade-in slide-in-from-bottom-2 border border-slate-300/80">
+        <div className="pb-2 border-b border-slate-200">
           <h2 className="text-xs font-extrabold text-slate-800 uppercase tracking-wider">
             Subjektif & Objektif (S & O)
           </h2>
@@ -860,7 +860,7 @@ export default function Brainstorm() {
         </div>
 
         {/* O (Objektif) — Pemeriksaan Fisik */}
-        <div className="space-y-2 pt-3 border-t border-slate-100">
+        <div className="space-y-2 pt-3 border-t border-slate-200">
           <div className="flex items-center justify-between">
             <label className="text-xs font-bold text-slate-700">
               O (Objektif) — Pemeriksaan Fisik
@@ -885,11 +885,11 @@ export default function Brainstorm() {
           {attachments.filter((a) => a.kategori === 'pemfis').length > 0 && (
             <div className="flex flex-wrap gap-2 pt-1">
               {attachments.filter((a) => a.kategori === 'pemfis').map((a) => (
-                <div key={a.id} className="size-14 rounded-2xl bg-surface border border-slate-200 overflow-hidden relative group">
+                <div key={a.id} className="size-14 rounded-2xl bg-slate-100 border border-slate-300 overflow-hidden relative group">
                   {a.type.startsWith('image/') ? (
                     <img src={a.dataUrl} className="size-full object-cover" />
                   ) : (
-                    <div className="flex size-full flex-col items-center justify-center bg-card text-ink-muted">
+                    <div className="flex size-full flex-col items-center justify-center bg-white text-slate-600">
                       <FileText size={16} />
                       <span className="caption truncate w-full text-center px-1 font-bold">{a.name.split('.').pop()?.toUpperCase()}</span>
                     </div>
@@ -904,7 +904,7 @@ export default function Brainstorm() {
         </div>
 
         {/* O (Objektif) — Pemeriksaan Penunjang */}
-        <div className="space-y-2 pt-3 border-t border-slate-100">
+        <div className="space-y-2 pt-3 border-t border-slate-200">
           <div className="flex items-center justify-between">
             <label className="text-xs font-bold text-slate-700">
               O (Objektif) — Pemeriksaan Penunjang
@@ -929,11 +929,11 @@ export default function Brainstorm() {
           {attachments.filter((a) => a.kategori === 'penunjang').length > 0 && (
             <div className="flex flex-wrap gap-2 pt-1">
               {attachments.filter((a) => a.kategori === 'penunjang').map((a) => (
-                <div key={a.id} className="size-14 rounded-2xl bg-surface border border-slate-200 overflow-hidden relative group">
+                <div key={a.id} className="size-14 rounded-2xl bg-slate-100 border border-slate-300 overflow-hidden relative group">
                   {a.type.startsWith('image/') ? (
                     <img src={a.dataUrl} className="size-full object-cover" />
                   ) : (
-                    <div className="flex size-full flex-col items-center justify-center bg-card text-ink-muted">
+                    <div className="flex size-full flex-col items-center justify-center bg-white text-slate-600">
                       <FileText size={16} />
                       <span className="caption truncate w-full text-center px-1 font-bold">{a.name.split('.').pop()?.toUpperCase()}</span>
                     </div>
@@ -949,8 +949,8 @@ export default function Brainstorm() {
       </div>
 
       {/* KARTU 3: A (ASSESSMENT / DIAGNOSIS) */}
-      <div className={'glass-card rounded-3xl p-5 shadow-sm space-y-4 animate-in fade-in slide-in-from-bottom-2 border border-slate-100 ' + hl('A')}>
-        <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+      <div className={'glass-card rounded-3xl p-5 shadow-sm space-y-4 animate-in fade-in slide-in-from-bottom-2 border border-slate-300/80 ' + hl('A')}>
+        <div className="flex items-center justify-between pb-2 border-b border-slate-200">
           <h2 className="text-xs font-extrabold text-slate-800 uppercase tracking-wider">A (Assessment / Diagnosis)</h2>
           <span className="caption text-xs text-ink-muted">Utama otomatis teratas</span>
         </div>
@@ -971,7 +971,7 @@ export default function Brainstorm() {
                   set({ A: newA })
                 }} 
                 className={`rounded-xl px-3 py-2.5 outline-none font-bold text-xs cursor-pointer transition-colors shrink-0 shadow-2xs ${
-                  dx.kategori === 'Utama' ? 'bg-primary text-white border border-primary' : 'bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-200'
+                  dx.kategori === 'Utama' ? 'bg-primary text-white border border-primary' : 'bg-slate-100 text-slate-800 hover:bg-slate-200 border border-slate-300'
                 }`}
               >
                 <option value="Utama">Utama</option>
@@ -986,7 +986,7 @@ export default function Brainstorm() {
                   set({ A: newA })
                 }}
                 placeholder="Nama Diagnosis..."
-                className="flex-1 min-w-0 rounded-xl bg-slate-50/80 border border-slate-200/90 px-3.5 py-2.5 outline-none font-bold text-slate-900 text-xs placeholder:text-slate-400 placeholder:font-normal focus:bg-white focus:border-primary focus:ring-2 focus:ring-primary/10 shadow-2xs transition-all"
+                className="flex-1 min-w-0 rounded-xl bg-slate-100/90 border border-slate-300 px-3.5 py-2.5 outline-none font-bold text-slate-900 text-xs placeholder:text-slate-400 placeholder:font-normal focus:bg-white focus:border-primary focus:ring-2 focus:ring-primary/10 shadow-2xs transition-all"
               />
 
               {/* ICD-10 On-Demand: Tampil jika sudah terisi atau saat tombol [+ ICD] diklik */}
@@ -1000,14 +1000,14 @@ export default function Brainstorm() {
                       set({ A: newA })
                     }} 
                     placeholder="ICD-10" 
-                    className="w-20 rounded-xl bg-slate-50/80 border border-slate-200/90 px-2 py-2.5 outline-none text-center uppercase font-mono text-xs font-bold text-slate-900 placeholder:text-slate-400 focus:bg-white focus:border-primary focus:ring-2 focus:ring-primary/10 shadow-2xs transition-all" 
+                    className="w-20 rounded-xl bg-slate-100/90 border border-slate-300 px-2 py-2.5 outline-none text-center uppercase font-mono text-xs font-bold text-slate-900 placeholder:text-slate-400 focus:bg-white focus:border-primary focus:ring-2 focus:ring-primary/10 shadow-2xs transition-all" 
                   />
                 </div>
               ) : (
                 <button
                   type="button"
                   onClick={() => setShowIcd10((prev) => ({ ...prev, [i]: true }))}
-                  className="px-2.5 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 hover:text-primary font-bold text-xs border border-slate-200 shrink-0 transition-colors cursor-pointer"
+                  className="px-2.5 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 hover:text-primary font-bold text-xs border border-slate-300 shrink-0 transition-colors cursor-pointer"
                   title="Tambah Kode ICD-10 (Opsional)"
                 >
                   + ICD
@@ -1043,8 +1043,8 @@ export default function Brainstorm() {
       </div>
 
       {/* KARTU 4: P (PLANNING KLINIS) */}
-      <div className="glass-card rounded-3xl p-5 shadow-sm space-y-6 animate-in fade-in slide-in-from-bottom-2 border border-slate-100">
-        <div className="pb-2 border-b border-slate-100">
+      <div className="glass-card rounded-3xl p-5 shadow-sm space-y-6 animate-in fade-in slide-in-from-bottom-2 border border-slate-300/80">
+        <div className="pb-2 border-b border-slate-200">
           <h2 className="text-xs font-extrabold text-slate-800 uppercase tracking-wider">P (Planning Klinis)</h2>
         </div>
 
@@ -1067,7 +1067,7 @@ export default function Brainstorm() {
                       set({ P: newP })
                     }}
                     placeholder="Nama Prosedur / Lab"
-                    className="flex-1 min-w-0 rounded-xl bg-slate-50/80 border border-slate-200/90 px-3.5 py-2.5 outline-none font-bold text-slate-900 text-xs placeholder:text-slate-400 placeholder:font-normal focus:bg-white focus:border-primary focus:ring-2 focus:ring-primary/10 shadow-2xs transition-all"
+                    className="flex-1 min-w-0 rounded-xl bg-slate-100/90 border border-slate-300 px-3.5 py-2.5 outline-none font-bold text-slate-900 text-xs placeholder:text-slate-400 placeholder:font-normal focus:bg-white focus:border-primary focus:ring-2 focus:ring-primary/10 shadow-2xs transition-all"
                   />
 
                   <input
@@ -1078,7 +1078,7 @@ export default function Brainstorm() {
                       set({ P: newP })
                     }}
                     placeholder="Keterangan"
-                    className="w-28 rounded-xl bg-slate-50/80 border border-slate-200/90 px-3 py-2.5 outline-none text-xs text-slate-700 font-semibold placeholder:text-slate-400 placeholder:font-normal focus:bg-white focus:border-primary shadow-2xs transition-all"
+                    className="w-28 rounded-xl bg-slate-100/90 border border-slate-300 px-3 py-2.5 outline-none text-xs text-slate-800 font-semibold placeholder:text-slate-400 placeholder:font-normal focus:bg-white focus:border-primary shadow-2xs transition-all"
                   />
 
                   {/* ICD-9 On-Demand: Tampil jika sudah terisi atau saat tombol [+ ICD] diklik */}
@@ -1091,13 +1091,13 @@ export default function Brainstorm() {
                         set({ P: newP })
                       }}
                       placeholder="ICD-9"
-                      className="w-20 rounded-xl bg-slate-50/80 border border-slate-200/90 px-2 py-2.5 outline-none text-center font-mono text-xs uppercase font-bold text-slate-900 shrink-0 placeholder:text-slate-400 focus:bg-white focus:border-primary shadow-2xs transition-all"
+                      className="w-20 rounded-xl bg-slate-100/90 border border-slate-300 px-2 py-2.5 outline-none text-center font-mono text-xs uppercase font-bold text-slate-900 shrink-0 placeholder:text-slate-400 focus:bg-white focus:border-primary shadow-2xs transition-all"
                     />
                   ) : (
                     <button
                       type="button"
                       onClick={() => setShowIcd9((prev) => ({ ...prev, [originalIndex]: true }))}
-                      className="px-2.5 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 hover:text-primary font-bold text-xs border border-slate-200 shrink-0 transition-colors cursor-pointer"
+                      className="px-2.5 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 hover:text-primary font-bold text-xs border border-slate-300 shrink-0 transition-colors cursor-pointer"
                       title="Tambah Kode ICD-9 (Opsional)"
                     >
                       + ICD
@@ -1132,7 +1132,7 @@ export default function Brainstorm() {
         </div>
 
         {/* 2. PTX */}
-        <div className={'border-t border-slate-100 pt-4 space-y-2.5 ' + hl('P')}>
+        <div className={'border-t border-slate-200 pt-4 space-y-2.5 ' + hl('P')}>
           <p className="text-xs font-extrabold text-slate-700 uppercase tracking-wider">
             2. Plan Terapi (PTX) — Farmakologi & Non-Farmako
           </p>
@@ -1169,7 +1169,7 @@ export default function Brainstorm() {
                         set({ P: newP })
                       }}
                       placeholder="Nama Obat / Terapi"
-                      className="flex-1 min-w-0 rounded-xl bg-slate-50/80 border border-slate-200/90 px-3.5 py-2.5 outline-none font-bold text-slate-900 text-xs placeholder:text-slate-400 placeholder:font-normal focus:bg-white focus:border-primary focus:ring-2 focus:ring-primary/10 shadow-2xs transition-all"
+                      className="flex-1 min-w-0 rounded-xl bg-slate-100/90 border border-slate-300 px-3.5 py-2.5 outline-none font-bold text-slate-900 text-xs placeholder:text-slate-400 placeholder:font-normal focus:bg-white focus:border-primary focus:ring-2 focus:ring-primary/10 shadow-2xs transition-all"
                     />
 
                     <input
@@ -1180,7 +1180,7 @@ export default function Brainstorm() {
                         set({ P: newP })
                       }}
                       placeholder="Dosis & Rute (mis. 1x80mg PO)"
-                      className="w-36 rounded-xl bg-slate-50/80 border border-slate-200/90 px-3 py-2.5 outline-none text-xs text-slate-700 font-semibold placeholder:text-slate-400 placeholder:font-normal focus:bg-white focus:border-primary shadow-2xs transition-all"
+                      className="w-36 rounded-xl bg-slate-100/90 border border-slate-300 px-3 py-2.5 outline-none text-xs text-slate-800 font-semibold placeholder:text-slate-400 placeholder:font-normal focus:bg-white focus:border-primary shadow-2xs transition-all"
                     />
 
                     <button
@@ -1232,7 +1232,7 @@ export default function Brainstorm() {
         </div>
 
         {/* 3. PMX */}
-        <div className="border-t border-slate-100 pt-4 space-y-2.5">
+        <div className="border-t border-slate-200 pt-4 space-y-2.5">
           <p className="text-xs font-extrabold text-slate-700 uppercase tracking-wider">
             3. Plan Monitoring (PMX)
           </p>
@@ -1250,7 +1250,7 @@ export default function Brainstorm() {
                       set({ P: newP })
                     }}
                     placeholder="Item Monitoring"
-                    className="flex-1 min-w-0 rounded-xl bg-slate-50/80 border border-slate-200/90 px-3.5 py-2.5 outline-none font-bold text-slate-900 text-xs placeholder:text-slate-400 placeholder:font-normal focus:bg-white focus:border-primary focus:ring-2 focus:ring-primary/10 shadow-2xs transition-all"
+                    className="flex-1 min-w-0 rounded-xl bg-slate-100/90 border border-slate-300 px-3.5 py-2.5 outline-none font-bold text-slate-900 text-xs placeholder:text-slate-400 placeholder:font-normal focus:bg-white focus:border-primary focus:ring-2 focus:ring-primary/10 shadow-2xs transition-all"
                   />
 
                   <input
@@ -1261,7 +1261,7 @@ export default function Brainstorm() {
                       set({ P: newP })
                     }}
                     placeholder="Target / Frekuensi"
-                    className="w-36 rounded-xl bg-slate-50/80 border border-slate-200/90 px-3 py-2.5 outline-none text-xs text-slate-700 font-semibold placeholder:text-slate-400 focus:bg-white focus:border-primary shadow-2xs transition-all"
+                    className="w-36 rounded-xl bg-slate-100/90 border border-slate-300 px-3 py-2.5 outline-none text-xs text-slate-800 font-semibold placeholder:text-slate-400 focus:bg-white focus:border-primary shadow-2xs transition-all"
                   />
 
                   <button
@@ -1289,7 +1289,7 @@ export default function Brainstorm() {
         </div>
 
         {/* 4. PEX */}
-        <div className="border-t border-slate-100 pt-4 space-y-2.5">
+        <div className="border-t border-slate-200 pt-4 space-y-2.5">
           <p className="text-xs font-extrabold text-slate-700 uppercase tracking-wider">
             4. Plan Edukasi (PEX)
           </p>
@@ -1307,7 +1307,7 @@ export default function Brainstorm() {
                       set({ P: newP })
                     }}
                     placeholder="Materi Edukasi Pasien / Keluarga"
-                    className="flex-1 min-w-0 rounded-xl bg-slate-50/80 border border-slate-200/90 px-3.5 py-2.5 outline-none font-bold text-slate-900 text-xs placeholder:text-slate-400 placeholder:font-normal focus:bg-white focus:border-primary focus:ring-2 focus:ring-primary/10 shadow-2xs transition-all"
+                    className="flex-1 min-w-0 rounded-xl bg-slate-100/90 border border-slate-300 px-3.5 py-2.5 outline-none font-bold text-slate-900 text-xs placeholder:text-slate-400 placeholder:font-normal focus:bg-white focus:border-primary focus:ring-2 focus:ring-primary/10 shadow-2xs transition-all"
                   />
 
                   <input
@@ -1318,7 +1318,7 @@ export default function Brainstorm() {
                       set({ P: newP })
                     }}
                     placeholder="Sasaran"
-                    className="w-32 rounded-xl bg-slate-50/80 border border-slate-200/90 px-3 py-2.5 outline-none text-xs text-slate-700 font-semibold placeholder:text-slate-400 focus:bg-white focus:border-primary shadow-2xs transition-all"
+                    className="w-32 rounded-xl bg-slate-100/90 border border-slate-300 px-3 py-2.5 outline-none text-xs text-slate-800 font-semibold placeholder:text-slate-400 focus:bg-white focus:border-primary shadow-2xs transition-all"
                   />
 
                   <button
@@ -1383,14 +1383,14 @@ export default function Brainstorm() {
       {/* Floating AI Input Bar */}
       <div className="fixed bottom-14 left-0 right-0 z-40 p-4 pointer-events-none flex flex-col items-center">
         <div className="w-full max-w-lg pointer-events-auto">
-          <div className="flex items-end gap-2 rounded-3xl bg-white/95 backdrop-blur-xl border border-slate-200 shadow-2xl p-2.5">
+          <div className="flex items-end gap-2 rounded-3xl bg-white/95 backdrop-blur-xl border border-slate-300 shadow-2xl p-2.5">
             {/* Menu Plus */}
             <div className="relative group shrink-0">
-              <button className="flex size-10 cursor-pointer items-center justify-center rounded-full bg-slate-100 text-slate-600 hover:bg-primary/10 hover:text-primary transition-colors">
+              <button className="flex size-10 cursor-pointer items-center justify-center rounded-full bg-slate-100 border border-slate-300 text-slate-700 hover:bg-primary/10 hover:text-primary transition-colors">
                 <Plus size={22} />
               </button>
-              <div className="absolute bottom-full left-0 mb-2 hidden flex-col gap-2 rounded-2xl bg-white p-2 shadow-xl border border-slate-200 group-hover:flex group-focus-within:flex w-max">
-                <p className="caption font-bold text-ink-muted uppercase tracking-wider px-2 pt-1">Alat AI</p>
+              <div className="absolute bottom-full left-0 mb-2 hidden flex-col gap-2 rounded-2xl bg-white p-2 shadow-xl border border-slate-300 group-hover:flex group-focus-within:flex w-max">
+                <p className="caption font-bold text-slate-500 uppercase tracking-wider px-2 pt-1">Alat AI</p>
                 <button onClick={() => ocrCameraRef.current?.click()} className="flex items-center gap-2 whitespace-nowrap rounded-xl p-2 text-xs font-semibold hover:bg-slate-100 text-slate-800"><Camera size={16}/> Ekstrak Teks (Kamera)</button>
                 <button onClick={() => ocrGalleryRef.current?.click()} className="flex items-center gap-2 whitespace-nowrap rounded-xl p-2 text-xs font-semibold hover:bg-slate-100 text-slate-800"><ImageIcon size={16}/> Ekstrak Teks (Galeri)</button>
               </div>
@@ -1403,13 +1403,13 @@ export default function Brainstorm() {
               placeholder="Ketik / dikte konsultasi... (tarik pojok untuk perbesar)"
               rows={2}
               maxLength={10000}
-              className="min-h-[50px] max-h-[260px] flex-1 resize-y bg-slate-50/90 border border-slate-200/80 rounded-2xl p-3 text-xs outline-none text-slate-900 font-medium placeholder:text-slate-400 placeholder:font-normal focus:bg-white focus:border-primary transition-all"
+              className="min-h-[50px] max-h-[260px] flex-1 resize-y bg-slate-100/90 border border-slate-300 rounded-2xl p-3 text-xs outline-none text-slate-900 font-medium placeholder:text-slate-400 placeholder:font-normal focus:bg-white focus:border-primary transition-all"
             />
 
             <div className="shrink-0 flex items-center gap-1 mb-1 mr-1">
               <button
                 onClick={toggleMic}
-                className={`flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-full transition-colors ${listening ? 'bg-red-500 text-white animate-pulse shadow-md shadow-red-500/30' : 'bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-900'}`}
+                className={`flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-full transition-colors ${listening ? 'bg-red-500 text-white animate-pulse shadow-md shadow-red-500/30' : 'bg-slate-100 border border-slate-300 text-slate-700 hover:bg-slate-200 hover:text-slate-900'}`}
               >
                 {listening ? <MicOff size={18} /> : <Mic size={18} />}
               </button>
@@ -1440,18 +1440,18 @@ export default function Brainstorm() {
       {/* Modal Pilih Pasien Lama / Readmisi */}
       {showSearchModal && (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-ink/50 backdrop-blur-sm p-0 sm:p-4 animate-in fade-in" onClick={() => setShowSearchModal(false)}>
-          <div className="flex h-[80dvh] max-h-[600px] w-full max-w-lg flex-col rounded-t-3xl sm:rounded-3xl bg-card shadow-2xl overflow-hidden border border-surface" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between border-b border-surface p-4">
+          <div className="flex h-[80dvh] max-h-[600px] w-full max-w-lg flex-col rounded-t-3xl sm:rounded-3xl bg-white shadow-2xl overflow-hidden border border-slate-300" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between border-b border-slate-200 p-4">
               <div>
                 <p className="text-xs font-bold text-ink">Pilih Pasien Lama (Readmisi)</p>
                 <p className="caption text-ink-muted">Pilih pasien untuk menyambungkan riwayat rawat inap & rekam medis</p>
               </div>
-              <button onClick={() => setShowSearchModal(false)} aria-label="Tutup" className="cursor-pointer rounded-full p-1.5 text-ink-muted hover:bg-surface">
+              <button onClick={() => setShowSearchModal(false)} aria-label="Tutup" className="cursor-pointer rounded-full p-1.5 text-ink-muted hover:bg-slate-100">
                 <X size={20} />
               </button>
             </div>
 
-            <div className="p-3 border-b border-surface">
+            <div className="p-3 border-b border-slate-200">
               <div className="relative">
                 <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-muted" />
                 <input
@@ -1472,7 +1472,7 @@ export default function Brainstorm() {
                     key={p.id}
                     type="button"
                     onClick={() => handleSelectExistingPatient(p)}
-                    className="w-full text-left rounded-2xl bg-surface/60 hover:bg-primary/10 border border-surface/80 hover:border-primary/30 p-3 transition-colors group cursor-pointer"
+                    className="w-full text-left rounded-2xl bg-slate-50 hover:bg-primary/10 border border-slate-200 hover:border-primary/40 p-3 transition-colors group cursor-pointer"
                   >
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0 flex-1">

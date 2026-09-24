@@ -24,18 +24,21 @@ Doctoid dirancang khusus untuk dokter spesialis dengan tema **Modern Clinical Gl
 | **Sky Bright** | `#38BDF8` (`sky-400` / `primary-soft`) | Aksen teks terang, highlight penunjang, border fokus input |
 | **Primary Gradient** | `from-[#3B82F6] to-[#1D4ED8]` | Tombol Simpan SOAP, Tombol Kirim Micro-Update, Header Dasbor |
 
-### B. Warna Latar Belakang (*Canvas*)
-| Mode | Warna Dasar | Efek Ambient Radial Mesh |
-| :--- | :--- | :--- |
-| **Light Mode (`surface`)** | `#F4F5FB` (Soft Clinical Cloud) | `radial-gradient(ellipse at 15% -10%, rgba(59,130,246,0.12), transparent 60%)` |
-| **Dark Mode (`surface-dark`)** | `#070B14` (Deep Medical Onyx) | `radial-gradient(ellipse at 15% -10%, rgba(59,130,246,0.22), transparent 60%)` |
+### B. Warna Latar Belakang (*Canvas*) & Hierarki Gradasi Kontras
+| Tingkat | Peran Elemen | Token / Warna | Spesifikasi & Border |
+| :--- | :--- | :--- | :--- |
+| **Level 0** | **Canvas (Latar Belakang Dasar)** | `#E5EBF4` (Cool Clinical Slate) | `radial-gradient` biru elektrik halus di sudut atas & bawah |
+| **Level 1** | **Glass Card (Kartu Kontainer)** | `#FFFFFF` (Solid Pure White) | `border: 1px solid rgba(203, 213, 225, 0.85)` (`border-slate-300`), `shadow-md` |
+| **Level 2** | **Form Inputs & Textarea** | `bg-slate-100/90` | `border border-slate-300`, `text-slate-900 font-semibold`, `focus:bg-white focus:border-primary` |
+| **Level 3** | **Dividers & Status Badges** | `border-slate-200` | Chip Onset (`amber-100`/`border-amber-300`), Chip MRS (`emerald-100`/`border-emerald-300`) |
+| **Level 4** | **Floating Bar & Navigasi** | `bg-white/96` (`glass-nav`) | `border-slate-300`, `backdrop-blur-2xl`, `shadow-2xl` |
 
 ### C. Permukaan Kaca (*Glassmorphism Surfaces*)
 | Elemen | Tema Terang (*Light*) | Tema Gelap (*Dark*) | Border & Efek Blur |
 | :--- | :--- | :--- | :--- |
-| **Glass Card** | `bg-white/70` | `bg-[#0D1527]/80` | `border-white/20`, `backdrop-blur-xl`, `shadow-sm` |
-| **Glass Nav (Floating Bar)** | `bg-white/80` | `bg-[#0D1527]/90` | `border-white/20`, `backdrop-blur-2xl`, `shadow-xl` |
-| **Input / Search Bar** | `bg-white/90` | `bg-white/5` | `border-primary-soft/30`, `focus:ring-2 focus:ring-primary/40` |
+| **Glass Card** | `#FFFFFF` solid | `bg-[#0D1527]/90` | `border-slate-300` (`rgba(203, 213, 225, 0.85)`), `backdrop-blur-xl`, `shadow-md` |
+| **Glass Nav (Floating Bar)** | `bg-white/96` | `bg-[#0D1527]/95` | `border-slate-300`, `backdrop-blur-2xl`, `shadow-2xl` |
+| **Input / Search Bar** | `bg-slate-100/90` | `bg-white/5` | `border-slate-300`, `focus:bg-white focus:border-primary focus:ring-4 focus:ring-primary/20` |
 
 ### D. Warna Status Semantik Klinis
 | Status / Fitur | Hex / Utility | Penerapan Klinis |

@@ -10,7 +10,7 @@ const hariKe = (iso: string) =>
   Math.max(1, Math.floor((Date.now() - new Date(iso).getTime()) / 86400000) + 1)
 
 const inputCls =
-  'w-full rounded-2xl border border-primary-soft/30 bg-card px-4 py-2.5 text-xs outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all'
+  'w-full rounded-2xl border border-slate-300 bg-white px-4 py-2.5 text-xs font-semibold text-slate-900 placeholder:text-slate-400 outline-none focus:border-primary focus:ring-4 focus:ring-primary/20 shadow-2xs transition-all'
 
 export default function RekamMedis() {
   const [q, setQ] = useState('')
@@ -78,7 +78,7 @@ export default function RekamMedis() {
           <select
             value={filterStatus}
             onChange={(e) => setFilterStatus(e.target.value)}
-            className="rounded-xl border border-primary-soft/30 bg-card px-2.5 py-1.5 text-xs font-bold text-ink outline-none focus:border-primary"
+            className="rounded-xl border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-bold text-slate-800 outline-none focus:border-primary shadow-2xs cursor-pointer"
           >
             <option value="semua">Semua Status</option>
             <option value="aktif">Rawat Aktif</option>
@@ -89,7 +89,7 @@ export default function RekamMedis() {
           <select
             value={filterJaminan}
             onChange={(e) => setFilterJaminan(e.target.value)}
-            className="rounded-xl border border-primary-soft/30 bg-card px-2.5 py-1.5 text-xs font-bold text-ink outline-none focus:border-primary"
+            className="rounded-xl border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-bold text-slate-800 outline-none focus:border-primary shadow-2xs cursor-pointer"
           >
             <option value="semua">Semua Jaminan</option>
             <option value="BPJS">BPJS</option>
@@ -99,7 +99,7 @@ export default function RekamMedis() {
         </div>
 
         {/* Toggle Lengkap / Ringkas */}
-        <label className="flex cursor-pointer items-center gap-2 rounded-2xl bg-card border border-surface px-3 py-1.5 shadow-xs hover:bg-surface/50 transition-all">
+        <label className="flex cursor-pointer items-center gap-2 rounded-2xl bg-white border border-slate-300 px-3 py-1.5 shadow-2xs hover:bg-slate-50 transition-all">
           <span className="text-xs font-bold text-ink">
             {isRingkas ? 'Tampilan Ringkas' : 'Tampilan Lengkap'}
           </span>

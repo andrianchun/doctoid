@@ -9,7 +9,7 @@ const hariKe = (iso: string) =>
   Math.max(1, Math.floor((Date.now() - new Date(iso).getTime()) / 86400000) + 1)
 
 const inputCls =
-  'w-full rounded-2xl border border-primary-soft/30 bg-card px-4 py-2.5 text-xs outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all'
+  'w-full rounded-2xl border border-slate-300 bg-white px-4 py-2.5 text-xs font-semibold text-slate-900 placeholder:text-slate-400 outline-none focus:border-primary focus:ring-4 focus:ring-primary/20 shadow-2xs transition-all'
 
 function renderTemplate(fmt: string, p: Patient, latest?: ProgressNote): string {
   const vars: Record<string, string> = {
@@ -96,11 +96,11 @@ export default function Rekap() {
       </div>
 
       {/* Pill Sub-Navigation */}
-      <div className="flex rounded-2xl bg-surface p-1 border border-surface shadow-xs">
+      <div className="flex rounded-2xl bg-slate-200/90 p-1 border border-slate-300 shadow-xs">
         <button
           onClick={() => setActiveTab('pasien')}
           className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all ${
-            activeTab === 'pasien' ? 'bg-white text-primary shadow-sm' : 'text-ink-muted hover:text-ink'
+            activeTab === 'pasien' ? 'bg-white text-primary shadow-sm' : 'text-slate-600 hover:text-slate-900'
           }`}
         >
           Daftar Pasien ({patients?.length ?? 0})
@@ -108,7 +108,7 @@ export default function Rekap() {
         <button
           onClick={() => setActiveTab('template')}
           className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all ${
-            activeTab === 'template' ? 'bg-white text-primary shadow-sm' : 'text-ink-muted hover:text-ink'
+            activeTab === 'template' ? 'bg-white text-primary shadow-sm' : 'text-slate-600 hover:text-slate-900'
           }`}
         >
           Template Operan
@@ -116,7 +116,7 @@ export default function Rekap() {
         <button
           onClick={() => setActiveTab('kalkulator')}
           className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all ${
-            activeTab === 'kalkulator' ? 'bg-white text-primary shadow-sm' : 'text-ink-muted hover:text-ink'
+            activeTab === 'kalkulator' ? 'bg-white text-primary shadow-sm' : 'text-slate-600 hover:text-slate-900'
           }`}
         >
           Kalkulator

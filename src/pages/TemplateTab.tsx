@@ -5,7 +5,7 @@ import { db, type Patient, type ProgressNote, type DiagnosisItem } from '../db'
 import { formatDate, hariKe } from '../utils/dateFormat'
 
 const inputCls =
-  'w-full rounded-2xl border border-slate-200/90 bg-slate-50/80 px-4 py-3 text-xs font-semibold text-slate-900 placeholder:text-slate-400 placeholder:font-normal outline-none focus:bg-white focus:border-primary focus:ring-4 focus:ring-primary/15 transition-all shadow-2xs'
+  'w-full rounded-2xl border border-slate-300 bg-slate-100/90 px-4 py-3 text-xs font-semibold text-slate-900 placeholder:text-slate-400 placeholder:font-normal outline-none focus:bg-white focus:border-primary focus:ring-4 focus:ring-primary/20 transition-all shadow-2xs'
 
 export function sortDiagnoses(diagnoses: DiagnosisItem[] | string | undefined): DiagnosisItem[] {
   if (!diagnoses || typeof diagnoses === 'string') return []
@@ -219,7 +219,7 @@ export default function TemplateTab() {
 
         {/* Modal Buat Template Baru */}
         {showNew && (
-          <div className="mt-3 space-y-3 rounded-2xl bg-surface/80 p-4 border border-primary-soft/20 animate-in fade-in">
+          <div className="mt-3 space-y-3 rounded-2xl bg-slate-100/90 p-4 border border-slate-300 animate-in fade-in">
             <p className="text-xs font-bold text-ink flex items-center gap-1.5">
               <Edit3 size={14} className="text-primary" /> Buat Format Template Kustom
             </p>
@@ -279,7 +279,7 @@ export default function TemplateTab() {
               value={output}
               readOnly
               rows={9}
-              className={inputCls + ' resize-y bg-surface/90 font-mono text-xs'}
+              className={inputCls + ' resize-y bg-slate-100/90 font-mono text-xs'}
             />
             <button
               onClick={handleCopy}
