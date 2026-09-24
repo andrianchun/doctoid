@@ -77,7 +77,13 @@ if (apk) {
     fs.mkdirSync('public/apk', { recursive: true });
   }
   fs.copyFileSync('android/app/build/outputs/apk/release/app-release.apk', 'public/apk/doctoid-latest.apk');
-  console.log('✓ APK rilis baru berhasil dikompilasi dan disalin ke public/apk/doctoid-latest.apk\n');
+  if (fs.existsSync('dist')) {
+    if (!fs.existsSync('dist/apk')) {
+      fs.mkdirSync('dist/apk', { recursive: true });
+    }
+    fs.copyFileSync('android/app/build/outputs/apk/release/app-release.apk', 'dist/apk/doctoid-latest.apk');
+  }
+  console.log('✓ APK rilis baru berhasil dikompilasi dan disalin ke public/apk & dist/apk/doctoid-latest.apk\n');
 }
 
 const deployHosting = () => {

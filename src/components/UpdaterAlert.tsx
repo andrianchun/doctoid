@@ -203,13 +203,15 @@ export default function UpdaterAlert() {
             setDownloadProgress(null)
             setErrorMsg('Android butuh izin untuk memasang pembaruan langsung. Silakan aktifkan "Izinkan dari sumber ini" pada layar setelan yang terbuka, lalu tekan Update lagi.')
             await ApkInstaller.openInstallSettings()
+            return
           }
+          return
         } catch (err: any) {
-          console.warn('Gagal memasang APK langsung:', err)
+          console.warn('ApkInstaller belum terpasang di biner APK lama, mengunduh APK lewat browser...', err)
           setDownloadProgress(null)
-          setErrorMsg(err.message || 'Gagal memulai pemasangan APK.')
+          window.open(manifest.ota_url, '_system')
+          return
         }
-        return
       }
 
       // Web / Browser biasa: buka unduhan file APK
@@ -304,13 +306,25 @@ export default function UpdaterAlert() {
             {isDownloading ? (
               <DownloadProgress progress={downloadProgress ?? 0} isApk={isApkRelease} />
             ) : (
-              <button
-                onClick={handleUpdate}
-                className="flex w-full cursor-pointer items-center justify-center gap-2 rounded-2xl bg-gradient-to-br from-primary to-primary-deep py-3.5 text-sm font-bold text-white shadow-lg shadow-primary/30 hover:brightness-110 active:scale-95 transition-all"
-              >
-                <DownloadCloud size={18} />
-                <span>Update Sekarang</span>
-              </button>
+              <div className="space-y-2">
+                <button
+                  onClick={handleUpdate}
+                  className="flex w-full cursor-pointer items-center justify-center gap-2 rounded-2xl bg-gradient-to-br from-primary to-primary-deep py-3.5 text-sm font-bold text-white shadow-lg shadow-primary/30 hover:brightness-110 active:scale-95 transition-all"
+                >
+                  <DownloadCloud size={18} />
+                  <span>Update Sekarang</span>
+                </button>
+                {isApkRelease && (
+                  <a
+                    href={manifest.ota_url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="block text-[11px] font-medium text-ink-muted hover:text-primary underline underline-offset-2 transition-colors pt-1"
+                  >
+                    Atau unduh berkas APK langsung di sini
+                  </a>
+                )}
+              </div>
             )}
           </div>
         </div>
