@@ -3,7 +3,13 @@ import type { TerapiItem, DiagnosisItem, Jaminan, RegexRule } from './db'
 /* Parser lokal non-AI (hemat token): mendeteksi format konsultasi medis Indonesia secara komprehensif */
 
 const NON_FARMAKO_REGEX =
-  /\b(?:head\s*(?:trunk\s*)?up|posisi|semifowler|fowler|tirah\s*baring|bedrest|diet|o2|oksigen|nasal\s*c(?:anul|anula)?|masker|nrm|fisioterapi|mobilisasi|edukasi|rehabilitasi|infus\s*stop|puasa|pasang\s*ngt|pasang\s*kateter|rawat\s*luka|alih\s*baring|suction)\b/i
+  /\b(?:head\s*(?:trunk\s*)?up|posisi|semifowler|fowler|tirah\s*baring|bed\s*rest|bedrest|diet|o2|oksigen|nasal\s*c(?:anul|anula)?|masker|nrm|fisioterapi|mobilisasi|edukasi|rehabilitasi|infus\s*stop|puasa|pasang\s*ngt|pasang\s*kateter|rawat\s*luka|alih\s*baring|suction)\b/i
+
+export const WA_HEADER_REGEX =
+  /(?:^|\r?\n)(?:\[\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?,?\s*\d{1,2}[:.]\d{2}(?::\d{2})?(?:\s*[AP]M)?\]|\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?,?\s*\d{1,2}[:.]\d{2}(?::\d{2})?(?:\s*[AP]M)?\s*[-–—])\s*([^:\n]+):\s*/gi
+
+const IS_TEMPERATURE_LINE =
+  /^\s*(?:[*_~#]*\s*)?S\s*[:=\t\-–—]\s*(?:\d{1,2}(?:[.,]\d+)?\s*(?:°?C|c|celcius)?\b|febris|afebris)/i
 
 const DRUG_INDICATORS =
   /\b(?:ivfd|infus|injeksi|inj|drip|bolus|tab|tablet|kapsul|caps|kaplet|amp|ampul|vial|syrup|sirup|supp|suppositoria|mg|mcg|gr|gram|ml|cc|tpm|gtt|iu|ui|po|iv|im|sc|prn|flash|paracetamol|citicolin|citicoline|piracetam|mecobalamin|santagesik|ketorolac|ondansetron|omeprazole|ranitidine|ceftriaxone|ceftri|cefixime|asering|rl|ns|nacl|d5|d10|manitol|mannitol|aspilet|clopidogrel|atorvastatin|amlodipine|candesartan|furosemide|phenytoin|valproat|diazepam|asam\s*folat|beneuron|neurobion|b\s*complex)\b/i
@@ -262,60 +268,115 @@ export function extractDemografi(
 } {
   let title = ''
   let nama_depan = ''
-
-  // 1. Tangkap format nama dengan gelar: "*Tn. Farid/ 47 th/ BPJS 3*", "dr. Andi, 35 th", "Nama: Ny. Siti"
-  const nameWithTitle = raw.match(/[*_~#]*[ \t]*\b(dr|dok|dokter|Tn|Ny|Sdr|Sdri|An|By)\.?[ \t]+([A-Za-z'.-]+(?:[ \t]+[A-Za-z'.-]+){0,3})/i)
-  if (nameWithTitle) {
-    const rawMatch = nameWithTitle[1].toLowerCase()
-    if (rawMatch === 'dr' || rawMatch === 'dok' || rawMatch === 'dokter') {
-      title = 'dr.'
-    } else {
-      const cap = rawMatch.charAt(0).toUpperCase() + rawMatch.slice(1)
-      title = cap.endsWith('.') ? cap : cap + '.'
-    }
-    nama_depan = nameWithTitle[2].replace(/[/,*_–—|]/g, '').trim()
-  } else {
-    const labelNama = raw.match(/(?:nama(?:\s*pasien)?|identitas|pasien)\s*[:-]\s*([A-Za-z][A-Za-z'.\s]{1,40}?)(?=\s*(?:,|\n|usia|umur|rm|\/|$))/i)
-    if (labelNama) {
-      nama_depan = labelNama[1].trim()
-      const checkTitle = nama_depan.match(/^(dr|dok|dokter|Tn|Ny|Sdr|Sdri|An|By)\.?\s+(.+)$/i)
-      if (checkTitle) {
-        const rawMatch = checkTitle[1].toLowerCase()
-        if (rawMatch === 'dr' || rawMatch === 'dok' || rawMatch === 'dokter') {
-          title = 'dr.'
-        } else {
-          const cap = rawMatch.charAt(0).toUpperCase() + rawMatch.slice(1)
-          title = cap.endsWith('.') ? cap : cap + '.'
-        }
-        nama_depan = checkTitle[2].trim()
-      }
-    } else {
-      nama_depan = applyLearnedScalar(raw, 'nama_depan', learnedRules)
-    }
-  }
-
-  // 2. Tangkap usia: "47 th", "47th", "47 tahun", "47 thn", "Usia 47"
-  const usiaMatch = raw.match(/\b(?:usia|umur)?\s*(\d{1,3})\s*(?:th|thn|tahun|yo)\b/i) || raw.match(/\b(?:usia|umur)\s*[:-]?\s*(\d{1,3})\b/i)
-  const usia = usiaMatch && usiaMatch[1] ? `${usiaMatch[1]} th` : applyLearnedScalar(raw, 'usia', learnedRules)
-
-  // 3. Tangkap No. RM
-  const rmMatch = raw.match(/(?:no\.?\s*rm|no\.?\s*rekam\s*medis|rm)\s*[:-]?\s*([\d-/]{4,20})/i)
-  const no_rm = rmMatch ? rmMatch[1].trim() : applyLearnedScalar(raw, 'no_rm', learnedRules)
-
-  // 4. Tangkap Jaminan: BPJS (BPJS 1, BPJS 2, BPJS 3, BPJS Non PBI), JKN, KIS, Umum, Asuransi
-  const jaminanMatch = raw.match(/\b(BPJS(?:\s*\d)?|JKN|KIS|Umum|Asuransi)\b/i)
+  let usia = ''
+  let no_rm = ''
   let jaminan: Jaminan | '' = ''
-  if (jaminanMatch) {
-    const jm = jaminanMatch[1].toUpperCase()
-    if (jm.startsWith('BPJS') || jm === 'JKN' || jm === 'KIS') jaminan = 'BPJS'
-    else if (jm.startsWith('UMUM')) jaminan = 'Umum'
-    else if (jm.startsWith('ASURANSI')) jaminan = 'Asuransi'
-  }
-  if (!jaminan) {
-    jaminan = (applyLearnedScalar(raw, 'jaminan', learnedRules) as Jaminan | '') || ''
+
+  // 1. Prioritas Utama: Format garis miring khas konsul pasien Indonesia:
+  // misal: "*Sdri.Santi/20 tahun/P/BPJS Ketenagakerjaan*"
+  // atau "Tn. Budi / 47 th / L / BPJS PBI"
+  // atau "*By. Ny. Siti / 3 hari / P / Umum*"
+  // atau "*dr. Handoko, Sp.S / 45 th / BPJS*"
+  const slashLineMatch = raw.match(
+    /[*_~#]*\s*(?:(dr|dok|dokter|Tn|Ny|Sdri|Sdr|An|By)\.?\s*)?([A-Za-z',.-]+(?:\s+[A-Za-z',.-]+)*)\s*\/\s*(\d{1,3}(?:\s*(?:th|thn|tahun|bln|bulan|hari|yo))?)\s*(?:\/\s*([LP]|Laki(?:-laki)?|Perempuan)\s*)?(?:\/\s*([^/\n*]+))?\*?/i
+  )
+
+  if (slashLineMatch) {
+    const rawGelar = slashLineMatch[1]
+    const rawNama = slashLineMatch[2]?.trim()
+    const rawUsia = slashLineMatch[3]?.trim()
+    const rawJaminan = slashLineMatch[5]?.trim()
+
+    // Validasi bahwa rawNama bukan kata kunci medis/header seperti "SUBJEKTIF" / "DOKTER JAGA"
+    if (rawNama && !/^(?:dokter|perawat|bidan|subjektif|subjektive|objektif|assesment|assessment|planning|konsul|pemeriksa|rujukan)$/i.test(rawNama)) {
+      if (rawGelar) {
+        const lower = rawGelar.toLowerCase()
+        title = (lower === 'dr' || lower === 'dok' || lower === 'dokter') ? 'dr.' : lower.charAt(0).toUpperCase() + lower.slice(1) + (rawGelar.endsWith('.') ? '' : '.')
+      }
+      nama_depan = rawNama.replace(/[/,*_–—|]/g, '').trim()
+      if (rawUsia) {
+        const numOnly = rawUsia.match(/\d+/)
+        usia = numOnly ? `${numOnly[0]} th` : rawUsia
+      }
+      if (rawJaminan) {
+        const jm = rawJaminan.toUpperCase()
+        if (jm.includes('BPJS') || jm.includes('JKN') || jm.includes('KIS')) jaminan = 'BPJS'
+        else if (jm.includes('UMUM')) jaminan = 'Umum'
+        else if (jm.includes('ASURANSI')) jaminan = 'Asuransi'
+      }
+    }
   }
 
-  // 5. Tanggal MRS & Tanggal Onset
+  // 2. Coba cari label nama eksplisit: "Nama: ...", "Pasien: ...", "Identitas: ..."
+  if (!nama_depan) {
+    const labelMatch = raw.match(/(?:nama(?:\s*pasien)?|identitas|pasien)\s*[:-]\s*([A-Za-z][A-Za-z'.\s]{1,40}?)(?=\s*(?:,|\n|usia|umur|rm|\/|$))/i)
+    if (labelMatch) {
+      const candidate = labelMatch[1].trim()
+      const titleCheck = candidate.match(/^(dr|dok|dokter|Tn|Ny|Sdri|Sdr|An|By)\.?\s*(.+)$/i)
+      if (titleCheck) {
+        const lower = titleCheck[1].toLowerCase()
+        title = (lower === 'dr' || lower === 'dok' || lower === 'dokter') ? 'dr.' : lower.charAt(0).toUpperCase() + lower.slice(1) + (titleCheck[1].endsWith('.') ? '' : '.')
+        nama_depan = titleCheck[2].trim()
+      } else {
+        nama_depan = candidate
+      }
+    }
+  }
+
+  // 3. Fallback nama dengan gelar di baris mandiri (cegah mencocokkan WhatsApp sender / dokter jaga / DPJP)
+  if (!nama_depan) {
+    const lines = raw.split(/\r?\n/)
+    for (const line of lines) {
+      if (/dokter\s*(?:jaga|spesialis|ruangan|igd|konsulen|dpjp)|pemeriksa\s*:|asal\s*rujukan|mohon\s*ijin|mohon\s*izin/i.test(line)) continue
+      if (/(?:^|\s)\[\d{1,2}[/-]\d{1,2}/.test(line)) continue // skip timestamp lines
+
+      const titleMatch = line.match(/[*_~#]*\s*\b(dr|dok|dokter|Tn|Ny|Sdri|Sdr|An|By)\.?\s*([A-Za-z'.-]+(?:[ \t]+[A-Za-z'.-]+){0,3})/i)
+      if (titleMatch) {
+        const rawGelar = titleMatch[1].toLowerCase()
+        const candidateName = titleMatch[2].replace(/[/,*_–—|]/g, '').trim()
+        if (!/^(?:jaga|spesialis|ruangan|pemeriksa|bella|konsul|igd|rawat|bangsal|dokter)/i.test(candidateName)) {
+          title = (rawGelar === 'dr' || rawGelar === 'dok' || rawGelar === 'dokter') ? 'dr.' : rawGelar.charAt(0).toUpperCase() + rawGelar.slice(1) + (titleMatch[1].endsWith('.') ? '' : '.')
+          nama_depan = candidateName
+          break
+        }
+      }
+    }
+  }
+
+  // Fallback aturan regex AI jika belum ditemukan
+  if (!nama_depan) {
+    nama_depan = applyLearnedScalar(raw, 'nama_depan', learnedRules)
+  }
+
+  // Usia fallback
+  if (!usia) {
+    const usiaMatch = raw.match(/\b(?:usia|umur)?\s*(\d{1,3})\s*(?:th|thn|tahun|yo)\b/i) || raw.match(/\b(?:usia|umur)\s*[:-]?\s*(\d{1,3})\b/i)
+    usia = usiaMatch && usiaMatch[1] ? `${usiaMatch[1]} th` : applyLearnedScalar(raw, 'usia', learnedRules)
+  }
+
+  // No RM
+  const rmMatch = raw.match(/(?:no\.?\s*rm|no\.?\s*rekam\s*medis|rm)\s*[:-]?\s*([\d-/]{4,20})/i)
+  if (rmMatch) {
+    no_rm = rmMatch[1].trim()
+  } else {
+    no_rm = applyLearnedScalar(raw, 'no_rm', learnedRules)
+  }
+
+  // Jaminan fallback
+  if (!jaminan) {
+    const jaminanMatch = raw.match(/\b(BPJS(?:[\s\w]*)|JKN|KIS|Umum|Asuransi)\b/i)
+    if (jaminanMatch) {
+      const jm = jaminanMatch[1].toUpperCase()
+      if (jm.includes('BPJS') || jm.includes('JKN') || jm.includes('KIS')) jaminan = 'BPJS'
+      else if (jm.includes('UMUM')) jaminan = 'Umum'
+      else if (jm.includes('ASURANSI')) jaminan = 'Asuransi'
+    }
+    if (!jaminan) {
+      jaminan = (applyLearnedScalar(raw, 'jaminan', learnedRules) as Jaminan | '') || ''
+    }
+  }
+
+  // Tanggal MRS & Tanggal Onset
   const { tgl_mrs, tgl_onset } = extractDates(raw)
 
   return { title, nama_depan, usia, no_rm, jaminan, tgl_mrs, tgl_onset }
@@ -330,9 +391,9 @@ interface RawSections {
 }
 
 const SECTION_HEADER_PATTERNS: { regex: RegExp; section: keyof RawSections }[] = [
-  // S (Subjektif)
+  // S (Subjektif) - mendukung Subjektif, Subjektive, Subyektif, Subyektive, Subjective, Subjectif, RPS, Anamnesis
   {
-    regex: /^\s*(?:[*_~#]*\s*)?(?:S|Subjektif|Subyektif|Subjective|Anamnesis|Keluhan|Keluhan\s*Utama|RPS)\b\s*[:\-–—]?\s*(.*)$/i,
+    regex: /^\s*(?:[*_~#]*\s*)?(?:S|Subjektif|Subjektive|Subyektif|Subyektive|Subjective|Subjectif|Anamnesis|Keluhan|Keluhan\s*Utama|RPS)\b\s*[:\-–—]?\s*(.*)$/i,
     section: 'S',
   },
   // O - Penunjang Khusus
@@ -342,7 +403,7 @@ const SECTION_HEADER_PATTERNS: { regex: RegExp; section: keyof RawSections }[] =
   },
   // O - Pemfis / Objektif Umum
   {
-    regex: /^\s*(?:[*_~#]*\s*)?(?:O|Objektif|Obyektif|Objective|Pemeriksaan\s*Fisik|Pemfis|Status\s*Generalis|Status\s*Neurologi|Status\s*Neurologis|Pemeriksaan)\b\s*[:\-–—]?\s*(.*)$/i,
+    regex: /^\s*(?:[*_~#]*\s*)?(?:O|Objektif|Objektive|Obyektif|Obyektive|Objective|Pemeriksaan\s*Fisik|Pemfis|Status\s*Generalis|Status\s*Neurologi|Status\s*Neurologis|Pemeriksaan)\b\s*[:\-–—]?\s*(.*)$/i,
     section: 'O_pemfis',
   },
   // A (Assessment)
@@ -350,45 +411,90 @@ const SECTION_HEADER_PATTERNS: { regex: RegExp; section: keyof RawSections }[] =
     regex: /^\s*(?:[*_~#]*\s*)?(?:A|Assessment|Assesment|Asesmen|Diagnosis|Diagnosa|Dx|WD\/?|DD\/?|Impresi\s*Klinis)\b\s*[:\-–—]?\s*(.*)$/i,
     section: 'A',
   },
-  // P (Planning)
+  // P (Planning / Advis) - mendukung PDx, PTx, PMx, PEx, Advis, Rekomendasi
   {
-    regex: /^\s*(?:[*_~#]*\s*)?(?:P|Plan|Planning|Tatalaksana|Penatalaksanaan|Terapi|Tx|Rencana|Advis)\b\s*[:\-–—]?\s*(.*)$/i,
+    regex: /^\s*(?:[*_~#]*\s*)?(?:P|Plan|Planning|PDx|PTx|PMx|PEx|Tatalaksana|Penatalaksanaan|Terapi|Tx|Rencana|Advis|Rekomendasi)\b\s*[:\-–—]?\s*(.*)$/i,
     section: 'P',
   },
 ]
 
 function sectionize(raw: string): RawSections {
+  // Bersihkan header chat WhatsApp (misal "[9/23, 15:03] Andrian: A:" -> "\nA:")
+  const cleanRaw = raw.replace(WA_HEADER_REGEX, '\n')
+
   const sections: RawSections = { S: [], O_pemfis: [], O_penunjang: [], A: [], P: [] }
   let current: keyof RawSections | null = null
+  let hasEncounteredPlanning = false
 
-  const lines = raw.split(/\r?\n/)
+  const lines = cleanRaw.split(/\r?\n/)
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].trim()
     if (!line) continue
 
     // Abaikan kalimat basa-basi konsultasi di awal/akhir
     if (NOISE_PHRASES.test(line) && !current) continue
-    if (/^mohon\s*(?:advis|tatalaksana|petunjuk)/i.test(line)) continue
+    if (/^mohon\s*(?:advis|tatalaksana|petunjuk|arahan)/i.test(line)) continue
+
+    // Cek apakah baris ini adalah Suhu (Temperatur) di tanda vital, bukan seksi S
+    const isTemp = IS_TEMPERATURE_LINE.test(line)
 
     // Cek apakah baris ini adalah header seksi SOAP
     let matchedSection: keyof RawSections | null = null
     let inlineContent = ''
+    let headerLabel = ''
 
-    for (const { regex, section } of SECTION_HEADER_PATTERNS) {
-      const match = line.match(regex)
-      if (match) {
-        matchedSection = section
-        inlineContent = match[1] ? match[1].trim() : ''
-        break
+    if (!isTemp) {
+      for (const { regex, section } of SECTION_HEADER_PATTERNS) {
+        const match = line.match(regex)
+        if (match) {
+          // Guard ekstra: huruf tunggal "S" tidak boleh mencocokkan temperatur
+          if (section === 'S') {
+            const afterHeader = match[1]?.trim() || ''
+            if (/^\d{1,2}(?:[.,]\d+)?\s*(?:°?C|c|celcius)?\b/i.test(afterHeader) || /^(?:febris|afebris)\b/i.test(afterHeader)) {
+              continue
+            }
+          }
+          matchedSection = section
+          inlineContent = match[1] ? match[1].trim() : ''
+          headerLabel = line.replace(/[:\-–—].*$/, '').trim()
+          break
+        }
       }
     }
 
     if (matchedSection) {
+      // PRIORITAS REVISI / ADVIS DOKTER SPESIALIS:
+      // Jika seksi Planning (P) sudah pernah terisi sebelumnya, dan kemudian muncul
+      // Assessment (A) atau Planning (P) baru: ini adalah balasan/advis konsultan spesialis.
+      // Kosongkan draft awal IGD dan prioritaskan advis definitif spesialis!
+      if (hasEncounteredPlanning && (matchedSection === 'A' || matchedSection === 'P')) {
+        if (matchedSection === 'A') {
+          sections.A = []
+          sections.P = []
+        }
+      }
+
       current = matchedSection
+      if (current === 'P') {
+        hasEncounteredPlanning = true
+        // Jika header berupa sub-header khusus (misal "PDx:" atau "PTx:"), masukkan barisnya
+        // ke sections.P agar dikenali oleh parsePlanningLines
+        if (/^(?:PDx|PTx|PMx|PEx)/i.test(headerLabel)) {
+          sections.P.push(line)
+          continue
+        }
+      }
+
       if (inlineContent) {
         sections[current].push(inlineContent)
       }
     } else if (current) {
+      // Jika baris temperatur berada di seksi O_pemfis atau sebelumnya, simpan di O_pemfis
+      if (isTemp) {
+        sections.O_pemfis.push(line)
+        continue
+      }
+
       // Deteksi penunjang yang terselip di dalam O (misal: "GDA 186 mg/dl" atau "CT Scan Kepala:")
       if (current === 'O_pemfis' && /^(?:GDA|GDS|GDP|HbA1c|Hasil\s*Lab|Lab:|Radiologi:|CT[\s-]?Scan)\b/i.test(line)) {
         sections.O_penunjang.push(line)
@@ -409,7 +515,8 @@ function parseDiagnosisLines(lines: string[]): DiagnosisItem[] {
     if (NOISE_PHRASES.test(clean)) continue
 
     // Pisahkan jika ada koma di baris yang sama (mis. "CVA Infark, HT, DM")
-    const parts = clean.split(/[,;]\s*/).map((p) => p.trim()).filter(Boolean)
+    // Jangan pecah angka desimal berkoma seperti "Hipokalemia 3,25" (koma diikuti digit)
+    const parts = clean.split(/,(?!\d)\s*|;\s*/).map((p) => p.trim()).filter(Boolean)
     for (const part of parts) {
       if (part.length >= 2) {
         results.push({
@@ -432,6 +539,7 @@ function parsePlanningLines(lines: string[], today: string): TerapiItem[] {
     const rawLine = line.trim()
     if (!rawLine) continue
     if (NOISE_PHRASES.test(rawLine)) continue
+    if (/^mohon\s*(?:arahan|advis|petunjuk|tatalaksana)/i.test(rawLine)) continue
 
     // 1. Deteksi Sub-Header PDX (Plan Diagnostik)
     const pdxMatch = rawLine.match(/^(?:[*_~#]*\s*)?(?:Pdx|Plan\s*Diagnostik|Diagnostik|Usulan\s*Lab|Pemeriksaan\s*Penunjang)\b\s*[:\-–—]?\s*(.*)$/i)

@@ -706,8 +706,11 @@ export default function Brainstorm() {
           />
           <div className="relative w-20 shrink-0">
             <input
-              value={form.usia}
-              onChange={(e) => set({ usia: e.target.value })}
+              value={form.usia.replace(/\s*thn?|\s*tahun/gi, '')}
+              onChange={(e) => {
+                const val = e.target.value.replace(/\s*thn?|\s*tahun/gi, '').trim()
+                set({ usia: val ? `${val} th` : '' })
+              }}
               placeholder="Usia"
               className={inputCls + ' text-center' + (form.usia ? ' pr-6' : '')}
             />

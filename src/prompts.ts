@@ -34,6 +34,10 @@ ATURAN WAJIB (CONCISENESS):
      a) Jika teks menyebutkan durasi hari, misal "sejak X hari yang lalu / X hari SMRS / X hari yll / H-X SMRS", hitung mundur X hari dari tgl_mrs (misal tgl_mrs 2026-09-24, onset sejak 3 hari yll -> 2026-09-21).
      b) Jika teks menyebutkan durasi jam atau waktu akut, misal "X jam sebelum MRS / X jam SMRS / beberapa jam lalu / tadi pagi / tadi malam", maka tgl_onset adalah SAMA DENGAN tgl_mrs.
      c) Jika tidak ada keterangan onset sama sekali di dalam teks, tgl_onset WAJIB DISAMAKAN dengan tgl_mrs (JANGAN PERNAH biarkan kosong "").
+6. ATURAN PARSING CHAT KONSULTASI WHATSAPP & ADVIS SPESIALIS:
+   - Identitas Pasien: Cari baris identitas pasien asli (misal: "*Gelar.Nama/Usia/Gender/Jaminan*" atau "Nama: ..."). JANGAN PERNAH mengambil nama pengirim chat, dokter jaga, atau pemohon konsul (misal "DOKTER JAGA IGD", "Iship Bella", "dr. Jaga") sebagai nama pasien!
+   - S vs O: Suhu tubuh seperti "S : 36 C" / "S: 36.5" / "S: afebris" adalah PEMERIKSAAN FISIK (O_pemfis), BUKAN Anamnesis / Subjektif (S). Anamnesis riwayat keluhan adalah Subjektif (S).
+   - Prioritas Advis / Revisi Spesialis: Jika di dalam teks terdapat balasan/revisi dari dokter spesialis / konsulen (misal diawali "[waktu] Nama: A: ... PDx: ... PTx: ..." atau "Advis: ..."), maka diagnosis (A) dan terapi (P) WAJIB MENGGUNAKAN revisi/advis definitif dari dokter spesialis tersebut (menggantikan draft awal dokter IGD/pemohon konsul agar tidak terjadi duplikasi resep).
 
 Balas HANYA JSON valid dengan skema persis:
 {
