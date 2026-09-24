@@ -31,19 +31,25 @@ if (notes && !/\s/.test(notes)) {
   process.exit(1);
 }
 
-// Pastikan public/apk ada dan salin APK rilis jika tersedia di build lokal
-if (!fs.existsSync('public/apk')) {
-  fs.mkdirSync('public/apk', { recursive: true });
-}
-if (fs.existsSync('android/app/build/outputs/apk/release/app-release.apk')) {
-  fs.copyFileSync('android/app/build/outputs/apk/release/app-release.apk', 'public/apk/doctoid-latest.apk');
-}
-
-if (apk && !fs.existsSync('public/apk/doctoid-latest.apk')) {
-  console.error('Jalur APK dipilih tapi public/apk/doctoid-latest.apk tidak ada.\n' +
-    'Build dulu APK-nya lalu salin:\n' +
-    '  cp android/app/build/outputs/apk/release/app-release.apk public/apk/doctoid-latest.apk');
-  process.exit(1);
+function syncAndroidVersion(newVersion) {
+  const gradlePath = 'android/app/build.gradle';
+  if (!fs.existsSync(gradlePath)) return;
+  let content = fs.readFileSync(gradlePath, 'utf8');
+  
+  // Bump versionCode
+  content = content.replace(/versionCode\s+(\d+)/, (match, code) => {
+    const nextCode = parseInt(code, 10) + 1;
+    console.log(`📱 Bumping Android versionCode: ${code} -> ${nextCode}`);
+    return `versionCode ${nextCode}`;
+  });
+  
+  // Update versionName
+  content = content.replace(/versionName\s+"[^"]+"/, () => {
+    console.log(`📱 Updating Android versionName -> "${newVersion}"`);
+    return `versionName "${newVersion}"`;
+  });
+  
+  fs.writeFileSync(gradlePath, content, 'utf8');
 }
 
 const from = readVersion();
@@ -56,6 +62,23 @@ run('npm run build:ota', {
   OTA_NOTES: notes || '',
   OTA_APK: apk ? '1' : '0'
 });
+
+if (apk) {
+  console.log('\n📱 Menyiapkan pembaruan biner APK native...');
+  syncAndroidVersion(version);
+  console.log('🔄 Menyinkronkan aset web terbaru ke project Android...');
+  run('npx cap sync android');
+  console.log('⚙️ Mengompilasi APK rilis (gradlew assembleRelease)...');
+  execSync(process.platform === 'win32' ? 'gradlew.bat assembleRelease' : './gradlew assembleRelease', {
+    stdio: 'inherit',
+    cwd: 'android'
+  });
+  if (!fs.existsSync('public/apk')) {
+    fs.mkdirSync('public/apk', { recursive: true });
+  }
+  fs.copyFileSync('android/app/build/outputs/apk/release/app-release.apk', 'public/apk/doctoid-latest.apk');
+  console.log('✓ APK rilis baru berhasil dikompilasi dan disalin ke public/apk/doctoid-latest.apk\n');
+}
 
 const deployHosting = () => {
   // Bersihkan cache unggahan Firebase agar manifest & ota zip terunggah segar (standar logym/lomeal/darka)

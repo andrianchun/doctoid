@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Sparkles, AlertCircle, X, DownloadCloud } from 'lucide-react'
-import { Capacitor } from '@capacitor/core'
+import { Capacitor, registerPlugin } from '@capacitor/core'
 import { CapacitorUpdater } from '@capgo/capacitor-updater'
+import { App as CapApp } from '@capacitor/app'
 
 interface OtaManifest {
   ota_version: string
@@ -11,12 +12,23 @@ interface OtaManifest {
   release_notes?: string
 }
 
-function DownloadProgress({ progress }: { progress: number }) {
+// Plugin lokal native Android: mengalirkan byte APK langsung ke PackageInstaller.Session
+// Tanpa menyimpan file fisik di Downloads (zero disk residue).
+const ApkInstaller = registerPlugin<any>('ApkInstaller')
+
+function DownloadProgress({ progress, isApk }: { progress: number; isApk?: boolean }) {
+  const isInstalling = progress >= 100
   return (
     <div className="w-full space-y-1.5 pt-1 text-left">
       <div className="flex items-center justify-between text-xs font-bold text-ink">
         <span className="text-ink-muted">
-          {progress >= 100 ? 'Memasang berkas & memuat ulang…' : 'Mengunduh pembaruan OTA…'}
+          {isInstalling
+            ? isApk
+              ? 'Mempersiapkan pemasangan APK…'
+              : 'Memasang berkas & memuat ulang…'
+            : isApk
+              ? 'Mengunduh paket pembaruan APK…'
+              : 'Mengunduh pembaruan OTA…'}
         </span>
         <span className="tabular-nums font-mono text-primary">{progress}%</span>
       </div>
@@ -25,12 +37,16 @@ function DownloadProgress({ progress }: { progress: number }) {
           className="h-full rounded-full bg-gradient-to-r from-primary to-primary-deep transition-all duration-150 ease-out"
           style={{ width: `${Math.max(progress, 3)}%` }}
         />
-        {progress >= 100 && (
+        {isInstalling && (
           <div className="absolute inset-0 bg-white/30 animate-pulse rounded-full" />
         )}
       </div>
       <p className="caption text-ink-muted text-center">
-        Jangan tutup aplikasi. Doctoid akan otomatis dimuat ulang setelah selesai.
+        {isInstalling
+          ? isApk
+            ? 'Konfirmasi dialog "Update/Install" Android di layar Anda.'
+            : 'Doctoid akan otomatis dimuat ulang setelah selesai.'
+          : 'Jangan tutup aplikasi saat proses berlangsung.'}
       </p>
     </div>
   )
@@ -42,11 +58,26 @@ export default function UpdaterAlert() {
   const [downloadProgress, setDownloadProgress] = useState<number | null>(null)
   const [errorMsg, setErrorMsg] = useState('')
 
-  const currentVersion = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '0.1.0'
+  const fallbackVersion = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '0.1.0'
+  const [currentVersion, setCurrentVersion] = useState<string>(fallbackVersion)
   const isNative = Capacitor.isNativePlatform()
 
   const checkUpdate = useCallback(async () => {
     try {
+      // Dapatkan versi terpasang yang sebenarnya (cek native App.getInfo() jika di Android)
+      let activeVer = fallbackVersion
+      if (isNative) {
+        try {
+          const info = await CapApp.getInfo()
+          if (info?.version) {
+            activeVer = info.version
+          }
+        } catch {
+          // Gunakan fallbackVersion jika getInfo gagal
+        }
+      }
+      setCurrentVersion(activeVer)
+
       // Jalur pengecekan tunggal: Native membaca URL absolut, Web membaca relatif dengan fallback
       const primaryUrl = isNative ? 'https://docto-id.web.app/ota/version.json' : '/ota/version.json'
       let res: Response | null = null
@@ -82,8 +113,14 @@ export default function UpdaterAlert() {
 
       const data = (await res.json()) as OtaManifest
 
-      // Deteksi versi berbeda (mendukung upgrade maupun rollback, standar lomeal/darka)
-      if (data.ota_version && data.ota_version !== currentVersion) {
+      // Jika rilis khusus APK tapi dibuka di Web/PWA, abaikan
+      if (data.is_apk && !isNative) {
+        setUpdateAvailable(false)
+        return
+      }
+
+      // Deteksi versi berbeda (mendukung upgrade maupun rollback, standar logym/lomeal/darka)
+      if (data.ota_version && data.ota_version !== activeVer) {
         const storedDismiss = localStorage.getItem('doctoid_dismissed_ota')
         if (storedDismiss === data.ota_version && !data.is_forced) {
           setUpdateAvailable(false)
@@ -97,7 +134,7 @@ export default function UpdaterAlert() {
     } catch {
       // Abaikan jika offline
     }
-  }, [currentVersion, isNative])
+  }, [fallbackVersion, isNative])
 
   useEffect(() => {
     checkUpdate()
@@ -128,7 +165,7 @@ export default function UpdaterAlert() {
     }
   }, [checkUpdate])
 
-  // Listener progres Capgo di native APK
+  // Listener progres Capgo (khusus bundle ZIP OTA)
   useEffect(() => {
     if (!isNative) return
     let listener: any
@@ -141,13 +178,56 @@ export default function UpdaterAlert() {
     }
   }, [isNative])
 
+  // Listener progres ApkInstaller (khusus unduhan streaming in-app APK)
+  useEffect(() => {
+    if (!isNative || Capacitor.getPlatform() !== 'android') return
+    let listener: any
+    ApkInstaller.addListener('apkInstall', (info: any) => {
+      if (info?.state === 'downloading') {
+        setDownloadProgress(Math.round(info.percent || 0))
+      } else if (info?.state === 'installing' || info?.state === 'prompt') {
+        // Tampilkan 100% saat dialog instalasi Android muncul agar tombol tidak mental
+        setDownloadProgress(100)
+      } else if (info?.state === 'failed') {
+        setDownloadProgress(null)
+        setErrorMsg(info?.message || 'Pemasangan APK dibatalkan atau gagal.')
+      }
+    }).then((l: any) => {
+      listener = l
+    })
+
+    return () => {
+      if (listener) listener.remove()
+    }
+  }, [isNative])
+
   const handleUpdate = async () => {
     if (!manifest) return
     setErrorMsg('')
     localStorage.removeItem('doctoid_dismissed_ota')
 
-    // Jalur APK Mandiri
-    if (manifest.is_apk || !manifest.ota_url.toLowerCase().endsWith('.zip')) {
+    const isApkRelease = manifest.is_apk || !manifest.ota_url.toLowerCase().endsWith('.zip')
+
+    // Jalur APK Mandiri: Pasang langsung dari dalam aplikasi (PackageInstaller Session)
+    if (isApkRelease) {
+      if (isNative && Capacitor.getPlatform() === 'android') {
+        setDownloadProgress(0)
+        try {
+          const res = await ApkInstaller.install({ url: manifest.ota_url })
+          if (res?.needsPermission) {
+            setDownloadProgress(null)
+            setErrorMsg('Android butuh izin untuk memasang pembaruan langsung. Silakan aktifkan "Izinkan dari sumber ini" pada layar setelan yang terbuka, lalu tekan Update lagi.')
+            await ApkInstaller.openInstallSettings()
+          }
+        } catch (err: any) {
+          console.warn('Gagal memasang APK langsung:', err)
+          setDownloadProgress(null)
+          setErrorMsg(err.message || 'Gagal memulai pemasangan APK.')
+        }
+        return
+      }
+
+      // Web / Browser biasa: buka unduhan file APK
       window.open(manifest.ota_url, '_blank')
       return
     }
@@ -164,7 +244,7 @@ export default function UpdaterAlert() {
       return
     }
 
-    // Native APK: Unduh bundle ZIP OTA via Capgo dan set bundle
+    // Native APK: Unduh bundle ZIP OTA via Capgo dan pasang
     try {
       setDownloadProgress(0)
       const bundle = await CapacitorUpdater.download({
@@ -193,6 +273,7 @@ export default function UpdaterAlert() {
   }
 
   const isDownloading = downloadProgress !== null
+  const isApkRelease = manifest.is_apk || !manifest.ota_url.toLowerCase().endsWith('.zip')
   const versionLine = currentVersion && manifest.ota_version
     ? `v${currentVersion} → v${manifest.ota_version}`
     : `v${manifest.ota_version}`
@@ -233,14 +314,14 @@ export default function UpdaterAlert() {
 
           <div className="pt-2">
             {isDownloading ? (
-              <DownloadProgress progress={downloadProgress ?? 0} />
+              <DownloadProgress progress={downloadProgress ?? 0} isApk={isApkRelease} />
             ) : (
               <button
                 onClick={handleUpdate}
                 className="flex w-full cursor-pointer items-center justify-center gap-2 rounded-2xl bg-gradient-to-br from-primary to-primary-deep py-3.5 text-sm font-bold text-white shadow-lg shadow-primary/30 hover:brightness-110 active:scale-95 transition-all"
               >
                 <DownloadCloud size={18} />
-                <span>Update Sekarang (OTA)</span>
+                <span>Update Sekarang</span>
               </button>
             )}
           </div>
@@ -288,7 +369,7 @@ export default function UpdaterAlert() {
         )}
 
         {isDownloading ? (
-          <DownloadProgress progress={downloadProgress ?? 0} />
+          <DownloadProgress progress={downloadProgress ?? 0} isApk={isApkRelease} />
         ) : (
           <button
             onClick={handleUpdate}

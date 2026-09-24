@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { Capacitor } from '@capacitor/core'
 import { CapacitorUpdater } from '@capgo/capacitor-updater'
+import { App as CapApp } from '@capacitor/app'
 import { StatusBar, Style } from '@capacitor/status-bar'
 import { Loader2 } from 'lucide-react'
 import { useUi } from './store'
@@ -24,12 +25,32 @@ const IDLE_LOCK_MS = 5 * 60 * 1000 // 5 menit tanpa aktivitas → auto-lock laya
 export default function App() {
   const { user, setUser, isUnlocked, setIsUnlocked, authLoading, setAuthLoading } = useUi()
 
-  // Inisialisasi Native Android: Status Bar & Capgo
+  // Inisialisasi Native Android: Status Bar, Capgo, & Sinkronisasi Versi APK
   useEffect(() => {
     if (Capacitor.isNativePlatform()) {
       CapacitorUpdater.notifyAppReady()
       StatusBar.setStyle({ style: Style.Light }).catch(() => {})
       StatusBar.setOverlaysWebView({ overlay: true }).catch(() => {})
+
+      // Deteksi jika user baru saja memasang APK versi baru:
+      // Bersihkan bundle cache Capgo agar webview langsung membaca aset terbaru bawaan APK
+      ;(async () => {
+        try {
+          const info = await CapApp.getInfo()
+          const lastVer = localStorage.getItem('doctoid_installed_native_ver')
+          if (lastVer && lastVer !== info.version) {
+            console.log(`Native APK diperbarui dari ${lastVer} ke ${info.version}. Mereset bundle cache Capgo...`)
+            localStorage.setItem('doctoid_installed_native_ver', info.version)
+            localStorage.removeItem('doctoid_dismissed_ota')
+            await CapacitorUpdater.reset()
+            window.location.reload()
+            return
+          }
+          localStorage.setItem('doctoid_installed_native_ver', info.version)
+        } catch (err) {
+          console.warn('Gagal sinkronisasi versi native APK:', err)
+        }
+      })()
     }
   }, [])
 
