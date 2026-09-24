@@ -75,14 +75,18 @@ async function main() {
   // Trim pixel transparan berlebih untuk mendapatkan batas simbol murni
   const trimmedIconBuf = await sharp(tempRawIcon).trim().toBuffer();
   
-  // Skala simbol ke 560x560 (sekitar 54.6% dari kanvas 1024x1024)
-  // Menjamin safe zone 100% pada adaptive icon Android & maskable PWA
-  const symbolSize = 560;
+  // Skala simbol ke 400x400 (sekitar 39% dari kanvas 1024x1024, lebih proporsional & elegan)
+  // Dilengkapi optical right-shift (+26px) karena huruf D memiliki visual weight vertikal di sisi kiri
+  const symbolSize = 400;
   const resizedSymbol = await sharp(trimmedIconBuf)
     .resize(symbolSize, symbolSize, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
     .toBuffer();
 
-  // Simpan master icon yang benar-benar simetris & centered
+  const masterShiftX = 26;
+  const masterLeft = Math.round((1024 - symbolSize) / 2) + masterShiftX;
+  const masterTop = Math.round((1024 - symbolSize) / 2);
+
+  // Simpan master icon yang benar-benar simetris & optically centered
   await sharp({
     create: {
       width: 1024,
@@ -91,7 +95,7 @@ async function main() {
       background: { r: 0, g: 0, b: 0, alpha: 0 }
     }
   })
-    .composite([{ input: resizedSymbol, gravity: 'center' }])
+    .composite([{ input: resizedSymbol, left: masterLeft, top: masterTop }])
     .png()
     .toFile('public/icon.png');
 
@@ -106,12 +110,25 @@ async function main() {
     .toFile('public/favicon.png');
 
   // Apple touch icon (180x180) dengan background putih bersih
-  await sharp(trimmedIconBuf)
-    .resize(110, 110, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
-    .extend({
-      top: 35, bottom: 35, left: 35, right: 35,
+  const appleSymbolSize = 85;
+  const appleShiftX = 6;
+  const appleSymbol = await sharp(trimmedIconBuf)
+    .resize(appleSymbolSize, appleSymbolSize, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
+    .toBuffer();
+
+  await sharp({
+    create: {
+      width: 180,
+      height: 180,
+      channels: 4,
       background: { r: 255, g: 255, b: 255, alpha: 1 }
-    })
+    }
+  })
+    .composite([{
+      input: appleSymbol,
+      left: Math.round((180 - appleSymbolSize) / 2) + appleShiftX,
+      top: Math.round((180 - appleSymbolSize) / 2)
+    }])
     .png()
     .toFile('public/apple-touch-icon.png');
 
@@ -127,12 +144,13 @@ async function main() {
     .png()
     .toFile('public/icon-512.png');
 
-  // PWA Maskable Icon 512x512 (simbol D aman di tengah dengan safe zone ~58%)
+  // PWA Maskable Icon 512x512 (simbol D lebih kecil & optical right shift)
+  const maskableSize = 200;
+  const maskableShiftX = 13;
   const maskableSymbol = await sharp(trimmedIconBuf)
-    .resize(290, 290, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
+    .resize(maskableSize, maskableSize, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
     .toBuffer();
 
-  const maskPad = Math.round((512 - 290) / 2);
   await sharp({
     create: {
       width: 512,
@@ -141,7 +159,11 @@ async function main() {
       background: { r: 255, g: 255, b: 255, alpha: 1 }
     }
   })
-    .composite([{ input: maskableSymbol, gravity: 'center' }])
+    .composite([{
+      input: maskableSymbol,
+      left: Math.round((512 - maskableSize) / 2) + maskableShiftX,
+      top: Math.round((512 - maskableSize) / 2)
+    }])
     .png()
     .toFile('public/icon-maskable-512.png');
 
@@ -158,9 +180,9 @@ async function main() {
     const targetDir = path.join('android/app/src/main/res', m.dir);
     if (!fs.existsSync(targetDir)) continue;
 
-    // 1. ic_launcher_foreground.png (108dp canvas, icon inside ~54dp safe zone diameter)
-    // Sesuai standar Android Adaptive Icons: safe zone adalah lingkaran 66dp, kita pakai 54dp agar aman dari pemotongan launcher vendor mana pun
-    const iconSizeInFg = Math.round(m.fg * (54 / 108));
+    // 1. ic_launcher_foreground.png (108dp canvas, icon inside ~38dp safe zone diameter with optical right shift)
+    const iconSizeInFg = Math.round(m.fg * (38 / 108));
+    const shiftFgX = Math.round(m.fg * (3.5 / 108));
     const fgSymbol = await sharp(trimmedIconBuf)
       .resize(iconSizeInFg, iconSizeInFg, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
       .toBuffer();
@@ -173,12 +195,17 @@ async function main() {
         background: { r: 0, g: 0, b: 0, alpha: 0 }
       }
     })
-      .composite([{ input: fgSymbol, gravity: 'center' }])
+      .composite([{
+        input: fgSymbol,
+        left: Math.round((m.fg - iconSizeInFg) / 2) + shiftFgX,
+        top: Math.round((m.fg - iconSizeInFg) / 2)
+      }])
       .png()
       .toFile(path.join(targetDir, 'ic_launcher_foreground.png'));
 
     // 2. ic_launcher.png (legacy launcher icon)
-    const iconSizeInLauncher = Math.round(m.launcher * 0.65);
+    const iconSizeInLauncher = Math.round(m.launcher * 0.48);
+    const shiftLauncherX = Math.round(m.launcher * 0.04);
     const launcherSymbol = await sharp(trimmedIconBuf)
       .resize(iconSizeInLauncher, iconSizeInLauncher, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
       .toBuffer();
@@ -191,7 +218,11 @@ async function main() {
         background: { r: 255, g: 255, b: 255, alpha: 1 }
       }
     })
-      .composite([{ input: launcherSymbol, gravity: 'center' }])
+      .composite([{
+        input: launcherSymbol,
+        left: Math.round((m.launcher - iconSizeInLauncher) / 2) + shiftLauncherX,
+        top: Math.round((m.launcher - iconSizeInLauncher) / 2)
+      }])
       .png()
       .toFile(path.join(targetDir, 'ic_launcher.png'));
 
@@ -202,12 +233,18 @@ async function main() {
       </svg>`
     );
     const roundBg = await sharp(roundSvg).png().toBuffer();
+    const roundIconSize = Math.round(m.launcher * 0.48);
+    const shiftRoundX = Math.round(m.launcher * 0.04);
     const roundIcon = await sharp(trimmedIconBuf)
-      .resize(Math.round(m.launcher * 0.58), Math.round(m.launcher * 0.58), { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
+      .resize(roundIconSize, roundIconSize, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
       .toBuffer();
 
     await sharp(roundBg)
-      .composite([{ input: roundIcon, gravity: 'center' }])
+      .composite([{
+        input: roundIcon,
+        left: Math.round((m.launcher - roundIconSize) / 2) + shiftRoundX,
+        top: Math.round((m.launcher - roundIconSize) / 2)
+      }])
       .png()
       .toFile(path.join(targetDir, 'ic_launcher_round.png'));
   }
