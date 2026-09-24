@@ -1,8 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Sparkles, AlertCircle, X, DownloadCloud } from 'lucide-react'
+import { AlertCircle, X, DownloadCloud } from 'lucide-react'
 import { Capacitor, registerPlugin } from '@capacitor/core'
 import { CapacitorUpdater } from '@capgo/capacitor-updater'
-import { App as CapApp } from '@capacitor/app'
 
 interface OtaManifest {
   ota_version: string
@@ -58,26 +57,12 @@ export default function UpdaterAlert() {
   const [downloadProgress, setDownloadProgress] = useState<number | null>(null)
   const [errorMsg, setErrorMsg] = useState('')
 
-  const fallbackVersion = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '0.1.0'
-  const [currentVersion, setCurrentVersion] = useState<string>(fallbackVersion)
+  // Versi bundle JS yang sedang aktif berjalan di aplikasi
+  const currentVersion = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '0.1.0'
   const isNative = Capacitor.isNativePlatform()
 
   const checkUpdate = useCallback(async () => {
     try {
-      // Dapatkan versi terpasang yang sebenarnya (cek native App.getInfo() jika di Android)
-      let activeVer = fallbackVersion
-      if (isNative) {
-        try {
-          const info = await CapApp.getInfo()
-          if (info?.version) {
-            activeVer = info.version
-          }
-        } catch {
-          // Gunakan fallbackVersion jika getInfo gagal
-        }
-      }
-      setCurrentVersion(activeVer)
-
       // Jalur pengecekan tunggal: Native membaca URL absolut, Web membaca relatif dengan fallback
       const primaryUrl = isNative ? 'https://docto-id.web.app/ota/version.json' : '/ota/version.json'
       let res: Response | null = null
@@ -91,7 +76,6 @@ export default function UpdaterAlert() {
         })
         clearTimeout(timeoutId)
       } catch {
-        // Fallback untuk dev/preview di localhost jika /ota belum ada di bundle lokal
         if (!isNative) {
           try {
             const controller2 = new AbortController()
@@ -119,8 +103,9 @@ export default function UpdaterAlert() {
         return
       }
 
-      // Deteksi versi berbeda (mendukung upgrade maupun rollback, standar logym/lomeal/darka)
-      if (data.ota_version && data.ota_version !== activeVer) {
+      // Deteksi versi berbeda berdasarkan bundle aktif (__APP_VERSION__)
+      // Standar teruji Logym, Lomeal, dan Darka: jika bundle sama persis, jangan tampilkan prompt
+      if (data.ota_version && data.ota_version !== currentVersion) {
         const storedDismiss = localStorage.getItem('doctoid_dismissed_ota')
         if (storedDismiss === data.ota_version && !data.is_forced) {
           setUpdateAvailable(false)
@@ -134,7 +119,7 @@ export default function UpdaterAlert() {
     } catch {
       // Abaikan jika offline
     }
-  }, [fallbackVersion, isNative])
+  }, [currentVersion, isNative])
 
   useEffect(() => {
     checkUpdate()
@@ -284,9 +269,12 @@ export default function UpdaterAlert() {
       <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/75 p-4 backdrop-blur-md animate-in fade-in duration-300">
         <div className="w-full max-w-sm rounded-3xl border border-white/20 bg-card p-6 shadow-2xl space-y-4 animate-in zoom-in-95 duration-300 text-center">
           <div className="flex flex-col items-center gap-2 pt-2">
-            <span className="flex size-16 items-center justify-center rounded-3xl bg-gradient-to-br from-primary to-primary-deep text-white shadow-xl shadow-primary/30">
-              <Sparkles size={32} />
-            </span>
+            {/* Ikon D Khas Doctoid — Bukan Icon Generik */}
+            <img
+              src="/icon.png"
+              alt="Doctoid"
+              className="size-20 rounded-3xl shadow-xl shadow-primary/25 border border-white/20 p-2 bg-gradient-to-br from-white/10 to-white/5 backdrop-blur-md object-contain"
+            />
             <h2 className="text-xl font-black text-ink tracking-tight mt-1">Pembaruan Wajib!</h2>
             <p className="caption text-xs text-ink-muted px-2">
               Versi terbaru Doctoid telah tersedia. Dokter perlu memperbarui aplikasi untuk melanjutkan akses rekam medis.
@@ -336,9 +324,12 @@ export default function UpdaterAlert() {
       <div className="flex flex-col gap-3 rounded-3xl border border-white/30 bg-card/95 p-4 shadow-2xl shadow-primary/10 backdrop-blur-xl relative overflow-hidden">
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-2.5 min-w-0 flex-1">
-            <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-primary-deep text-white shadow-md shadow-primary/20">
-              <Sparkles size={20} />
-            </span>
+            {/* Ikon D Khas Doctoid */}
+            <img
+              src="/icon.png"
+              alt="Doctoid"
+              className="size-11 rounded-2xl shadow-md shadow-primary/20 border border-white/20 p-1 bg-gradient-to-br from-white/10 to-white/5 object-contain shrink-0"
+            />
             <div className="min-w-0 flex-1">
               <h3 className="text-sm font-bold text-ink leading-tight truncate">Update Tersedia</h3>
               <p className="caption text-xs text-ink-muted mt-0.5 tabular-nums truncate">
