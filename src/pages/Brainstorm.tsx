@@ -14,9 +14,9 @@ import CustomSelect from '../components/CustomSelect'
 import { lineToTerapi, localParse, classifyFragment, type LocalParseResult } from '../parser'
 import { rapikan, analisisKasus } from '../ai'
 import { buatKonteks, catatTerapi, saranTerapi, type Suggestion } from '../styleLearning'
-import { formatDate, hariKe } from '../utils/dateFormat'
+import { formatDate, hariKe, getLocalDateString } from '../utils/dateFormat'
 
-const today = () => new Date().toISOString().slice(0, 10)
+const today = () => getLocalDateString()
 
 interface StagedAnalysis {
   A: DiagnosisItem[]
@@ -1481,7 +1481,7 @@ export default function Brainstorm() {
           <div className="w-full flex flex-col items-center pointer-events-auto">
             {/* Helper status text — Mengambang elegan di atas kotak input */}
             {(busy === 'ocr' || listening || busy === 'ai' || busy === 'analisis') && (
-              <div className="mb-2 flex items-center justify-center gap-2 caption font-medium text-ink bg-white/95 backdrop-blur-md px-3.5 py-1.5 rounded-full shadow-lg border border-primary/25 w-max mx-auto animate-in fade-in zoom-in-95 duration-150">
+              <div className="mb-2 flex items-center justify-center gap-2 caption font-medium text-ink bg-white/95 backdrop-blur-md px-3.5 py-1.5 rounded-full shadow-lg border border-primary/25 w-max mx-auto animate-in fade-in duration-150">
                 {busy === 'ocr' && <><Loader2 size={13} className="animate-spin text-primary" /> <span className="text-primary font-bold">Mengekstrak teks...</span></>}
                 {busy === 'ai' && <><Loader2 size={13} className="animate-spin text-primary" /> <span className="text-primary font-bold">AI sedang merapikan...</span></>}
                 {busy === 'analisis' && <><Loader2 size={13} className="animate-spin text-blue-600" /> <span className="text-blue-600 font-bold">AI sedang menganalisis...</span></>}
@@ -1490,7 +1490,7 @@ export default function Brainstorm() {
             )}
 
             {/* Kotak Input Putih Bersih — Menyambung Mulus dengan Tab Highlight Putih */}
-            <div className="flex items-end gap-2 rounded-t-3xl rounded-b-none bg-white border-t border-x border-slate-200/80 border-b-0 shadow-[0_-12px_30px_-4px_rgba(15,23,42,0.16),0_-4px_10px_-2px_rgba(15,23,42,0.08),-4px_0_16px_-4px_rgba(15,23,42,0.1),4px_0_16px_-4px_rgba(15,23,42,0.1)] p-2.5 transition-all w-full -mb-[1px]">
+            <div className="flex items-end gap-2 rounded-t-3xl rounded-b-none bg-white border-t border-x border-slate-200/80 border-b-0 p-2.5 transition-colors w-full relative z-20">
               {/* Radial Fan Attachment Menu (Kamera, Galeri, Dikte ala Lomeal) */}
               <AttachmentMenu
                 disabled={busy === 'ai'}

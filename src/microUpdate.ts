@@ -1,5 +1,6 @@
 import { db, type TerapiItem } from './db'
 import { lineToTerapi } from './parser'
+import { getLocalDateString } from './utils/dateFormat'
 
 /* Micro-Update: parse perintah singkat ("Stop Ceftriaxone, tambah Valsartan 1x80"),
    duplikasi ProgressNote terakhir sebagai note hari ini, lalu terapkan ke daftar P. */
@@ -9,7 +10,7 @@ export interface MicroResult {
 }
 
 export async function applyMicroUpdate(patientId: number, command: string): Promise<MicroResult> {
-  const today = new Date().toISOString().slice(0, 10)
+  const today = getLocalDateString()
   const notes = await db.progressNotes.where('patient_id').equals(patientId).sortBy('tanggal')
   const last = notes[notes.length - 1]
   const P: TerapiItem[] = last ? structuredClone(last.P) : []

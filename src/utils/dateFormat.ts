@@ -70,3 +70,15 @@ export function hariKe(isoOrDate?: string | Date | null): number {
   if (isNaN(d.getTime())) return 1
   return Math.max(1, Math.floor((Date.now() - d.getTime()) / 86400000) + 1)
 }
+
+/**
+ * Mengembalikan tanggal lokal perangkat dalam format baku YYYY-MM-DD.
+ * Menghindari bug timezone UTC (mis. toISOString() yang mundur 1 hari sebelum jam 07:00 pagi WIB).
+ */
+export function getLocalDateString(d: Date = new Date()): string {
+  const year = d.getFullYear()
+  const month = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+

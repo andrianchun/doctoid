@@ -1,4 +1,5 @@
 import type { TerapiItem, DiagnosisItem, Jaminan, RegexRule } from './db'
+import { getLocalDateString } from './utils/dateFormat'
 
 /* Parser lokal non-AI (hemat token): mendeteksi format konsultasi medis Indonesia secara komprehensif */
 
@@ -685,7 +686,7 @@ export interface LocalParseResult {
 export function localParse(raw: string, learnedRules: RegexRule[] = []): { data: LocalParseResult; success: boolean } {
   const demo = extractDemografi(raw, learnedRules)
   const sec = sectionize(raw)
-  const today = new Date().toISOString().slice(0, 10)
+  const today = getLocalDateString()
 
   const S = sec.S.join('\n').trim()
   const O_pemfis = sec.O_pemfis.join('\n').trim()

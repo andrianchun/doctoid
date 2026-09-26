@@ -3,6 +3,10 @@
   "appName": "Doctoid",
   "webDir": "dist",
   "plugins": {
+    "StatusBar": {
+      "overlaysWebView": true,
+      "style": "LIGHT"
+    },
     "FirebaseAuthentication": {
       "skipNativeAuth": false,
       "providers": ["google.com"]

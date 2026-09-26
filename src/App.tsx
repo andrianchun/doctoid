@@ -29,8 +29,16 @@ export default function App() {
   useEffect(() => {
     if (Capacitor.isNativePlatform()) {
       CapacitorUpdater.notifyAppReady()
-      StatusBar.setStyle({ style: Style.Light }).catch(() => {})
-      StatusBar.setOverlaysWebView({ overlay: true }).catch(() => {})
+      // Atur status bar transparan dengan teks/ikon hitam (gelap) untuk tema terang
+      const applyStatusBar = async () => {
+        try {
+          await StatusBar.setOverlaysWebView({ overlay: true })
+          await StatusBar.setStyle({ style: Style.Light })
+        } catch {
+          // ignore
+        }
+      }
+      applyStatusBar()
 
       // Deteksi jika user baru saja memasang APK versi baru:
       // Bersihkan bundle cache Capgo agar webview langsung membaca aset terbaru bawaan APK
@@ -128,6 +136,7 @@ export default function App() {
               <Route path="/dasbor" element={<Dasbor />} />
               <Route path="/brainstorm" element={<Brainstorm />} />
               <Route path="/rekammedis" element={<RekamMedis />} />
+              <Route path="/rekammedis/:id" element={<PatientProfile />} />
               <Route path="/rekap" element={<Navigate to="/rekammedis" replace />} />
               <Route path="/template" element={<TemplateTab />} />
               <Route path="/pasien/:id" element={<PatientProfile />} />

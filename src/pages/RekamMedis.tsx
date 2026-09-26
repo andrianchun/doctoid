@@ -149,7 +149,7 @@ export default function RekamMedis() {
           return (
             <Link
               key={p.id}
-              to={`/pasien/${p.id}`}
+              to={`/rekammedis/${p.id}`}
               className="glass-card glass-card-hover block rounded-3xl p-4 transition-all"
             >
               <div className="flex items-start justify-between gap-3">
