@@ -1,10 +1,10 @@
 import { useRef } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { LayoutDashboard, Sparkles, FolderOpen, FileText } from 'lucide-react'
+import { LayoutDashboard, PenLine, FolderOpen, FileText } from 'lucide-react'
 
 const TABS = [
   { to: '/dasbor', label: 'Dasbor', Icon: LayoutDashboard },
-  { to: '/brainstorm', label: 'Catat Pasien', Icon: Sparkles },
+  { to: '/brainstorm', label: 'Catat Pasien', Icon: PenLine },
   { to: '/rekammedis', label: 'Rekam Medis', Icon: FolderOpen },
   { to: '/template', label: 'Template', Icon: FileText },
 ]
@@ -22,6 +22,15 @@ export default function Layout() {
     location.pathname.startsWith('/pasien/')
   const isTemplate = location.pathname === '/template'
   const isMainTab = isDasbor || isBrainstorm || isRekamMedis || isTemplate
+  const activeIndex = isDasbor
+    ? 0
+    : isBrainstorm
+    ? 1
+    : isRekamMedis
+    ? 2
+    : isTemplate
+    ? 3
+    : -1
 
   // Gestur Swipe Horizontal antar Tab Utama
   const touchStartX = useRef<number | null>(null)
@@ -95,7 +104,24 @@ export default function Layout() {
                 : 'rounded-3xl border border-white/25'
             }`}
           >
-            <div className="flex items-center justify-around">
+            <div className="relative flex h-12 items-center justify-around">
+              {/* Sliding White Indicator Pill (GPU Accelerated 60-120fps) */}
+              {activeIndex >= 0 && (
+                <div
+                  aria-hidden="true"
+                  className="absolute inset-y-0 left-0 w-1/4 flex items-center justify-center pointer-events-none z-10 transition-transform duration-300 ease-[cubic-bezier(0.25,1,0.5,1)]"
+                  style={{
+                    transform: `translate3d(${activeIndex * 100}%, 0, 0)`,
+                  }}
+                >
+                  <div
+                    className={`w-[70px] h-9.5 rounded-2xl bg-white shadow-sm shadow-black/10 transition-opacity duration-200 ${
+                      isBrainstorm ? 'opacity-0' : 'opacity-100'
+                    }`}
+                  />
+                </div>
+              )}
+
               {TABS.map(({ to, label, Icon }) => {
                 const isActive =
                   to === '/dasbor'
@@ -121,7 +147,7 @@ export default function Layout() {
                     {isBrainstormActive && (
                       <span
                         aria-hidden="true"
-                        className="absolute -top-3 inset-x-0 bottom-0 bg-white rounded-b-2xl pointer-events-none z-10"
+                        className="absolute -top-3 inset-x-0 mx-auto w-[70px] bottom-0 bg-white rounded-b-2xl pointer-events-none z-10"
                       >
                         {/* Lengkungan sudut kiri (inverted concave fillet) */}
                         <svg
@@ -148,12 +174,10 @@ export default function Layout() {
                     )}
 
                     <div
-                      className={`relative z-20 flex items-center justify-center transition-all duration-150 ${
-                        isBrainstormActive
+                      className={`relative z-20 flex items-center justify-center transition-colors duration-200 w-[70px] h-9.5 rounded-2xl ${
+                        isActive
                           ? 'text-primary'
-                          : isActive
-                          ? 'w-13 h-8.5 rounded-xl bg-white text-primary shadow-sm shadow-black/10'
-                          : 'w-11 h-8 rounded-xl text-white/70 group-hover:text-white group-hover:bg-white/15 group-active:bg-white/20'
+                          : 'text-white/70 group-hover:text-white group-hover:bg-white/10 group-active:bg-white/15'
                       }`}
                     >
                       <Icon size={23} strokeWidth={2.2} />

@@ -229,3 +229,43 @@ input, textarea, [contenteditable="true"] {
   -ms-overflow-style: none;
   scrollbar-width: none;
 }
+
+/* ==========================================================================
+   ANIMASI BERPENDAR (FLICKERING) TOMBOL VISITE & BADGE REKAP RUANGAN
+   ========================================================================== */
+@keyframes flicker-blue-btn {
+  0%, 100% {
+    box-shadow: 0 1px 3px 0 rgba(37, 99, 235, 0.3), 0 0 0 0 rgba(37, 99, 235, 0);
+    filter: brightness(1);
+    opacity: 1;
+  }
+  50% {
+    box-shadow: 0 4px 14px 0 rgba(37, 99, 235, 0.45), 0 0 0 3px rgba(37, 99, 235, 0.28);
+    filter: brightness(1.08);
+    opacity: 0.92;
+  }
+}
+
+@keyframes flicker-blue-badge {
+  0%, 100% {
+    background-color: rgba(37, 99, 235, 0.08);
+    border-color: rgba(37, 99, 235, 0.25);
+    box-shadow: 0 0 0 0 rgba(37, 99, 235, 0);
+    color: #2563EB;
+  }
+  50% {
+    background-color: rgba(37, 99, 235, 0.22);
+    border-color: rgba(37, 99, 235, 0.6);
+    box-shadow: 0 0 8px rgba(37, 99, 235, 0.35), 0 0 0 2px rgba(37, 99, 235, 0.2);
+    color: #1D4ED8;
+  }
+}
+
+.animate-flicker-blue {
+  animation: flicker-blue-btn 2.8s ease-in-out infinite;
+}
+
+.animate-flicker-blue-badge {
+  animation: flicker-blue-badge 2.8s ease-in-out infinite;
+}
+

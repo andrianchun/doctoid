@@ -1489,8 +1489,8 @@ export default function Brainstorm() {
               </div>
             )}
 
-            {/* Kotak Input Putih Bersih — Menyambung Mulus dengan Tab Highlight Putih */}
-            <div className="flex items-end gap-2 rounded-t-3xl rounded-b-none bg-white border-t border-x border-slate-200/80 border-b-0 p-2.5 transition-colors w-full relative z-20">
+            {/* Kotak Input Putih Bersih — dengan Fade Shadow Lembut ke Atas agar Terpisah Tegas dari Objek Belakang */}
+            <div className="flex items-end gap-2 rounded-t-3xl rounded-b-none bg-white border-t border-x border-slate-300/80 border-b-0 p-2.5 transition-shadow w-full relative z-20 shadow-[0_-12px_36px_-6px_rgba(15,23,42,0.18),0_-4px_14px_-2px_rgba(15,23,42,0.08)]">
               {/* Radial Fan Attachment Menu (Kamera, Galeri, Dikte ala Lomeal) */}
               <AttachmentMenu
                 disabled={busy === 'ai'}

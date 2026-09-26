@@ -9,10 +9,10 @@ import {
 } from '@dnd-kit/core'
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts'
 import {
-  BedDouble, Plus,
-  ChevronRight, Pencil, Eye, EyeOff, Settings, Building2, ChevronDown, X, Activity, Check, Stethoscope
+  BedDouble, Plus, Check,
+  ChevronRight, Pencil, Eye, EyeOff, Settings, Building2, ChevronDown, X
 } from 'lucide-react'
-import { db, type Patient, type Ward, type Hospital, type ProgressNote } from '../db'
+import { db, type Patient, type Ward, type Hospital, type ProgressNote, type TerapiItem } from '../db'
 import { useUi } from '../store'
 import { verifyBiometric } from '../webauthn'
 import Masked from '../components/Masked'
@@ -48,8 +48,8 @@ const dropAnimationConfig: DropAnimation = {
       },
     },
   }),
-  duration: 180,
-  easing: 'cubic-bezier(0.18, 0.67, 0.6, 1.22)',
+  duration: 150,
+  easing: 'ease-out',
 }
 
 const customCollisionDetection: CollisionDetection = (args) => {
@@ -137,12 +137,47 @@ function PatientCardContent({
   onOpenVisite?: (e: React.MouseEvent) => void
   handleToggleMask?: (e: React.MouseEvent) => void
 }) {
-  const [showFull, setShowFull] = useState(false)
+  const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({})
   const cleanUsia = patient.usia?.toString().replace(/\s*(th|tahun)\b/gi, '').trim()
   const diagnoses = getPatientDiagnoses(patient, latestNote)
-  const noteForS = cleanSubjective(latestNote?.S) ? latestNote : latestNoteWithS
+  const activeNote = cleanSubjective(latestNote?.S) ? latestNote : (latestNoteWithS || latestNote)
+  const noteForS = activeNote
   const keluhan = cleanSubjective(noteForS?.S)
   const clinical = extractClinicalHighlights(noteForS)
+
+  const toggleSection = (key: string, e: React.MouseEvent) => {
+    e.stopPropagation()
+    setExpandedSections((prev) => ({ ...prev, [key]: !prev[key] }))
+  }
+
+  // S: Subjektif
+  const sFull = cleanSubjective(noteForS?.S)
+  const sSummary = clinical.sList.length > 0 ? clinical.sList.join(' · ') : keluhan
+  const hasS = !!(sSummary || sFull)
+  const canExpandS = !!(sFull && (sFull !== sSummary || sFull.length > 50))
+
+  // O: Objektif
+  const oPemfis = noteForS?.O_pemfis?.trim() || ''
+  const oPenunjang = noteForS?.O_penunjang?.trim() || ''
+  const oSummary = clinical.oList.length > 0 ? clinical.oList.join(' · ') : [oPemfis, oPenunjang].filter(Boolean).join(' · ')
+  const hasO = !!(clinical.oList.length > 0 || oPemfis || oPenunjang)
+  const canExpandO = !!(oPemfis || oPenunjang)
+
+  // A: Assessment
+  const aSummary = diagnoses.join(' · ')
+  const hasA = diagnoses.length > 0
+  const canExpandA = diagnoses.length > 1 || (Array.isArray(noteForS?.A) && noteForS.A.length > 0)
+
+  // P: Plan (Terapi)
+  const allTherapies = useMemo(() => (noteForS?.P || []) as TerapiItem[], [noteForS?.P])
+  const activeTherapies = useMemo(() => allTherapies.filter((p) => p.status === 'aktif'), [allTherapies])
+  const pSummary = activeTherapies.length > 0
+    ? activeTherapies.map((p) => `${p.nama_item}${p.dosis_keterangan ? ' ' + p.dosis_keterangan : ''}`).join(' · ')
+    : ''
+  const hasP = activeTherapies.length > 0 || allTherapies.length > 0
+  const canExpandP = allTherapies.length > 0
+
+  const hasSoap = !!noteForS && (hasS || hasO || hasA || hasP)
 
   return (
     <div>
@@ -154,51 +189,23 @@ function PatientCardContent({
           {cleanUsia && <span className="caption text-xs font-medium shrink-0">({cleanUsia} th)</span>}
         </div>
 
-        <div className="flex items-center gap-1.5 shrink-0">
-          {/* Tombol Status Visite Hari Ini */}
-          {onOpenVisite && (
-            <button
-              type="button"
-              onClick={onOpenVisite}
-              title={isVisitedToday ? 'Sudah divisite hari ini (Klik untuk edit)' : 'Belum divisite hari ini (Klik untuk catat visite)'}
-              className={`flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[10px] font-bold cursor-pointer transition-all active:scale-95 ${
-                isVisitedToday
-                  ? 'bg-emerald-100/90 text-emerald-800 hover:bg-emerald-200 border border-emerald-300/40 shadow-2xs'
-                  : 'bg-primary/10 text-primary hover:bg-primary/20 border border-primary/25 animate-pulse'
-              }`}
-            >
-              {isVisitedToday ? (
-                <>
-                  <Check size={11} strokeWidth={2.5} className="shrink-0 text-emerald-600" />
-                  <span>Sudah Visite</span>
-                </>
-              ) : (
-                <>
-                  <Stethoscope size={11} className="shrink-0 text-primary" />
-                  <span>Catat Visite</span>
-                </>
-              )}
-            </button>
-          )}
-
-          {/* Tombol Dedicated Sensor / Biometrik di Kanan Atas Kartu */}
-          {handleToggleMask ? (
-            <button
-              type="button"
-              onClick={handleToggleMask}
-              onPointerDown={(e) => e.stopPropagation()}
-              aria-label={unmasked ? 'Sensor Identitas Pasien' : 'Tampilkan Identitas Pasien (Biometrik)'}
-              title={unmasked ? 'Sensor Identitas' : 'Buka Sensor Identitas (Biometrik)'}
-              className="flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-xl text-ink-muted/70 hover:text-primary hover:bg-primary/10 active:scale-90 transition-all -mr-1"
-            >
-              {unmasked ? <Eye size={15} /> : <EyeOff size={15} />}
-            </button>
-          ) : (
-            <div className="flex size-7 shrink-0 items-center justify-center text-primary/70 -mr-1">
-              {unmasked ? <Eye size={15} /> : <EyeOff size={15} />}
-            </div>
-          )}
-        </div>
+        {/* Tombol Dedicated Sensor / Biometrik di Kanan Atas Kartu */}
+        {handleToggleMask ? (
+          <button
+            type="button"
+            onClick={handleToggleMask}
+            onPointerDown={(e) => e.stopPropagation()}
+            aria-label={unmasked ? 'Sensor Identitas Pasien' : 'Tampilkan Identitas Pasien (Biometrik)'}
+            title={unmasked ? 'Sensor Identitas' : 'Buka Sensor Identitas (Biometrik)'}
+            className="flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-xl text-ink-muted/70 hover:text-primary hover:bg-primary/10 active:scale-90 transition-all -mr-1"
+          >
+            {unmasked ? <Eye size={15} /> : <EyeOff size={15} />}
+          </button>
+        ) : (
+          <div className="flex size-7 shrink-0 items-center justify-center text-primary/70 -mr-1">
+            {unmasked ? <Eye size={15} /> : <EyeOff size={15} />}
+          </div>
+        )}
       </div>
 
       {/* No. RM: Jika kosong tidak dicantumkan, jika ada langsung angkanya tanpa 'RM: ' */}
@@ -208,118 +215,294 @@ function PatientCardContent({
         </p>
       )}
 
-      {/* Daftar Diagnosis: Poin-poin rapi & wrapped text untuk semua diagnosis */}
-      {diagnoses.length > 0 ? (
-        <div className="mt-2 space-y-1">
-          {diagnoses.map((dx, idx) => (
-            <div key={idx} className="flex items-start gap-1.5 text-xs leading-snug">
-              <span className="text-primary font-bold shrink-0 mt-0.5 leading-none">•</span>
-              <span
-                className={`break-words whitespace-normal text-left ${
-                  idx === 0 ? 'font-bold text-primary' : 'font-medium text-ink'
-                }`}
-              >
-                {dx}
-              </span>
-            </div>
-          ))}
-        </div>
-      ) : (
-        <div className="group mt-1.5 flex items-center justify-between gap-1 text-xs font-bold text-primary py-0.5">
-          <span className="truncate">Lihat Rekam Medis</span>
-          <ChevronRight size={14} className="shrink-0 text-primary/70 group-hover:translate-x-0.5 transition-transform" />
-        </div>
+      {/* Daftar Diagnosis bila belum ada catatan SOAP */}
+      {!hasSoap && (
+        diagnoses.length > 0 ? (
+          <div className="mt-2 space-y-1">
+            {diagnoses.map((dx, idx) => (
+              <div key={idx} className="flex items-start gap-1.5 text-xs leading-snug">
+                <span className="text-primary font-bold shrink-0 mt-0.5 leading-none">•</span>
+                <span
+                  className={`break-words whitespace-normal text-left ${
+                    idx === 0 ? 'font-bold text-primary' : 'font-medium text-ink'
+                  }`}
+                >
+                  {dx}
+                </span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="group mt-1.5 flex items-center justify-between gap-1 text-xs font-bold text-primary py-0.5">
+            <span className="truncate">Lihat Rekam Medis</span>
+            <ChevronRight size={14} className="shrink-0 text-primary/70 group-hover:translate-x-0.5 transition-transform" />
+          </div>
+        )
       )}
 
-      {/* Temuan Klinis Visite (S & O Positif Singkat) */}
-      {(clinical.sList.length > 0 || clinical.oList.length > 0 || keluhan) && (
-        <div className="mt-2.5 rounded-2xl bg-primary/5 border border-primary/15 p-2.5 text-xs space-y-1.5">
-          <div className="flex items-center justify-between gap-1 text-[10px] font-bold">
-            <span className="flex items-center gap-1 text-primary">
-              <Activity size={12} className="shrink-0 text-primary" />
-              <span>Temuan Klinis Visite</span>
-            </span>
-            <div className="flex items-center gap-2">
-              {noteForS?.tanggal && (
-                <span className="text-[10px] font-semibold text-ink-muted/80">
-                  {formatNoteDate(noteForS.tanggal)}
-                </span>
-              )}
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  setShowFull((prev) => !prev)
-                }}
-                className="text-[10px] text-primary/80 hover:text-primary underline cursor-pointer font-medium"
-              >
-                {showFull ? 'Ringkas' : 'Lengkap'}
-              </button>
+      {/* Format SOAP Temuan Positif dengan Separator Line Antar Baris & Klik Area Toggle */}
+      {hasSoap && (
+        <div className="mt-2 pt-1 border-t border-slate-100 divide-y divide-slate-100 text-xs">
+          {noteForS?.tanggal && (
+            <div className="flex items-center justify-between pb-1 text-xs font-semibold text-ink-muted/80">
+              <span>{formatNoteDate(noteForS.tanggal)}</span>
             </div>
-          </div>
+          )}
 
-          {showFull ? (
-            <div className="space-y-1 text-xs text-ink/90 bg-white/70 p-2 rounded-xl border border-primary/10">
-              {noteForS?.S && (
-                <p className="leading-relaxed break-words whitespace-pre-line">
-                  <b className="text-primary font-bold">S:</b> {cleanSubjective(noteForS.S)}
-                </p>
-              )}
-              {noteForS?.O_pemfis && (
-                <p className="leading-relaxed break-words whitespace-pre-line border-t border-slate-100 pt-1">
-                  <b className="text-primary font-bold">O (Fisik):</b> {noteForS.O_pemfis}
-                </p>
-              )}
-              {noteForS?.O_penunjang && (
-                <p className="leading-relaxed break-words whitespace-pre-line border-t border-slate-100 pt-1">
-                  <b className="text-primary font-bold">O (Penunjang):</b> {noteForS.O_penunjang}
-                </p>
-              )}
+          {/* S: Subjektif */}
+          {hasS && (
+            <div
+              onClick={(e) => {
+                if (canExpandS) toggleSection('S', e)
+              }}
+              className={`py-1.5 -mx-1 px-1 rounded-xl transition-colors ${
+                canExpandS ? 'cursor-pointer hover:bg-slate-50/70 active:bg-slate-100/70' : ''
+              }`}
+            >
+              <div className="flex items-start justify-between gap-1.5">
+                <div className="flex items-start gap-1.5 min-w-0 flex-1">
+                  <span className="font-bold text-primary text-xs shrink-0 mt-0.5">S:</span>
+                  <div className="min-w-0 flex-1">
+                    {!expandedSections['S'] ? (
+                      <span className="text-ink font-medium break-words text-xs line-clamp-2">
+                        {sSummary}
+                      </span>
+                    ) : (
+                      <p className="text-ink font-medium break-words leading-relaxed whitespace-pre-line bg-slate-50/90 p-2.5 rounded-xl text-xs">
+                        {sFull || sSummary}
+                      </p>
+                    )}
+                  </div>
+                </div>
+                {canExpandS && (
+                  <button
+                    type="button"
+                    onClick={(e) => toggleSection('S', e)}
+                    className="text-ink-muted hover:text-ink p-0.5 shrink-0 cursor-pointer mt-0.5"
+                    aria-label="Toggle detail S"
+                    title={expandedSections['S'] ? 'Tutup detail' : 'Buka detail'}
+                  >
+                    <ChevronDown
+                      size={14}
+                      className={`transition-transform duration-200 ${
+                        expandedSections['S'] ? 'rotate-180' : 'rotate-0'
+                      }`}
+                    />
+                  </button>
+                )}
+              </div>
             </div>
-          ) : (
-            <div className="space-y-1 text-xs">
-              {/* S: Keluhan Positif */}
-              {clinical.sList.length > 0 ? (
-                <div className="flex items-start gap-1.5 leading-snug">
-                  <span className="font-bold text-amber-700 text-[11px] shrink-0 mt-0.5">S:</span>
-                  <span className="text-ink font-medium break-words">
-                    {clinical.sList.join(' · ')}
-                  </span>
-                </div>
-              ) : keluhan ? (
-                <div className="flex items-start gap-1.5 leading-snug">
-                  <span className="font-bold text-amber-700 text-[11px] shrink-0 mt-0.5">S:</span>
-                  <span className="text-ink font-medium break-words line-clamp-2">
-                    {keluhan}
-                  </span>
-                </div>
-              ) : null}
+          )}
 
-              {/* O: Temuan Positif (TTV, Defisit Neuro, Lab, CT) */}
-              {clinical.oList.length > 0 && (
-                <div className="flex items-start gap-1.5 leading-snug">
-                  <span className="font-bold text-sky-700 text-[11px] shrink-0 mt-0.5">O:</span>
-                  <span className="text-ink font-medium break-words">
-                    {clinical.oList.join(' · ')}
-                  </span>
+          {/* O: Objektif */}
+          {hasO && (
+            <div
+              onClick={(e) => {
+                if (canExpandO) toggleSection('O', e)
+              }}
+              className={`py-1.5 -mx-1 px-1 rounded-xl transition-colors ${
+                canExpandO ? 'cursor-pointer hover:bg-slate-50/70 active:bg-slate-100/70' : ''
+              }`}
+            >
+              <div className="flex items-start justify-between gap-1.5">
+                <div className="flex items-start gap-1.5 min-w-0 flex-1">
+                  <span className="font-bold text-primary text-xs shrink-0 mt-0.5">O:</span>
+                  <div className="min-w-0 flex-1">
+                    {!expandedSections['O'] ? (
+                      <span className="text-ink font-medium break-words text-xs line-clamp-2">
+                        {oSummary}
+                      </span>
+                    ) : (
+                      <div className="space-y-1.5 text-ink font-medium break-words bg-slate-50/90 p-2.5 rounded-xl text-xs">
+                        {oPemfis && (
+                          <p className="leading-relaxed whitespace-pre-line">
+                            <span className="font-semibold text-primary">Fisik: </span>
+                            {oPemfis}
+                          </p>
+                        )}
+                        {oPenunjang && (
+                          <p className={`leading-relaxed whitespace-pre-line ${oPemfis ? 'border-t border-slate-200/60 pt-1.5' : ''}`}>
+                            <span className="font-semibold text-primary">Penunjang: </span>
+                            {oPenunjang}
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 </div>
-              )}
+                {canExpandO && (
+                  <button
+                    type="button"
+                    onClick={(e) => toggleSection('O', e)}
+                    className="text-ink-muted hover:text-ink p-0.5 shrink-0 cursor-pointer mt-0.5"
+                    aria-label="Toggle detail O"
+                    title={expandedSections['O'] ? 'Tutup detail' : 'Buka detail'}
+                  >
+                    <ChevronDown
+                      size={14}
+                      className={`transition-transform duration-200 ${
+                        expandedSections['O'] ? 'rotate-180' : 'rotate-0'
+                      }`}
+                    />
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* A: Assessment */}
+          {hasA && (
+            <div
+              onClick={(e) => {
+                if (canExpandA) toggleSection('A', e)
+              }}
+              className={`py-1.5 -mx-1 px-1 rounded-xl transition-colors ${
+                canExpandA ? 'cursor-pointer hover:bg-slate-50/70 active:bg-slate-100/70' : ''
+              }`}
+            >
+              <div className="flex items-start justify-between gap-1.5">
+                <div className="flex items-start gap-1.5 min-w-0 flex-1">
+                  <span className="font-bold text-primary text-xs shrink-0 mt-0.5">A:</span>
+                  <div className="min-w-0 flex-1">
+                    {!expandedSections['A'] ? (
+                      <span className="text-ink font-medium break-words text-xs line-clamp-2">
+                        {aSummary}
+                      </span>
+                    ) : (
+                      <div className="space-y-1 bg-slate-50/90 p-2.5 rounded-xl text-xs">
+                        {diagnoses.map((dx, idx) => (
+                          <div key={idx} className="flex items-start gap-1.5 text-ink font-medium">
+                            <span className="text-primary font-bold shrink-0 mt-0.5">•</span>
+                            <span className="break-words">{dx}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+                {canExpandA && (
+                  <button
+                    type="button"
+                    onClick={(e) => toggleSection('A', e)}
+                    className="text-ink-muted hover:text-ink p-0.5 shrink-0 cursor-pointer mt-0.5"
+                    aria-label="Toggle detail A"
+                    title={expandedSections['A'] ? 'Tutup detail' : 'Buka detail'}
+                  >
+                    <ChevronDown
+                      size={14}
+                      className={`transition-transform duration-200 ${
+                        expandedSections['A'] ? 'rotate-180' : 'rotate-0'
+                      }`}
+                    />
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* P: Plan */}
+          {hasP && (
+            <div
+              onClick={(e) => {
+                if (canExpandP) toggleSection('P', e)
+              }}
+              className={`py-1.5 -mx-1 px-1 rounded-xl transition-colors ${
+                canExpandP ? 'cursor-pointer hover:bg-slate-50/70 active:bg-slate-100/70' : ''
+              }`}
+            >
+              <div className="flex items-start justify-between gap-1.5">
+                <div className="flex items-start gap-1.5 min-w-0 flex-1">
+                  <span className="font-bold text-primary text-xs shrink-0 mt-0.5">P:</span>
+                  <div className="min-w-0 flex-1">
+                    {!expandedSections['P'] ? (
+                      <span className="text-ink font-medium break-words text-xs line-clamp-2">
+                        {pSummary || 'Belum ada terapi aktif'}
+                      </span>
+                    ) : (
+                      <div className="space-y-1.5 bg-slate-50/90 p-2.5 rounded-xl text-xs">
+                        {allTherapies.map((item, idx) => (
+                          <div key={idx} className="flex items-center justify-between gap-2 text-ink">
+                            <span className={`font-medium break-words ${item.status === 'stop' ? 'line-through text-ink-muted' : 'text-ink'}`}>
+                              • {item.nama_item} {item.dosis_keterangan}
+                            </span>
+                            <span
+                              className={`text-xs px-2 py-0.5 rounded-full font-bold uppercase shrink-0 ${
+                                item.status === 'stop'
+                                  ? 'bg-rose-50 text-rose-600 border border-rose-200/60'
+                                  : 'bg-emerald-50 text-emerald-700 border border-emerald-200/60'
+                              }`}
+                            >
+                              {item.status}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+                {canExpandP && (
+                  <button
+                    type="button"
+                    onClick={(e) => toggleSection('P', e)}
+                    className="text-ink-muted hover:text-ink p-0.5 shrink-0 cursor-pointer mt-0.5"
+                    aria-label="Toggle detail P"
+                    title={expandedSections['P'] ? 'Tutup detail' : 'Buka detail'}
+                  >
+                    <ChevronDown
+                      size={14}
+                      className={`transition-transform duration-200 ${
+                        expandedSections['P'] ? 'rotate-180' : 'rotate-0'
+                      }`}
+                    />
+                  </button>
+                )}
+              </div>
             </div>
           )}
         </div>
       )}
 
-      {/* Badges */}
-      <div className="mt-2.5 flex flex-wrap gap-1.5">
-        <span className="rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-bold text-primary">
-          {patient.jaminan}
-        </span>
-        <span className="rounded-full bg-surface px-2.5 py-0.5 text-xs font-semibold text-ink-muted">
-          P-{hariKe(patient.tgl_mrs)}
-        </span>
-        {patient.tgl_onset && (
-          <span className="rounded-full bg-amber-50 border border-amber-200/60 px-2 py-0.5 text-xs font-bold text-amber-700">
-            OH-{hariKe(patient.tgl_onset)}
+      {/* Badges & Tombol Visite di Kanan Bawah */}
+      <div className="mt-2.5 flex items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-1.5 min-w-0">
+          <span className="rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-bold text-primary">
+            {patient.jaminan}
+          </span>
+          <span className="rounded-full bg-surface px-2.5 py-0.5 text-xs font-semibold text-ink-muted">
+            P-{hariKe(patient.tgl_mrs)}
+          </span>
+          {patient.tgl_onset && (
+            <span className="rounded-full bg-amber-50 border border-amber-200/60 px-2 py-0.5 text-xs font-bold text-amber-700">
+              OH-{hariKe(patient.tgl_onset)}
+            </span>
+          )}
+        </div>
+
+        {onOpenVisite ? (
+          <button
+            type="button"
+            onClick={onOpenVisite}
+            onPointerDown={(e) => e.stopPropagation()}
+            title={isVisitedToday ? 'Sudah divisite hari ini (Klik untuk edit)' : 'Belum divisite hari ini (Klik untuk catat visite)'}
+            className={`shrink-0 h-7.5 px-3 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 justify-center cursor-pointer select-none ${
+              isVisitedToday
+                ? 'bg-slate-100 hover:bg-slate-200/90 text-slate-500 hover:text-slate-700 border border-slate-200/90 shadow-2xs'
+                : 'bg-gradient-to-r from-primary to-primary-deep text-white shadow-sm shadow-primary/25 hover:shadow-md hover:shadow-primary/35 hover:brightness-105 animate-flicker-blue'
+            }`}
+          >
+            {isVisitedToday && <Check size={13} className="stroke-[2.5]" />}
+            <span>Visite</span>
+          </button>
+        ) : (
+          <span
+            className={`shrink-0 h-7.5 px-3 rounded-xl text-xs font-bold flex items-center gap-1.5 justify-center select-none ${
+              isVisitedToday
+                ? 'bg-slate-100 text-slate-400 border border-slate-200/60'
+                : 'bg-gradient-to-r from-primary to-primary-deep text-white shadow-sm shadow-primary/25 opacity-80'
+            }`}
+          >
+            {isVisitedToday && <Check size={13} className="stroke-[2.5]" />}
+            <span>Visite</span>
           </span>
         )}
       </div>
@@ -332,12 +515,14 @@ function PatientCard({
   latestNote,
   latestNoteWithS,
   isAnyDragging,
+  isHighlighted,
   onOpenVisite,
 }: {
   patient: Patient
   latestNote?: ProgressNote
   latestNoteWithS?: ProgressNote
   isAnyDragging?: boolean
+  isHighlighted?: boolean
   onOpenVisite?: (patient: Patient, latestNote?: ProgressNote) => void
 }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
@@ -365,21 +550,28 @@ function PatientCard({
 
   return (
     <div
+      id={`patient-card-${patient.id}`}
       ref={setNodeRef}
       {...listeners}
       {...attributes}
       data-no-swipe="true"
       onClick={() => {
         if (!isDragging && !isAnyDragging) {
+          sessionStorage.setItem('doctoid_dasbor_scroll_y', String(window.scrollY))
+          sessionStorage.setItem('doctoid_last_patient_id', String(patient.id))
           navigate(`/rekammedis/${patient.id}`)
         }
       }}
-      className={`rounded-2xl p-3.5 sm:p-4 select-none touch-manipulation transition-all duration-150 ${
+      className={`rounded-2xl p-3.5 sm:p-4 select-none touch-manipulation transition-colors duration-150 ${
+        isHighlighted
+          ? 'ring-2 ring-primary/80 shadow-md shadow-primary/15 bg-primary/[0.04]'
+          : ''
+      } ${
         isDragging
-          ? 'opacity-25 grayscale-[30%] border-2 border-dashed border-primary/50 bg-primary/5 shadow-none scale-[0.98] pointer-events-none'
+          ? 'opacity-25 grayscale-[30%] border-2 border-dashed border-primary/50 bg-primary/5 shadow-none pointer-events-none'
           : isVisitedToday
           ? 'bg-slate-50/80 border border-slate-200/80 opacity-70 hover:opacity-100 hover:border-primary/40 cursor-pointer shadow-2xs hover:shadow-md'
-          : 'glass-card border border-white/80 cursor-pointer hover:border-primary/40 active:scale-[0.99] shadow-xs hover:shadow-md'
+          : 'glass-card border border-white/80 cursor-pointer hover:border-primary/40 shadow-xs hover:shadow-md'
       }`}
     >
       <PatientCardContent
@@ -402,6 +594,7 @@ function WardColumn({
   latestNoteWithSMap,
   isAnyDragging,
   lastMovedWardId,
+  highlightPatientId,
   onOpenVisite,
 }: {
   ward: Ward
@@ -410,19 +603,32 @@ function WardColumn({
   latestNoteWithSMap?: Map<number, ProgressNote>
   isAnyDragging?: boolean
   lastMovedWardId?: number | null
+  highlightPatientId?: number | null
   onOpenVisite?: (patient: Patient, latestNote?: ProgressNote) => void
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: ward.id! })
-  const [userCollapsed, setUserCollapsed] = useState<boolean | null>(null)
+  const { collapsedWards, toggleCollapsedWard, expandWard } = useUi()
 
   // Otomatis buka ruangan bila ada pasien yang baru saja dipindahkan ke ruangan ini
   useEffect(() => {
-    if (lastMovedWardId === ward.id) {
-      setUserCollapsed(false)
+    if (lastMovedWardId === ward.id && ward.id !== undefined) {
+      expandWard(ward.id)
     }
-  }, [lastMovedWardId, ward.id])
+  }, [lastMovedWardId, ward.id, expandWard])
 
-  const collapsed = userCollapsed !== null ? userCollapsed : patients.length === 0
+  const collapsed =
+    ward.id !== undefined && collapsedWards[ward.id] !== undefined
+      ? collapsedWards[ward.id]
+      : patients.length === 0
+
+  const todayStr = getLocalDateString()
+  const unvisitedCount = useMemo(() => {
+    return patients.filter((p) => {
+      const note = latestNoteMap?.get(p.id!)
+      return note?.tanggal !== todayStr
+    }).length
+  }, [patients, latestNoteMap, todayStr])
+  const hasUnvisited = unvisitedCount > 0
 
   return (
     <div
@@ -435,7 +641,7 @@ function WardColumn({
     >
       <button
         type="button"
-        onClick={() => setUserCollapsed(!collapsed)}
+        onClick={() => ward.id !== undefined && toggleCollapsedWard(ward.id, collapsed)}
         className="w-full mb-1.5 flex items-center justify-between px-1 cursor-pointer select-none group text-left"
         aria-label={`Sembunyikan atau tampilkan ruangan ${ward.nama}`}
       >
@@ -450,11 +656,22 @@ function WardColumn({
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
           <span
-            className={`rounded-full px-2 py-0.5 text-[11px] font-bold shadow-2xs min-w-[1.4rem] text-center transition-colors ${
+            className={`rounded-full px-2.5 py-0.5 text-[11px] font-bold shadow-2xs min-w-[1.4rem] text-center transition-all ${
               isOver
                 ? 'bg-primary text-white font-extrabold'
+                : hasUnvisited
+                ? 'bg-primary/10 border border-primary/30 text-primary animate-flicker-blue-badge'
+                : patients.length > 0
+                ? 'bg-slate-100 border border-slate-200/80 text-slate-500'
                 : 'bg-white/90 border border-slate-200/60 text-ink-muted'
             }`}
+            title={
+              hasUnvisited
+                ? `${unvisitedCount} dari ${patients.length} pasien belum divisite hari ini`
+                : patients.length > 0
+                ? `Semua ${patients.length} pasien sudah divisite hari ini`
+                : 'Belum ada pasien'
+            }
           >
             {patients.length}
           </span>
@@ -476,6 +693,7 @@ function WardColumn({
               latestNote={latestNoteMap?.get(p.id!)}
               latestNoteWithS={latestNoteWithSMap?.get(p.id!)}
               isAnyDragging={isAnyDragging}
+              isHighlighted={highlightPatientId === p.id}
               onOpenVisite={onOpenVisite}
             />
           ))}
@@ -511,10 +729,24 @@ function WardColumn({
 
 export default function Dasbor() {
   const navigate = useNavigate()
-  const { user, unmasked, setUnmasked } = useUi()
-  const [filterRs, setFilterRs] = useState<number>(0)
+  const {
+    user,
+    unmasked,
+    setUnmasked,
+    collapsedRs,
+    toggleCollapsedRs,
+    expandHospital,
+    expandWard,
+  } = useUi()
+  const [filterRs, setFilterRs] = useState<number>(() => {
+    try {
+      const s = sessionStorage.getItem('doctoid_dasbor_filter_rs')
+      return s ? parseInt(s, 10) : 0
+    } catch {
+      return 0
+    }
+  })
   const [toast, setToast] = useState('')
-  const [collapsedRs, setCollapsedRs] = useState<Record<number, boolean>>({})
   const [activePatient, setActivePatient] = useState<Patient | null>(null)
   const [lastMovedWardId, setLastMovedWardId] = useState<number | null>(null)
   const [addWardHospital, setAddWardHospital] = useState<Hospital | null>(null)
@@ -529,18 +761,20 @@ export default function Dasbor() {
     const elRect = el.getBoundingClientRect()
     const relativeLeft = elRect.left - containerRect.left
     const targetScrollLeft = container.scrollLeft + relativeLeft - container.clientWidth / 2 + elRect.width / 2
-    container.scrollTo({ left: Math.max(0, targetScrollLeft), behavior: 'smooth' })
+    const maxScroll = Math.max(0, container.scrollWidth - container.clientWidth)
+    container.scrollTo({ left: Math.max(0, Math.min(maxScroll, targetScrollLeft)), behavior: 'smooth' })
   }
 
   const handleFilterClick = (id: number, e?: React.MouseEvent<HTMLButtonElement>) => {
     setFilterRs(id)
+    sessionStorage.setItem('doctoid_dasbor_filter_rs', String(id))
     if (e?.currentTarget) {
       centerElement(e.currentTarget)
     }
   }
 
   const toggleRs = (id: number, currentCollapsed: boolean) => {
-    setCollapsedRs((prev) => ({ ...prev, [id]: !currentCollapsed }))
+    toggleCollapsedRs(id, currentCollapsed)
   }
   const notify = (m: string) => {
     setToast(m)
@@ -580,6 +814,92 @@ export default function Dasbor() {
   const aktif = useLiveQuery(() => db.patients.where('status_rawat').equals('aktif').toArray(), [], [])
   const allNotes = useLiveQuery(() => db.progressNotes.toArray(), [], [])
 
+  // Restorasi dan pencatatan posisi scroll
+  const [highlightPatientId, setHighlightPatientId] = useState<number | null>(null)
+  const hasRestoredScroll = useRef(false)
+  const isRestoringScroll = useRef(false)
+
+  // Rekam posisi scroll Dasbor saat user scrolling
+  useEffect(() => {
+    let timeoutId: any
+    const handleScroll = () => {
+      clearTimeout(timeoutId)
+      timeoutId = setTimeout(() => {
+        if (isRestoringScroll.current) return
+        sessionStorage.setItem('doctoid_dasbor_scroll_y', String(window.scrollY))
+      }, 100)
+    }
+
+    window.addEventListener('scroll', handleScroll, { passive: true })
+    return () => {
+      clearTimeout(timeoutId)
+      window.removeEventListener('scroll', handleScroll)
+      if (!isRestoringScroll.current && window.scrollY > 0) {
+        sessionStorage.setItem('doctoid_dasbor_scroll_y', String(window.scrollY))
+      }
+    }
+  }, [])
+
+  // Restorasi posisi scroll & highlight kartu pasien saat kembali ke Dasbor
+  useEffect(() => {
+    if (hasRestoredScroll.current) return
+    if (aktif === undefined || wards === undefined || hospitals === undefined) return
+
+    const savedYStr = sessionStorage.getItem('doctoid_dasbor_scroll_y')
+    const savedPatientId = sessionStorage.getItem('doctoid_last_patient_id')
+    const savedY = savedYStr ? parseInt(savedYStr, 10) : 0
+
+    if (!savedY && !savedPatientId) {
+      hasRestoredScroll.current = true
+      return
+    }
+
+    // Pastikan faskes & ruangan pasien target dalam keadaan terbuka (expanded)
+    if (savedPatientId) {
+      const pId = parseInt(savedPatientId, 10)
+      const targetP = aktif.find((p) => p.id === pId)
+      if (targetP) {
+        if (targetP.hospital_id) expandHospital(targetP.hospital_id)
+        if (targetP.lokasi_sekarang) expandWard(targetP.lokasi_sekarang)
+      }
+    }
+
+    isRestoringScroll.current = true
+
+    const timer = setTimeout(() => {
+      let restored = false
+      if (savedPatientId) {
+        const pId = parseInt(savedPatientId, 10)
+        const el = document.getElementById(`patient-card-${savedPatientId}`)
+        if (el) {
+          if (savedY > 0) {
+            window.scrollTo({ top: savedY, behavior: 'instant' })
+          } else {
+            el.scrollIntoView({ block: 'center', behavior: 'instant' })
+          }
+          setHighlightPatientId(pId)
+          setTimeout(() => {
+            setHighlightPatientId(null)
+            sessionStorage.removeItem('doctoid_last_patient_id')
+          }, 2500)
+          restored = true
+        }
+      }
+
+      if (!restored && savedY > 0) {
+        window.scrollTo({ top: savedY, behavior: 'instant' })
+      }
+
+      hasRestoredScroll.current = true
+
+      setTimeout(() => {
+        isRestoringScroll.current = false
+      }, 150)
+    }, 60)
+
+    return () => clearTimeout(timer)
+  }, [aktif, wards, hospitals, expandHospital, expandWard])
+
   const { latestNoteMap, latestNoteWithSMap } = useMemo(() => {
     const latestMap = new Map<number, ProgressNote>()
     const withSMap = new Map<number, ProgressNote>()
@@ -610,8 +930,8 @@ export default function Dasbor() {
     }),
     useSensor(TouchSensor, {
       activationConstraint: {
-        delay: 200,
-        tolerance: 8,
+        delay: 400, // Durasi long-press standar (400ms) agar tidak terpicu saat scrolling atau tap biasa
+        tolerance: 5, // Batas pergeseran jari (5px) sebelum membatalkan mode drag untuk scrolling alami
       },
     }),
   )
@@ -639,8 +959,9 @@ export default function Dasbor() {
           : null
 
         setLastMovedWardId(targetWardId)
+        expandWard(targetWardId)
         if (targetHospital) {
-          setCollapsedRs((prev) => ({ ...prev, [targetHospital.id!]: false }))
+          expandHospital(targetHospital.id!)
         }
 
         await db.patients.update(patientId, {
@@ -783,8 +1104,6 @@ export default function Dasbor() {
               <span>{h.nama}</span>
             </button>
           ))}
-          {/* Spacer ekstra di ujung kanan agar item terakhir dapat berada tepat di tengah layar */}
-          <div className="w-20 shrink-0 pointer-events-none" aria-hidden="true" />
         </div>
 
         {/* Tombol Kelola Faskes (Icon Pensil Tanpa Teks) - Posisi tetap di kanan */}
@@ -922,6 +1241,7 @@ export default function Dasbor() {
                           latestNoteWithSMap={latestNoteWithSMap}
                           isAnyDragging={!!activePatient}
                           lastMovedWardId={lastMovedWardId}
+                          highlightPatientId={highlightPatientId}
                           onOpenVisite={(patient, note) => setVisiteTarget({ patient, latestNote: note })}
                         />
                       ))
@@ -973,7 +1293,7 @@ export default function Dasbor() {
 
         <DragOverlay dropAnimation={dropAnimationConfig}>
           {activePatient ? (
-            <div className="glass-card rounded-2xl p-3.5 sm:p-4 bg-white/95 border-2 border-primary shadow-2xl ring-4 ring-primary/20 scale-105 rotate-1 select-none pointer-events-none cursor-grabbing transform-gpu">
+            <div className="glass-card rounded-2xl p-3.5 sm:p-4 bg-white/95 border-2 border-primary shadow-xl ring-2 ring-primary/20 select-none pointer-events-none cursor-grabbing">
               <PatientCardContent
                 patient={activePatient}
                 latestNote={latestNoteMap.get(activePatient.id!)}

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, useRef, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { Search, ChevronRight, Pill, Clock } from 'lucide-react'
@@ -23,6 +23,53 @@ export default function RekamMedis() {
   const wards = useLiveQuery(() => db.wards.toArray(), [], [])
   const hospitals = useLiveQuery(() => db.hospitals.toArray(), [], [])
   const allNotes = useLiveQuery(() => db.progressNotes.toArray(), [], [])
+
+  const hasRestoredScroll = useRef(false)
+  const isRestoringScroll = useRef(false)
+
+  // Rekam posisi scroll di Rekam Medis
+  useEffect(() => {
+    let timer: any
+    const onScroll = () => {
+      clearTimeout(timer)
+      timer = setTimeout(() => {
+        if (isRestoringScroll.current) return
+        sessionStorage.setItem('doctoid_rm_scroll_y', String(window.scrollY))
+      }, 100)
+    }
+    window.addEventListener('scroll', onScroll, { passive: true })
+    return () => {
+      clearTimeout(timer)
+      window.removeEventListener('scroll', onScroll)
+      if (!isRestoringScroll.current && window.scrollY > 0) {
+        sessionStorage.setItem('doctoid_rm_scroll_y', String(window.scrollY))
+      }
+    }
+  }, [])
+
+  // Restorasi scroll saat data patients selesai dimuat
+  useEffect(() => {
+    if (hasRestoredScroll.current) return
+    if (patients === undefined) return
+
+    const savedYStr = sessionStorage.getItem('doctoid_rm_scroll_y')
+    const savedY = savedYStr ? parseInt(savedYStr, 10) : 0
+    if (!savedY) {
+      hasRestoredScroll.current = true
+      return
+    }
+
+    isRestoringScroll.current = true
+    const timer = setTimeout(() => {
+      window.scrollTo({ top: savedY, behavior: 'instant' })
+      hasRestoredScroll.current = true
+      setTimeout(() => {
+        isRestoringScroll.current = false
+      }, 150)
+    }, 50)
+
+    return () => clearTimeout(timer)
+  }, [patients])
 
   const wardMap = useMemo(() => {
     const map = new Map<number, { nama: string; warna: string }>()
@@ -150,6 +197,9 @@ export default function RekamMedis() {
             <Link
               key={p.id}
               to={`/rekammedis/${p.id}`}
+              onClick={() => {
+                sessionStorage.setItem('doctoid_rm_scroll_y', String(window.scrollY))
+              }}
               className="glass-card glass-card-hover block rounded-3xl p-4 transition-all"
             >
               <div className="flex items-start justify-between gap-3">
