@@ -269,3 +269,10 @@ input, textarea, [contenteditable="true"] {
   animation: flicker-blue-badge 2.8s ease-in-out infinite;
 }
 
+/* Kunci scroll background saat dialog/modal terbuka */
+html.scroll-locked,
+body.scroll-locked {
+  overflow: hidden !important;
+  overscroll-behavior: none !important;
+}
+

@@ -302,7 +302,7 @@ export default function TemplateTab() {
       {toast && (
         <aside
           aria-label="Notifikasi"
-          className="fixed inset-x-0 bottom-24 z-50 mx-auto w-fit rounded-2xl bg-ink/90 backdrop-blur-md px-5 py-2.5 text-xs font-semibold text-white shadow-2xl animate-in fade-in slide-in-from-bottom-2"
+          className="fixed inset-x-0 bottom-24 z-50 mx-auto w-fit rounded-2xl bg-gradient-to-r from-primary to-primary-deep px-5 py-2.5 text-xs font-bold text-white shadow-xl shadow-primary/35 border border-white/20 animate-in fade-in slide-in-from-bottom-2"
         >
           {toast}
         </aside>

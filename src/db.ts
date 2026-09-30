@@ -2,6 +2,7 @@ import Dexie, { type EntityTable } from 'dexie'
 
 export type Jaminan = 'BPJS' | 'Umum' | 'Asuransi'
 export type StatusRawat = 'aktif' | 'krs'
+export type KeteranganKrs = 'Izin Dokter' | 'APS' | 'Meninggal' | 'Alih Rawat' | 'Rujuk'
 export type KategoriTerapi = 'Farmakologi' | 'Non-Farmakologi' | 'Diagnostik' | 'Monitoring' | 'Edukasi'
 
 export interface Hospital {
@@ -28,6 +29,8 @@ export interface RawatEpisode {
   ward_id?: number
   diagnosis_utama: string
   catatan_krs?: string
+  keterangan_krs?: KeteranganKrs
+  detail_krs?: string // keterangan departemen alih rawat atau RS rujukan
 }
 
 export interface Patient {
@@ -39,11 +42,15 @@ export interface Patient {
   no_rm: string
   tgl_mrs: string // ISO date
   tgl_onset: string // ISO date — dasar hitung "Stroke Hari ke-X"
+  tgl_krs?: string // ISO date tanggal pulang
   diagnosis_utama: string
   lokasi_sekarang: number // ward id
   status_rawat: StatusRawat
+  keterangan_krs?: KeteranganKrs
+  detail_krs?: string // keterangan departemen alih rawat atau RS rujukan
   jaminan: Jaminan
   riwayat_rawat?: RawatEpisode[] // riwayat episode rawat inap sebelumnya
+  order?: number // urutan tampilan / nomor urut bed manual
 }
 
 export interface DiagnosisItem {
@@ -71,6 +78,7 @@ export interface ProgressNote {
   O_penunjang: string
   A: DiagnosisItem[]
   P: TerapiItem[]
+  catatan?: string // Catatan bebas di luar SOAP (rencana KRS, konsul, extra, dll)
   attachments?: { name: string; type: string; dataUrl: string; kategori: 'pemfis' | 'penunjang' }[]
 }
 
@@ -97,7 +105,7 @@ export interface RegexRule {
   pattern: string // untuk field skalar: regex dgn capture group 1 = value. untuk label_*: kata label literal.
   flags: string
   hospital_id?: number
-  source: 'ai'
+  source: 'ai' | 'user'
   hits: number
   created_at: string
 }
@@ -123,6 +131,22 @@ export interface BrainstormDraft {
   updated_at: string
 }
 
+export type KategoriPenunjang = 'Laboratorium' | 'Radiologi' | 'Lainnya'
+
+export interface PenunjangItem {
+  id?: number
+  patient_id: number
+  tanggal: string // ISO date YYYY-MM-DD
+  kategori: KategoriPenunjang
+  nama_pemeriksaan: string // mis. "Darah Lengkap", "CT Scan Kepala", "Foto Thorax AP"
+  hasil: string // mis. "Hb 12.8, Leu 11.200, Plt 285.000" atau "Infark luas hemisfer kiri"
+  status: 'selesai' | 'menunggu' // 'selesai' = ada hasil, 'menunggu' = menunggu hasil
+  catatan?: string // indikasi / keterangan tambahan
+  attachments?: { id?: string; name: string; type: string; dataUrl: string }[]
+  created_at?: string
+  updated_at?: string
+}
+
 export const db = new Dexie('doctoid') as Dexie & {
   patients: EntityTable<Patient, 'id'>
   progressNotes: EntityTable<ProgressNote, 'id'>
@@ -133,6 +157,7 @@ export const db = new Dexie('doctoid') as Dexie & {
   regexRules: EntityTable<RegexRule, 'id'>
   therapyHistory: EntityTable<TherapyHistoryEntry, 'id'>
   brainstormDraft: EntityTable<BrainstormDraft, 'id'>
+  penunjang: EntityTable<PenunjangItem, 'id'>
 }
 
 db.version(1).stores({
@@ -154,4 +179,8 @@ db.version(3).stores({
 
 db.version(4).stores({
   brainstormDraft: 'id',
+})
+
+db.version(5).stores({
+  penunjang: '++id, patient_id, kategori, tanggal, status',
 })

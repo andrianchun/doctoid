@@ -19,6 +19,7 @@ import { SortableContext, verticalListSortingStrategy, useSortable, arrayMove } 
 import { CSS } from '@dnd-kit/utilities'
 import { getStoredDateFormat, getStoredTimeFormat, saveDateFormat, saveTimeFormat, type DateFormat, type TimeFormat } from '../utils/dateFormat'
 import { convertToWebP } from '../utils/mediaCompress'
+import { useBodyScrollLock } from '../utils/useBodyScrollLock'
 
 export const PRESET_ICONS = [
   { id: 'hospital-building', icon: Building2 },
@@ -93,11 +94,21 @@ function FaskesIconColorModal({
     }
   }
 
+  useBodyScrollLock(open)
+
   if (!open) return null
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in">
-      <div className="w-full max-w-md rounded-3xl bg-card border border-surface p-5 shadow-2xl space-y-4 animate-in slide-in-from-bottom-6">
+    <div
+      className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in overscroll-contain touch-none select-none"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose()
+      }}
+    >
+      <div
+        className="w-full max-w-md rounded-3xl bg-card border border-surface p-5 shadow-2xl space-y-4 animate-in slide-in-from-bottom-6 overscroll-contain touch-auto select-auto"
+        onClick={(e) => e.stopPropagation()}
+      >
         {/* Header Bersih Tanpa Ikon */}
         <div className="flex items-center justify-between pb-2 border-b border-surface">
           <h4 className="text-sm font-bold text-ink">Ikon & Warna Faskes</h4>
@@ -424,6 +435,7 @@ function HospitalAccordion({
 }) {
   const [isOpen, setIsOpen] = useState(false)
   const [showEditModal, setShowEditModal] = useState(false)
+  useBodyScrollLock(showEditModal)
   const [name, setName] = useState(hospital.nama)
   const [color, setColor] = useState(hospital.kode_warna)
   const [icon, setIcon] = useState(hospital.icon || 'hospital-building')
@@ -705,8 +717,16 @@ function HospitalAccordion({
 
       {/* Edit Faskes Modal */}
       {showEditModal && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in">
-          <div className="w-full max-w-md rounded-3xl bg-card border border-surface p-5 shadow-2xl space-y-4 animate-in zoom-in-95">
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in overscroll-contain touch-none select-none"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setShowEditModal(false)
+          }}
+        >
+          <div
+            className="w-full max-w-md rounded-3xl bg-card border border-surface p-5 shadow-2xl space-y-4 animate-in zoom-in-95 overscroll-contain touch-auto select-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="flex items-center justify-between pb-2 border-b border-surface">
               <h4 className="text-sm font-bold text-ink">Ubah Data Faskes</h4>
               <div className="flex items-center gap-1">
@@ -1179,7 +1199,7 @@ export default function Settings() {
       {toast && (
         <aside
           aria-label="Notifikasi"
-          className="fixed inset-x-0 bottom-24 z-50 mx-auto w-fit max-w-[90%] rounded-2xl bg-ink/90 backdrop-blur-md px-5 py-2.5 text-xs font-semibold text-white shadow-2xl animate-in fade-in slide-in-from-bottom-2"
+          className="fixed inset-x-0 bottom-24 z-50 mx-auto w-fit max-w-[90%] rounded-2xl bg-gradient-to-r from-primary to-primary-deep px-5 py-2.5 text-xs font-bold text-white shadow-xl shadow-primary/35 border border-white/20 animate-in fade-in slide-in-from-bottom-2"
         >
           {toast}
         </aside>

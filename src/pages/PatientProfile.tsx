@@ -1,12 +1,27 @@
-import { useState } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useState, useEffect, useMemo } from 'react'
+import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
 import {
   ArrowLeft, Pill, HeartPulse, ClipboardCopy, X, Send,
-  Loader2, LogOut, Check, History, Sparkles, Activity, ShieldCheck, Stethoscope,
-  Mic, Eye, EyeOff, Pencil, Trash2, Plus
+  Loader2, LogOut, RotateCcw, Check, History, Sparkles, Activity, ShieldCheck, Stethoscope,
+  Mic, Eye, EyeOff, Pencil, Trash2, Plus, CheckSquare, Square,
+  FlaskConical, Image as ImageIcon, Upload, AlertTriangle
 } from 'lucide-react'
-import { db, type TerapiItem, type KategoriTerapi, type Jaminan, type StatusRawat, type ProgressNote } from '../db'
+import {
+  db,
+  type TerapiItem,
+  type KategoriTerapi,
+  type KategoriPenunjang,
+  type PenunjangItem,
+  type Jaminan,
+  type StatusRawat,
+  type KeteranganKrs,
+  type ProgressNote,
+  type Patient,
+  type Ward,
+  type Hospital,
+} from '../db'
+import { appCache, cachePatient } from '../utils/dataCache'
 import Masked from '../components/Masked'
 import { useUi } from '../store'
 import { verifyBiometric } from '../webauthn'
@@ -14,6 +29,7 @@ import { chatPasien, type ChatMsg } from '../ai'
 import { applyMicroUpdate } from '../microUpdate'
 import { formatDate, getLocalDateString } from '../utils/dateFormat'
 import VisiteModal from '../components/VisiteModal'
+import { useBodyScrollLock } from '../utils/useBodyScrollLock'
 
 const hariKe = (iso: string) =>
   Math.max(1, Math.floor((Date.now() - new Date(iso).getTime()) / 86400000) + 1)
@@ -28,11 +44,37 @@ const KATEGORI_OPTIONS: KategoriTerapi[] = [
   'Edukasi',
 ]
 
+function guessKategori(nama: string): KategoriPenunjang {
+  const n = nama.toLowerCase()
+  if (/\b(ct|rontgen|ro|x-ray|xray|mri|usg|thorax|bno|foto|angio|msct|scan)\b/i.test(n)) {
+    return 'Radiologi'
+  }
+  if (/\b(dl|darah|urin|lab|gda|gds|gdp|elektrolit|sgot|sgpt|ureum|kreatinin|cr|lipid|kolesterol|tg|hba1c|crp|ast|alt|wbc|hgb|plt|hbsag|anti-hcv|troponin|ckmb|d-dimer)\b/i.test(n)) {
+    return 'Laboratorium'
+  }
+  return 'Lainnya'
+}
+
+const LAB_SUGGESTIONS = [
+  'Darah Lengkap (DL)', 'GDA / GDS', 'Ureum / Kreatinin', 'Elektrolit (Na/K/Cl)',
+  'Profil Lipid (Kol/TG/HDL/LDL)', 'SGOT / SGPT', 'Urinalisis Lengkap', 'Koagulasi (PT/APTT/INR)',
+  'HbA1c', 'Analisa Gas Darah (AGD)', 'Troponin I / T', 'D-Dimer'
+]
+const RADIOLOGI_SUGGESTIONS = [
+  'CT-Scan Kepala Non-Kontras', 'Foto Thorax AP', 'MRI Kepala & MRA', 'USG Abdomen',
+  'USG Doppler Carotis', 'CT-Scan Kepala dg Kontras', 'Foto BNO / Polos Abdomen', 'Echocardiografi'
+]
+const LAINNYA_SUGGESTIONS = [
+  'EKG 12 Lead', 'EEG (Elektroensefalografi)', 'EMG / NCV', 'Lumbal Pungsi',
+  'Endoskopi', 'Funduskopi'
+]
+
 function TerapiRow({
   item,
   index,
   noteId,
   noteDate,
+  resultText,
   onEdit,
   onDelete,
   onToggleStatus,
@@ -41,36 +83,67 @@ function TerapiRow({
   index: number
   noteId: number
   noteDate: string
+  resultText?: string
   onEdit?: (item: TerapiItem, index: number, noteId: number) => void
   onDelete?: (index: number, noteId: number) => void
   onToggleStatus?: (index: number, noteId: number) => void
 }) {
+  const isDiagnostic = item.kategori === 'Diagnostik'
   const baru = item.status === 'aktif' && item.tgl_mulai === noteDate
   const isStopped = item.status === 'stop'
 
   return (
     <div className="group flex items-center justify-between py-1.5 px-2 rounded-xl hover:bg-surface/60 transition-colors gap-2">
-      <div className="min-w-0 flex-1">
-        {isStopped ? (
-          <p className="text-xs text-ink-muted/70">
-            <del className="text-rose-500/80">
-              {item.nama_item} {item.dosis_keterangan}
-            </del>{' '}
-            <span className="caption text-[11px] text-rose-600 font-semibold">
-              (stop {formatDate(item.tgl_stop)})
-            </span>
-          </p>
-        ) : (
-          <p className="text-xs text-ink leading-snug">
-            <b className="font-bold">{item.nama_item}</b>{' '}
-            <span className="text-ink-muted">{item.dosis_keterangan}</span>
-            {item.icd9 && (
-              <span className="ml-1.5 font-mono caption font-bold text-primary bg-primary/10 px-1.5 py-0.5 rounded text-[10px]">
-                ICD-9: {item.icd9}
-              </span>
+      <div className="min-w-0 flex-1 flex items-center gap-2">
+        {isDiagnostic && onToggleStatus && (
+          <button
+            type="button"
+            onClick={() => onToggleStatus(index, noteId)}
+            className="cursor-pointer text-ink-muted hover:text-primary transition-colors shrink-0"
+            title={isStopped ? 'Tandai belum dilakukan' : 'Tandai sudah dilakukan'}
+          >
+            {isStopped ? (
+              <CheckSquare size={16} className="text-emerald-600" />
+            ) : (
+              <Square size={16} className="text-slate-400" />
             )}
-          </p>
+          </button>
         )}
+        <div className="min-w-0 flex-1">
+          {isDiagnostic ? (
+            <p className="text-xs leading-snug">
+              <span className={`font-bold ${isStopped ? 'line-through text-ink-muted/70' : 'text-ink'}`}>
+                {item.nama_item}
+              </span>
+              {resultText ? (
+                <span className="text-primary font-medium ml-1.5">: {resultText}</span>
+              ) : item.dosis_keterangan ? (
+                <span className="text-ink-muted ml-1.5">({item.dosis_keterangan})</span>
+              ) : (
+                <span className="text-amber-600 font-medium ml-1.5 text-[11px]">(Menunggu hasil)</span>
+              )}
+            </p>
+          ) : isStopped ? (
+            <p className="text-xs text-ink-muted/70">
+              <del className="text-rose-500/80">
+                {item.nama_item} {item.dosis_keterangan}
+              </del>{' '}
+              <span className="caption text-[11px] text-rose-600 font-semibold">
+                (stop {formatDate(item.tgl_stop)})
+              </span>
+            </p>
+          ) : (
+            <p className="text-xs text-ink leading-snug">
+              <b className="font-bold">{item.nama_item}</b>{' '}
+              <span className="text-ink-muted">{item.dosis_keterangan}</span>
+              {item.icd9 && (
+                <span className="ml-1.5 font-mono caption font-bold text-primary bg-primary/10 px-1.5 py-0.5 rounded text-[10px]">
+                  ICD-9: {item.icd9}
+                </span>
+              )}
+            </p>
+          )}
+        </div>
       </div>
 
       <div className="flex items-center gap-1 shrink-0">
@@ -80,7 +153,7 @@ function TerapiRow({
           </span>
         )}
 
-        {onToggleStatus && (
+        {!isDiagnostic && onToggleStatus && (
           <button
             type="button"
             onClick={() => onToggleStatus(index, noteId)}
@@ -127,15 +200,55 @@ function TerapiRow({
 export default function PatientProfile() {
   const { id } = useParams()
   const pid = Number(id)
-  const patient = useLiveQuery(() => db.patients.get(pid), [pid])
+  const location = useLocation()
+  const navState = (location.state || {}) as {
+    patient?: Patient
+    latestNote?: ProgressNote
+    latestNoteWithS?: ProgressNote
+    ward?: Ward
+    hospital?: Hospital
+  }
+
+  // Pre-seed from navState or appCache to eliminate frame-0 rendering flicker
+  const initialPatient = navState.patient || (pid ? appCache.patientsMap.get(pid) : undefined)
+  const initialNotes = (pid && appCache.notesMap.has(pid))
+    ? appCache.notesMap.get(pid)!
+    : (navState.latestNote ? [navState.latestNote] : [])
+  const initialWard = navState.ward || (initialPatient?.lokasi_sekarang ? appCache.wardsMap.get(initialPatient.lokasi_sekarang) : undefined)
+  const initialHospital = navState.hospital || (initialPatient?.hospital_id ? appCache.hospitalsMap.get(initialPatient.hospital_id) : undefined)
+
+  const patient = useLiveQuery(() => db.patients.get(pid), [pid], initialPatient)
   const notes = useLiveQuery(
     () => db.progressNotes.where('patient_id').equals(pid).sortBy('tanggal'),
-    [pid], [],
+    [pid],
+    initialNotes,
   )
-  const ward = useLiveQuery(() => (patient ? db.wards.get(patient.lokasi_sekarang) : undefined), [patient?.lokasi_sekarang])
-  const hospital = useLiveQuery(() => (patient ? db.hospitals.get(patient.hospital_id) : undefined), [patient?.hospital_id])
-  const allHospitals = useLiveQuery(() => db.hospitals.toArray(), [], [])
-  const allWards = useLiveQuery(() => db.wards.toArray(), [], [])
+  const ward = useLiveQuery(
+    () => (patient ? db.wards.get(patient.lokasi_sekarang) : undefined),
+    [patient?.lokasi_sekarang],
+    initialWard,
+  )
+  const hospital = useLiveQuery(
+    () => (patient ? db.hospitals.get(patient.hospital_id) : undefined),
+    [patient?.hospital_id],
+    initialHospital,
+  )
+  const allHospitals = useLiveQuery(() => db.hospitals.toArray(), [], appCache.hospitals || [])
+  const allWards = useLiveQuery(() => db.wards.toArray(), [], appCache.wards || [])
+
+  // Update in-memory cache when fresh data arrives
+  useEffect(() => {
+    if (patient) cachePatient(patient)
+  }, [patient])
+
+  useEffect(() => {
+    if (notes && pid) {
+      appCache.notesMap.set(pid, notes)
+      if (notes.length > 0) {
+        appCache.latestNoteMap.set(pid, notes[notes.length - 1])
+      }
+    }
+  }, [notes, pid])
 
   const navigate = useNavigate()
   const { unmasked, setUnmasked } = useUi()
@@ -168,6 +281,9 @@ export default function PatientProfile() {
     hospital_id: 0,
     lokasi_sekarang: 0,
     status_rawat: 'aktif' as StatusRawat,
+    keterangan_krs: 'Izin Dokter' as KeteranganKrs,
+    detail_krs: '',
+    tgl_krs: '',
     jaminan: 'BPJS' as Jaminan,
     tgl_mrs: '',
     tgl_onset: '',
@@ -184,6 +300,9 @@ export default function PatientProfile() {
       hospital_id: patient.hospital_id || 0,
       lokasi_sekarang: patient.lokasi_sekarang || 0,
       status_rawat: patient.status_rawat || 'aktif',
+      keterangan_krs: patient.keterangan_krs || 'Izin Dokter',
+      detail_krs: patient.detail_krs || '',
+      tgl_krs: patient.tgl_krs ? patient.tgl_krs.slice(0, 10) : getLocalDateString(),
       jaminan: patient.jaminan || 'BPJS',
       tgl_mrs: patient.tgl_mrs ? patient.tgl_mrs.slice(0, 10) : '',
       tgl_onset: patient.tgl_onset ? patient.tgl_onset.slice(0, 10) : '',
@@ -194,6 +313,17 @@ export default function PatientProfile() {
   const handleSavePatient = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!patient) return
+    const newWardId = Number(editPatientForm.lokasi_sekarang)
+    let newOrder = patient.order
+    if (newWardId !== patient.lokasi_sekarang) {
+      const wardCount = await db.patients
+        .where('lokasi_sekarang')
+        .equals(newWardId)
+        .filter((p) => p.status_rawat === 'aktif')
+        .count()
+      newOrder = wardCount + 1
+    }
+
     await db.patients.update(pid, {
       title: editPatientForm.title,
       nama_depan: editPatientForm.nama_depan.trim(),
@@ -201,11 +331,15 @@ export default function PatientProfile() {
       no_rm: editPatientForm.no_rm.trim(),
       diagnosis_utama: editPatientForm.diagnosis_utama.trim(),
       hospital_id: Number(editPatientForm.hospital_id),
-      lokasi_sekarang: Number(editPatientForm.lokasi_sekarang),
+      lokasi_sekarang: newWardId,
       status_rawat: editPatientForm.status_rawat,
+      keterangan_krs: editPatientForm.status_rawat === 'krs' ? editPatientForm.keterangan_krs : undefined,
+      detail_krs: editPatientForm.status_rawat === 'krs' ? editPatientForm.detail_krs.trim() || undefined : undefined,
+      tgl_krs: editPatientForm.status_rawat === 'krs' ? editPatientForm.tgl_krs : undefined,
       jaminan: editPatientForm.jaminan,
       tgl_mrs: editPatientForm.tgl_mrs,
       tgl_onset: editPatientForm.tgl_onset,
+      order: newOrder,
     })
     notify('Data pasien berhasil diperbarui ✓')
     setShowEditPatientModal(false)
@@ -221,6 +355,225 @@ export default function PatientProfile() {
       navigate('/rekammedis', { replace: true })
     }
   }
+
+  /* CRUD Pemeriksaan Penunjang (Lab, Radiologi, Penunjang Lain) */
+  const rawPenunjang = useLiveQuery(
+    () => (pid ? db.penunjang.where('patient_id').equals(pid).reverse().sortBy('tanggal') : []),
+    [pid]
+  )
+  const penunjangList = useMemo(() => rawPenunjang || [], [rawPenunjang])
+
+  const [penunjangFilter, setPenunjangFilter] = useState<'semua' | 'Laboratorium' | 'Radiologi' | 'Lainnya' | 'menunggu'>('semua')
+  const [showAddPenunjangModal, setShowAddPenunjangModal] = useState(false)
+  const [penunjangForm, setPenunjangForm] = useState<{
+    id?: number
+    kategori: KategoriPenunjang
+    nama_pemeriksaan: string
+    tanggal: string
+    status: 'selesai' | 'menunggu'
+    hasil: string
+    catatan: string
+    attachments: { id?: string; name: string; type: string; dataUrl: string }[]
+  }>({
+    kategori: 'Laboratorium',
+    nama_pemeriksaan: '',
+    tanggal: getLocalDateString(),
+    status: 'selesai',
+    hasil: '',
+    catatan: '',
+    attachments: [],
+  })
+
+  const [showQuickHasilModal, setShowQuickHasilModal] = useState(false)
+  const [quickHasilItem, setQuickHasilItem] = useState<PenunjangItem | null>(null)
+  const [quickHasilText, setQuickHasilText] = useState('')
+  const [previewImage, setPreviewImage] = useState<{ url: string; title: string } | null>(null)
+
+  const openAddPenunjang = (defaultKategori: KategoriPenunjang = 'Laboratorium', defaultName = '') => {
+    setPenunjangForm({
+      kategori: defaultKategori,
+      nama_pemeriksaan: defaultName,
+      tanggal: getLocalDateString(),
+      status: 'selesai',
+      hasil: '',
+      catatan: '',
+      attachments: [],
+    })
+    setShowAddPenunjangModal(true)
+  }
+
+  const openEditPenunjang = (item: PenunjangItem) => {
+    setPenunjangForm({
+      id: item.id,
+      kategori: item.kategori,
+      nama_pemeriksaan: item.nama_pemeriksaan,
+      tanggal: item.tanggal,
+      status: item.status,
+      hasil: item.hasil || '',
+      catatan: item.catatan || '',
+      attachments: item.attachments || [],
+    })
+    setShowAddPenunjangModal(true)
+  }
+
+  const handleSavePenunjang = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!pid || !penunjangForm.nama_pemeriksaan.trim()) return
+
+    if (penunjangForm.id) {
+      await db.penunjang.update(penunjangForm.id, {
+        kategori: penunjangForm.kategori,
+        nama_pemeriksaan: penunjangForm.nama_pemeriksaan.trim(),
+        tanggal: penunjangForm.tanggal,
+        status: penunjangForm.status,
+        hasil: penunjangForm.hasil.trim(),
+        catatan: penunjangForm.catatan.trim(),
+        attachments: penunjangForm.attachments,
+        updated_at: new Date().toISOString(),
+      })
+      notify('Pemeriksaan penunjang berhasil diperbarui ✓')
+    } else {
+      await db.penunjang.add({
+        patient_id: pid,
+        kategori: penunjangForm.kategori,
+        nama_pemeriksaan: penunjangForm.nama_pemeriksaan.trim(),
+        tanggal: penunjangForm.tanggal || getLocalDateString(),
+        status: penunjangForm.status,
+        hasil: penunjangForm.hasil.trim(),
+        catatan: penunjangForm.catatan.trim(),
+        attachments: penunjangForm.attachments,
+        created_at: new Date().toISOString(),
+      })
+      notify('Pemeriksaan penunjang berhasil ditambahkan ✓')
+    }
+    setShowAddPenunjangModal(false)
+  }
+
+  const handleDeletePenunjang = async (id: number, nama: string) => {
+    if (window.confirm(`Hapus pemeriksaan penunjang "${nama}"?`)) {
+      await db.penunjang.delete(id)
+      notify(`Pemeriksaan "${nama}" dihapus`)
+    }
+  }
+
+  const openQuickHasil = (item: PenunjangItem) => {
+    setQuickHasilItem(item)
+    setQuickHasilText(item.hasil || '')
+    setShowQuickHasilModal(true)
+  }
+
+  const handleSaveQuickHasil = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!quickHasilItem?.id || !quickHasilText.trim()) return
+    await db.penunjang.update(quickHasilItem.id, {
+      hasil: quickHasilText.trim(),
+      status: 'selesai',
+      updated_at: new Date().toISOString(),
+    })
+    notify(`Hasil ${quickHasilItem.nama_pemeriksaan} berhasil disimpan ✓`)
+    setShowQuickHasilModal(false)
+    setQuickHasilItem(null)
+    setQuickHasilText('')
+  }
+
+  const handleAttachPenunjangFile = (file: File) => {
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = () => {
+      const dataUrl = reader.result as string
+      setPenunjangForm((prev) => ({
+        ...prev,
+        attachments: [
+          ...prev.attachments,
+          {
+            id: Math.random().toString(36).slice(2),
+            name: file.name,
+            type: file.type,
+            dataUrl,
+          },
+        ],
+      }))
+    }
+    reader.readAsDataURL(file)
+  }
+
+  const handleRemovePenunjangAttachment = (index: number) => {
+    setPenunjangForm((prev) => ({
+      ...prev,
+      attachments: prev.attachments.filter((_, i) => i !== index),
+    }))
+  }
+
+  const handleImportFromCppt = async () => {
+    if (!pid || !notes || notes.length === 0) {
+      notify('Tidak ada catatan CPPT untuk diimpor')
+      return
+    }
+    const latestNote = notes[notes.length - 1]
+    const imported: string[] = []
+
+    // 1. Tarik dari P (Diagnostik)
+    const pDiag = latestNote.P.filter((p) => p.kategori === 'Diagnostik')
+    for (const it of pDiag) {
+      const lower = it.nama_item.toLowerCase().trim()
+      const already = penunjangList.some((p) => p.nama_pemeriksaan.toLowerCase().trim() === lower)
+      if (!already) {
+        await db.penunjang.add({
+          patient_id: pid,
+          kategori: guessKategori(it.nama_item),
+          nama_pemeriksaan: it.nama_item.trim(),
+          tanggal: latestNote.tanggal,
+          status: it.dosis_keterangan?.trim() ? 'selesai' : 'menunggu',
+          hasil: it.dosis_keterangan?.trim() || '',
+          created_at: new Date().toISOString(),
+        })
+        imported.push(it.nama_item)
+      }
+    }
+
+    // 2. Tarik dari O_penunjang jika ada baris berformat "Item: Hasil"
+    if (latestNote.O_penunjang?.trim()) {
+      const lines = latestNote.O_penunjang.split('\n').map((l) => l.trim()).filter(Boolean)
+      for (const line of lines) {
+        const cleanLine = line.replace(/^[-•*]\s*/, '')
+        const match = cleanLine.match(/^([^:\n]+):\s*(.+)$/)
+        if (match) {
+          const testName = match[1].trim()
+          const testResult = match[2].trim()
+          const lower = testName.toLowerCase()
+          const already = penunjangList.some((p) => p.nama_pemeriksaan.toLowerCase().trim() === lower)
+          if (!already && testName.length < 50) {
+            await db.penunjang.add({
+              patient_id: pid,
+              kategori: guessKategori(testName),
+              nama_pemeriksaan: testName,
+              tanggal: latestNote.tanggal,
+              status: 'selesai',
+              hasil: testResult,
+              created_at: new Date().toISOString(),
+            })
+            imported.push(testName)
+          }
+        }
+      }
+    }
+
+    if (imported.length > 0) {
+      notify(`Berhasil mengimpor ${imported.length} pemeriksaan penunjang dari CPPT ✓`)
+    } else {
+      notify('Semua pemeriksaan dari CPPT sudah tercatat di penunjang')
+    }
+  }
+
+  const filteredPenunjang = useMemo(() => {
+    if (penunjangFilter === 'menunggu') {
+      return penunjangList.filter((p) => p.status === 'menunggu')
+    }
+    if (penunjangFilter !== 'semua') {
+      return penunjangList.filter((p) => p.kategori === penunjangFilter)
+    }
+    return penunjangList
+  }, [penunjangList, penunjangFilter])
 
   /* CRUD Item Terapi */
   const [editingTerapi, setEditingTerapi] = useState<{
@@ -268,20 +621,21 @@ export default function PatientProfile() {
     if (!targetNote) return
     const item = targetNote.P[index]
     const newP = [...targetNote.P]
+    const isDiag = item.kategori === 'Diagnostik'
     if (item.status === 'aktif') {
       newP[index] = {
         ...item,
         status: 'stop',
         tgl_stop: getLocalDateString(),
       }
-      notify(`Terapi "${item.nama_item}" dihentikan (stop)`)
+      notify(isDiag ? `PDx "${item.nama_item}" ditandai sudah dilakukan ✓` : `Terapi "${item.nama_item}" dihentikan (stop)`)
     } else {
       newP[index] = {
         ...item,
         status: 'aktif',
         tgl_stop: null,
       }
-      notify(`Terapi "${item.nama_item}" diaktifkan kembali`)
+      notify(isDiag ? `PDx "${item.nama_item}" ditandai belum dilakukan` : `Terapi "${item.nama_item}" diaktifkan kembali`)
     }
     await db.progressNotes.update(noteId, { P: newP })
   }
@@ -320,6 +674,7 @@ export default function PatientProfile() {
     O_pemfis: string
     O_penunjang: string
     A: string
+    catatan: string
   } | null>(null)
 
   const openEditNote = (n: ProgressNote) => {
@@ -330,6 +685,7 @@ export default function PatientProfile() {
       O_pemfis: n.O_pemfis || '',
       O_penunjang: n.O_penunjang || '',
       A: Array.isArray(n.A) ? n.A.map((a) => a.nama_diagnosis).join('\n') : String(n.A || ''),
+      catatan: n.catatan || '',
     })
   }
 
@@ -354,8 +710,9 @@ export default function PatientProfile() {
       O_pemfis: editingNote.O_pemfis.trim(),
       O_penunjang: editingNote.O_penunjang.trim(),
       A: aItems.length > 0 ? aItems : targetNote.A,
+      catatan: editingNote.catatan.trim() || undefined,
     })
-    notify('Catatan CPPT berhasil diperbarui ✓')
+    notify('Catatan CPPT berhasil diperbarui')
     setEditingNote(null)
   }
 
@@ -368,6 +725,17 @@ export default function PatientProfile() {
 
   /* Chat & Instruksi Mikro */
   const [chatOpen, setChatOpen] = useState(false)
+  const [showKrsModal, setShowKrsModal] = useState(false)
+  const [krsForm, setKrsForm] = useState<{
+    keterangan_krs: KeteranganKrs
+    detail_krs: string
+    tgl_krs: string
+  }>({
+    keterangan_krs: 'Izin Dokter',
+    detail_krs: '',
+    tgl_krs: getLocalDateString(),
+  })
+  useBodyScrollLock(Boolean(chatOpen || showEditPatientModal || editingTerapi || addingTerapiNoteId || editingNote || showKrsModal))
   const [msgs, setMsgs] = useState<ChatMsg[]>([])
   const [draft, setDraft] = useState('')
   const [busy, setBusy] = useState(false)
@@ -388,7 +756,14 @@ export default function PatientProfile() {
     setListening(true)
   }
 
-  if (!patient) return <main className="p-5 text-sm text-ink-muted">Memuat data rekam medis…</main>
+  if (!patient) {
+    return (
+      <main className="space-y-5 p-5 animate-pulse">
+        <div className="glass-blue-hero rounded-3xl p-6 h-56 bg-primary/20" />
+        <div className="rounded-3xl glass-card p-6 h-48 bg-slate-100" />
+      </main>
+    )
+  }
 
   const latest = notes[notes.length - 1]
   const farmako = latest?.P.filter((p) => p.kategori === 'Farmakologi') ?? []
@@ -424,16 +799,46 @@ export default function PatientProfile() {
     }
   }
 
-  const toggleKrs = async () => {
-    await db.patients.update(pid, { status_rawat: patient.status_rawat === 'aktif' ? 'krs' : 'aktif' })
-    notify(patient.status_rawat === 'aktif' ? 'Pasien ditandai KRS' : 'Pasien kembali rawat aktif')
+  const openKrsModal = () => {
+    setKrsForm({
+      keterangan_krs: patient?.keterangan_krs || 'Izin Dokter',
+      detail_krs: patient?.detail_krs || '',
+      tgl_krs: patient?.tgl_krs ? patient.tgl_krs.slice(0, 10) : getLocalDateString(),
+    })
+    setShowKrsModal(true)
+  }
+
+  const handleConfirmKrs = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!patient) return
+    await db.patients.update(pid, {
+      status_rawat: 'krs',
+      keterangan_krs: krsForm.keterangan_krs,
+      detail_krs: krsForm.detail_krs.trim() || undefined,
+      tgl_krs: krsForm.tgl_krs || getLocalDateString(),
+    })
+    setShowKrsModal(false)
+    const detailLabel = krsForm.detail_krs.trim() ? ` (${krsForm.detail_krs.trim()})` : ''
+    notify(`Pasien ditandai KRS: ${krsForm.keterangan_krs}${detailLabel} ✓`)
+  }
+
+  const handleKembaliRawat = async () => {
+    if (!patient) return
+    if (!window.confirm('Kembalikan status pasien ini menjadi Rawat Inap (aktif)?')) return
+    await db.patients.update(pid, {
+      status_rawat: 'aktif',
+      keterangan_krs: undefined,
+      detail_krs: undefined,
+      tgl_krs: undefined,
+    })
+    notify('Pasien kembali rawat aktif ✓')
   }
 
   const buildKonteks = () => {
     const riwayatRawatKonteks = patient.riwayat_rawat && patient.riwayat_rawat.length > 0
       ? `\n\n[RIWAYAT RAWAT INAP TERDAHULU (REKAM MEDIS)]\n` +
         patient.riwayat_rawat.map((r, i) =>
-          `- Rawat Ke-${i + 1}: MRS ${formatDate(r.tgl_mrs)}${r.tgl_krs ? ` s/d KRS ${formatDate(r.tgl_krs)}` : ''} | Dx: ${r.diagnosis_utama}${r.catatan_krs ? ` | Terapi KRS: ${r.catatan_krs}` : ''}`
+          `- Rawat Ke-${i + 1}: MRS ${formatDate(r.tgl_mrs)}${r.tgl_krs ? ` s/d KRS ${formatDate(r.tgl_krs)}` : ''}${r.keterangan_krs ? ` (${r.keterangan_krs}${r.detail_krs ? `: ${r.detail_krs}` : ''})` : ''} | Dx: ${r.diagnosis_utama}${r.catatan_krs ? ` | Terapi KRS: ${r.catatan_krs}` : ''}`
         ).join('\n')
       : ''
 
@@ -555,19 +960,46 @@ export default function PatientProfile() {
           <span className="rounded-full bg-white/20 px-3 py-1 text-xs font-bold text-white">
             {hospital?.nama} · {ward?.nama}
           </span>
-          <span className="rounded-full bg-white/20 px-3 py-1 text-xs font-bold text-white">
-            Perawatan P-{hariKe(patient.tgl_mrs)} ({formatDate(patient.tgl_mrs)})
-          </span>
           {patient.tgl_onset && (
-            <span className="rounded-full bg-amber-400/30 text-amber-200 border border-amber-300/40 px-3 py-1 text-xs font-bold">
+            <span className="rounded-full bg-white/20 px-3 py-1 text-xs font-bold text-white">
               Onset OH-{hariKe(patient.tgl_onset)} ({formatDate(patient.tgl_onset)})
             </span>
           )}
-          <span className={`rounded-full px-3 py-1 text-xs font-bold ${
-            patient.status_rawat === 'aktif' ? 'bg-emerald-400/30 text-emerald-100 border border-emerald-300/40' : 'bg-white/30 text-white'
-          }`}>
-            {patient.status_rawat === 'aktif' ? 'Rawat Inap' : 'Sudah KRS'}
-          </span>
+          {patient.status_rawat === 'aktif' ? (
+            <span className="rounded-full bg-amber-400/30 text-amber-200 border border-amber-300/40 px-3 py-1 text-xs font-bold">
+              Perawatan P-{hariKe(patient.tgl_mrs)} ({formatDate(patient.tgl_mrs)})
+            </span>
+          ) : (
+            <span className="rounded-full bg-slate-700/60 text-slate-200 border border-slate-600/60 px-3 py-1 text-xs font-bold">
+              {patient.tgl_krs ? `KRS ${formatDate(patient.tgl_krs)}` : 'Sudah KRS'}
+              {patient.tgl_krs && patient.tgl_mrs ? ` · ${Math.max(1, Math.floor((new Date(patient.tgl_krs).getTime() - new Date(patient.tgl_mrs).getTime()) / 86400000) + 1)} hari rawat` : ''}
+            </span>
+          )}
+          {patient.status_rawat === 'aktif' ? (
+            <span className="rounded-full px-3 py-1 text-xs font-bold bg-emerald-400/30 text-emerald-100 border border-emerald-300/40">
+              Rawat Inap
+            </span>
+          ) : patient.keterangan_krs === 'Meninggal' ? (
+            <span className="rounded-full px-3 py-1 text-xs font-bold bg-rose-500/80 text-white border border-rose-400/50 shadow-xs">
+              Meninggal
+            </span>
+          ) : patient.keterangan_krs === 'APS' ? (
+            <span className="rounded-full px-3 py-1 text-xs font-bold bg-amber-500/80 text-white border border-amber-400/50 shadow-xs">
+              KRS: APS
+            </span>
+          ) : patient.keterangan_krs === 'Alih Rawat' ? (
+            <span className="rounded-full px-3 py-1 text-xs font-bold bg-indigo-500/80 text-white border border-indigo-400/50 shadow-xs">
+              Alih Rawat {patient.detail_krs ? `→ ${patient.detail_krs}` : ''}
+            </span>
+          ) : patient.keterangan_krs === 'Rujuk' ? (
+            <span className="rounded-full px-3 py-1 text-xs font-bold bg-sky-500/80 text-white border border-sky-400/50 shadow-xs">
+              Rujuk {patient.detail_krs ? `→ ${patient.detail_krs}` : ''}
+            </span>
+          ) : (
+            <span className="rounded-full px-3 py-1 text-xs font-bold bg-white/30 text-white">
+              KRS: {patient.keterangan_krs || 'Izin Dokter'}
+            </span>
+          )}
         </div>
       </div>
 
@@ -753,12 +1185,29 @@ export default function PatientProfile() {
           >
             <ClipboardCopy size={15} /> Salin Resep KRS WhatsApp
           </button>
-          <button
-            onClick={toggleKrs}
-            className="flex h-10 cursor-pointer items-center gap-2 rounded-2xl bg-surface px-4 text-xs font-bold text-ink hover:bg-surface/80 active:scale-95 transition-all"
-          >
-            <LogOut size={15} /> {patient.status_rawat === 'aktif' ? 'Tandai KRS' : 'Kembali Rawat'}
-          </button>
+          {patient.status_rawat === 'aktif' ? (
+            <button
+              onClick={openKrsModal}
+              className="flex h-10 cursor-pointer items-center gap-2 rounded-2xl bg-surface px-4 text-xs font-bold text-ink hover:bg-surface/80 active:scale-95 transition-all"
+            >
+              <LogOut size={15} /> Tandai KRS
+            </button>
+          ) : (
+            <>
+              <button
+                onClick={openKrsModal}
+                className="flex h-10 cursor-pointer items-center gap-2 rounded-2xl bg-surface px-4 text-xs font-bold text-ink hover:bg-surface/80 active:scale-95 transition-all"
+              >
+                <Pencil size={14} /> Ubah KRS ({patient.keterangan_krs || 'Izin Dokter'})
+              </button>
+              <button
+                onClick={handleKembaliRawat}
+                className="flex h-10 cursor-pointer items-center gap-2 rounded-2xl bg-amber-50 border border-amber-200 text-amber-800 px-4 text-xs font-bold hover:bg-amber-100 active:scale-95 transition-all"
+              >
+                <RotateCcw size={15} /> Kembali Rawat Aktif
+              </button>
+            </>
+          )}
         </div>
 
         {krsText && (
@@ -768,6 +1217,219 @@ export default function PatientProfile() {
             rows={7}
             className="mt-2 w-full resize-y rounded-2xl border border-primary-soft/30 bg-surface/90 p-3.5 font-mono text-xs outline-none animate-in fade-in"
           />
+        )}
+      </div>
+
+      {/* Pemeriksaan Penunjang (Lab, Radiologi, Penunjang Lain) */}
+      <div id="section-penunjang" className="glass-card rounded-3xl p-5 shadow-sm space-y-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div className="flex size-8 items-center justify-center rounded-xl bg-sky-100 text-sky-700">
+              <FlaskConical size={18} />
+            </div>
+            <div>
+              <p className="h2 text-sm font-bold text-ink">Pemeriksaan Penunjang</p>
+              <p className="caption text-[11px] text-ink-muted">Lab, Radiologi, & Evaluasi Diagnostik</p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => openAddPenunjang()}
+            className="inline-flex items-center gap-1.5 rounded-xl bg-primary/10 border border-primary/20 px-3 py-1.5 text-xs font-bold text-primary hover:bg-primary/20 active:scale-95 transition-all cursor-pointer"
+          >
+            <Plus size={14} /> Tambah Penunjang
+          </button>
+        </div>
+
+        {/* Filter Chips Kategori */}
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none text-xs">
+          <button
+            type="button"
+            onClick={() => setPenunjangFilter('semua')}
+            className={`px-3 py-1 rounded-xl font-bold whitespace-nowrap cursor-pointer transition-all ${
+              penunjangFilter === 'semua'
+                ? 'bg-primary text-white shadow-sm'
+                : 'bg-surface text-ink-muted hover:bg-slate-200/60'
+            }`}
+          >
+            Semua ({penunjangList.length})
+          </button>
+          <button
+            type="button"
+            onClick={() => setPenunjangFilter('Laboratorium')}
+            className={`px-3 py-1 rounded-xl font-bold whitespace-nowrap cursor-pointer transition-all ${
+              penunjangFilter === 'Laboratorium'
+                ? 'bg-blue-600 text-white shadow-sm'
+                : 'bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200/50'
+            }`}
+          >
+            🔬 Lab ({penunjangList.filter((p) => p.kategori === 'Laboratorium').length})
+          </button>
+          <button
+            type="button"
+            onClick={() => setPenunjangFilter('Radiologi')}
+            className={`px-3 py-1 rounded-xl font-bold whitespace-nowrap cursor-pointer transition-all ${
+              penunjangFilter === 'Radiologi'
+                ? 'bg-purple-600 text-white shadow-sm'
+                : 'bg-purple-50 text-purple-700 hover:bg-purple-100 border border-purple-200/50'
+            }`}
+          >
+            🩻 Radiologi ({penunjangList.filter((p) => p.kategori === 'Radiologi').length})
+          </button>
+          <button
+            type="button"
+            onClick={() => setPenunjangFilter('Lainnya')}
+            className={`px-3 py-1 rounded-xl font-bold whitespace-nowrap cursor-pointer transition-all ${
+              penunjangFilter === 'Lainnya'
+                ? 'bg-slate-700 text-white shadow-sm'
+                : 'bg-slate-100 text-slate-700 hover:bg-slate-200/80 border border-slate-200/60'
+            }`}
+          >
+            📑 Lainnya ({penunjangList.filter((p) => p.kategori === 'Lainnya').length})
+          </button>
+          {penunjangList.some((p) => p.status === 'menunggu') && (
+            <button
+              type="button"
+              onClick={() => setPenunjangFilter('menunggu')}
+              className={`px-3 py-1 rounded-xl font-bold whitespace-nowrap cursor-pointer transition-all ${
+                penunjangFilter === 'menunggu'
+                  ? 'bg-amber-600 text-white shadow-sm'
+                  : 'bg-amber-50 text-amber-700 hover:bg-amber-100 border border-amber-200/60'
+              }`}
+            >
+              ⏳ Menunggu ({penunjangList.filter((p) => p.status === 'menunggu').length})
+            </button>
+          )}
+        </div>
+
+        {/* Empty state & smart import helper */}
+        {penunjangList.length === 0 ? (
+          <div className="rounded-2xl border border-dashed border-slate-200 p-5 text-center space-y-2 bg-surface/30">
+            <p className="text-xs text-ink-muted font-medium">Belum ada pemeriksaan penunjang tercatat untuk pasien ini.</p>
+            <div className="flex flex-wrap justify-center gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => openAddPenunjang()}
+                className="px-3.5 py-1.5 rounded-xl bg-primary text-white text-xs font-bold shadow-xs active:scale-95 transition-all cursor-pointer"
+              >
+                + Tambah Pemeriksaan Baru
+              </button>
+              {(latest?.O_penunjang?.trim() || latest?.P.some((p) => p.kategori === 'Diagnostik')) && (
+                <button
+                  type="button"
+                  onClick={handleImportFromCppt}
+                  className="px-3.5 py-1.5 rounded-xl bg-surface border border-slate-200 text-ink text-xs font-bold hover:bg-slate-100 active:scale-95 transition-all cursor-pointer"
+                >
+                  ⚡ Tarik dari CPPT Terakhir
+                </button>
+              )}
+            </div>
+          </div>
+        ) : filteredPenunjang.length === 0 ? (
+          <p className="text-center py-4 text-xs text-ink-muted">Tidak ada pemeriksaan pada kategori ini.</p>
+        ) : (
+          <div className="space-y-2.5">
+            {filteredPenunjang.map((item) => (
+              <div
+                key={item.id}
+                className="rounded-2xl border border-surface bg-surface/40 p-3.5 space-y-2 hover:bg-surface/70 transition-colors"
+              >
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span
+                      className={`text-[10px] font-bold px-2 py-0.5 rounded-md border ${
+                        item.kategori === 'Laboratorium'
+                          ? 'bg-blue-50 text-blue-700 border-blue-200/60'
+                          : item.kategori === 'Radiologi'
+                          ? 'bg-purple-50 text-purple-700 border-purple-200/60'
+                          : 'bg-slate-100 text-slate-700 border-slate-200/60'
+                      }`}
+                    >
+                      {item.kategori === 'Laboratorium' ? '🔬 Lab' : item.kategori === 'Radiologi' ? '🩻 Radiologi' : '📑 ' + item.kategori}
+                    </span>
+                    <span className="text-[11px] font-medium text-ink-muted">
+                      {formatDate(item.tanggal)}
+                    </span>
+                    <span
+                      className={`text-[10px] font-bold px-2 py-0.5 rounded-md border ${
+                        item.status === 'selesai'
+                          ? 'bg-emerald-50 text-emerald-700 border-emerald-200/60'
+                          : 'bg-amber-50 text-amber-700 border-amber-200/60'
+                      }`}
+                    >
+                      {item.status === 'selesai' ? '✓ Ada Hasil' : '⏳ Menunggu'}
+                    </span>
+                  </div>
+
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => openEditPenunjang(item)}
+                      title="Edit penunjang"
+                      className="p-1 rounded-lg text-ink-muted hover:text-primary hover:bg-primary/10 transition-colors cursor-pointer"
+                    >
+                      <Pencil size={13} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDeletePenunjang(item.id!, item.nama_pemeriksaan)}
+                      title="Hapus penunjang"
+                      className="p-1 rounded-lg text-ink-muted hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
+                </div>
+
+                <div>
+                  <p className="text-xs font-bold text-ink">{item.nama_pemeriksaan}</p>
+                  {item.catatan && (
+                    <p className="text-[11px] text-ink-muted/80 mt-0.5 italic">
+                      Indikasi: {item.catatan}
+                    </p>
+                  )}
+                </div>
+
+                {item.status === 'selesai' ? (
+                  <div className="bg-white/90 p-2.5 rounded-xl border border-slate-200/70 text-xs">
+                    <span className="font-bold text-primary mr-1">Hasil:</span>
+                    <span className="text-ink font-medium whitespace-pre-line leading-relaxed">
+                      {item.hasil || '—'}
+                    </span>
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-between gap-2 bg-amber-50/70 border border-amber-200/60 px-3 py-2 rounded-xl text-xs">
+                    <span className="text-amber-800 font-medium italic text-[11px]">
+                      Pemeriksaan telah dijadwalkan / sampel dikirim — belum ada hasil
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => openQuickHasil(item)}
+                      className="px-2.5 py-1 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-bold text-[11px] active:scale-95 transition-all cursor-pointer shrink-0 shadow-2xs"
+                    >
+                      + Isi Hasil
+                    </button>
+                  </div>
+                )}
+
+                {item.attachments && item.attachments.length > 0 && (
+                  <div className="flex items-center gap-2 pt-1 flex-wrap">
+                    {item.attachments.map((att, attIdx) => (
+                      <button
+                        key={attIdx}
+                        type="button"
+                        onClick={() => setPreviewImage({ url: att.dataUrl, title: `${item.nama_pemeriksaan} - ${att.name}` })}
+                        className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-white border border-slate-200 text-[11px] text-ink font-medium hover:border-primary cursor-pointer transition-colors shadow-2xs"
+                      >
+                        <ImageIcon size={12} className="text-primary" />
+                        <span className="truncate max-w-[120px]">{att.name}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
         )}
       </div>
 
@@ -787,7 +1449,7 @@ export default function PatientProfile() {
                 <div key={ep.id || i} className="rounded-2xl border border-surface bg-surface/60 p-3.5 space-y-1.5">
                   <div className="flex items-center justify-between text-ink-muted">
                     <span className="h3 text-xs font-bold text-primary">Episode #{episodeIndex}</span>
-                    <span className="caption font-medium">MRS: {formatDate(ep.tgl_mrs)} {ep.tgl_krs ? `→ KRS: ${formatDate(ep.tgl_krs)}` : ''}</span>
+                    <span className="caption font-medium">MRS: {formatDate(ep.tgl_mrs)} {ep.tgl_krs ? `→ KRS: ${formatDate(ep.tgl_krs)}` : ''}{ep.keterangan_krs ? ` (${ep.keterangan_krs}${ep.detail_krs ? `: ${ep.detail_krs}` : ''})` : ''}</span>
                   </div>
                   <p className="h2 text-sm font-bold text-ink">{ep.diagnosis_utama}</p>
                   {(h || w) && (
@@ -848,7 +1510,7 @@ export default function PatientProfile() {
             {(['S', 'O_pemfis', 'O_penunjang'] as const).map((k) =>
               n[k] ? (
                 <p key={k} className="body-md text-xs leading-relaxed">
-                  <b className="text-ink-muted font-bold">{k === 'S' ? 'S' : k === 'O_pemfis' ? 'O (Pemfis)' : 'O (Penunjang)'}:</b> {n[k]}
+                  <b className="text-ink-muted font-bold">{k === 'S' ? 'S' : k === 'O_pemfis' ? 'O - Fisik' : 'O - Penunjang'}:</b> {n[k]}
                 </p>
               ) : null,
             )}
@@ -873,6 +1535,14 @@ export default function PatientProfile() {
                 ))}
               </div>
             )}
+            {n.catatan && (
+              <div className="flex items-start gap-1.5 text-xs border-t border-surface/80 pt-1.5 mt-1">
+                <AlertTriangle size={13} className="text-amber-500 fill-amber-400/20 shrink-0 mt-0.5" />
+                <span className="text-amber-900 font-semibold break-words leading-relaxed min-w-0 flex-1">
+                  {n.catatan}
+                </span>
+              </div>
+            )}
           </div>
         ))}
         {!notes.length && (
@@ -893,8 +1563,14 @@ export default function PatientProfile() {
 
       {/* Dialog Chat AI */}
       {chatOpen && (
-        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 backdrop-blur-sm animate-in fade-in" onClick={() => setChatOpen(false)}>
-          <div className="flex h-[82dvh] w-full max-w-lg flex-col rounded-t-3xl bg-card shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div
+          className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 backdrop-blur-sm animate-in fade-in overscroll-contain touch-none select-none"
+          onClick={() => setChatOpen(false)}
+        >
+          <div
+            className="flex h-[82dvh] w-full max-w-lg flex-col rounded-t-3xl bg-card shadow-2xl overscroll-contain touch-auto select-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="flex items-center justify-between border-b border-surface p-4">
               <div>
                 <p className="h2 text-sm font-bold text-ink">Diskusi Kasus AI</p>
@@ -904,7 +1580,7 @@ export default function PatientProfile() {
                 <X size={20} />
               </button>
             </div>
-            <div className="flex-1 space-y-2.5 overflow-y-auto p-4">
+            <div className="flex-1 space-y-2.5 overflow-y-auto overscroll-contain p-4">
               {!msgs.length && (
                 <div className="rounded-2xl bg-surface/80 p-4 text-center text-xs text-ink-muted">
                   Tanyakan rasionalisasi EBM, evaluasi interaksi obat, atau usulkan perubahan terapi.
@@ -961,8 +1637,14 @@ export default function PatientProfile() {
 
       {/* Modal Edit Data Pasien */}
       {showEditPatientModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in" onClick={() => setShowEditPatientModal(false)}>
-          <div className="w-full max-w-md max-h-[90dvh] overflow-y-auto rounded-3xl bg-white p-5 shadow-2xl space-y-4" onClick={(e) => e.stopPropagation()}>
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in overscroll-contain touch-none select-none"
+          onClick={() => setShowEditPatientModal(false)}
+        >
+          <div
+            className="w-full max-w-md max-h-[90dvh] overflow-y-auto overscroll-contain rounded-3xl bg-white p-5 shadow-2xl space-y-4 touch-auto select-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <div>
                 <h3 className="text-sm font-bold text-ink">Edit Data Pasien</h3>
@@ -1085,15 +1767,92 @@ export default function PatientProfile() {
                 <div>
                   <label className="block text-[11px] font-semibold text-ink-muted mb-1">Status Rawat</label>
                   <select
-                    value={editPatientForm.status_rawat}
-                    onChange={(e) => setEditPatientForm({ ...editPatientForm, status_rawat: e.target.value as StatusRawat })}
-                    className="w-full h-9 rounded-xl border border-slate-200 px-2 text-xs bg-white text-ink outline-none focus:border-primary"
+                    value={
+                      editPatientForm.status_rawat === 'aktif'
+                        ? 'aktif'
+                        : editPatientForm.keterangan_krs === 'APS'
+                        ? 'krs_aps'
+                        : editPatientForm.keterangan_krs === 'Meninggal'
+                        ? 'krs_meninggal'
+                        : editPatientForm.keterangan_krs === 'Alih Rawat'
+                        ? 'krs_alih'
+                        : editPatientForm.keterangan_krs === 'Rujuk'
+                        ? 'krs_rujuk'
+                        : 'krs_izin'
+                    }
+                    onChange={(e) => {
+                      const val = e.target.value
+                      if (val === 'aktif') {
+                        setEditPatientForm({ ...editPatientForm, status_rawat: 'aktif' })
+                      } else {
+                        const ketMap: Record<string, KeteranganKrs> = {
+                          krs_izin: 'Izin Dokter',
+                          krs_aps: 'APS',
+                          krs_meninggal: 'Meninggal',
+                          krs_alih: 'Alih Rawat',
+                          krs_rujuk: 'Rujuk',
+                        }
+                        setEditPatientForm({
+                          ...editPatientForm,
+                          status_rawat: 'krs',
+                          keterangan_krs: ketMap[val] || 'Izin Dokter',
+                          tgl_krs: editPatientForm.tgl_krs || getLocalDateString(),
+                        })
+                      }
+                    }}
+                    className="w-full h-9 rounded-xl border border-slate-200 px-2 text-xs bg-white text-ink outline-none focus:border-primary font-medium"
                   >
                     <option value="aktif">Rawat Inap (Aktif)</option>
-                    <option value="krs">Sudah KRS</option>
+                    <option value="krs_izin">KRS: Izin Dokter</option>
+                    <option value="krs_aps">KRS: APS (Pulang Paksa)</option>
+                    <option value="krs_meninggal">KRS: Meninggal Dunia</option>
+                    <option value="krs_alih">KRS: Alih Rawat (Departemen Lain)</option>
+                    <option value="krs_rujuk">KRS: Rujuk (Faskes/RS Lain)</option>
                   </select>
                 </div>
               </div>
+
+              {editPatientForm.status_rawat === 'krs' && (
+                <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200 space-y-2">
+                  {editPatientForm.keterangan_krs === 'Alih Rawat' && (
+                    <div>
+                      <label className="block text-[11px] font-semibold text-ink-muted mb-1">
+                        Ke Departemen / Spesialis
+                      </label>
+                      <input
+                        type="text"
+                        value={editPatientForm.detail_krs}
+                        onChange={(e) => setEditPatientForm({ ...editPatientForm, detail_krs: e.target.value })}
+                        placeholder="Contoh: Bedah Saraf, ICU, IPD..."
+                        className="w-full h-9 rounded-xl border border-slate-200 px-2 text-xs text-ink outline-none focus:border-primary bg-white"
+                      />
+                    </div>
+                  )}
+                  {editPatientForm.keterangan_krs === 'Rujuk' && (
+                    <div>
+                      <label className="block text-[11px] font-semibold text-ink-muted mb-1">
+                        Tujuan Rujukan (RS / Faskes)
+                      </label>
+                      <input
+                        type="text"
+                        value={editPatientForm.detail_krs}
+                        onChange={(e) => setEditPatientForm({ ...editPatientForm, detail_krs: e.target.value })}
+                        placeholder="Contoh: RSUD Dr. Soetomo, RS PON..."
+                        className="w-full h-9 rounded-xl border border-slate-200 px-2 text-xs text-ink outline-none focus:border-primary bg-white"
+                      />
+                    </div>
+                  )}
+                  <div>
+                    <label className="block text-[11px] font-semibold text-ink-muted mb-1">Tanggal Keluar (KRS)</label>
+                    <input
+                      type="date"
+                      value={editPatientForm.tgl_krs}
+                      onChange={(e) => setEditPatientForm({ ...editPatientForm, tgl_krs: e.target.value })}
+                      className="w-full h-9 rounded-xl border border-slate-200 px-2 text-xs text-ink outline-none focus:border-primary bg-white"
+                    />
+                  </div>
+                </div>
+              )}
 
               <div className="grid grid-cols-2 gap-2">
                 <div>
@@ -1147,8 +1906,14 @@ export default function PatientProfile() {
 
       {/* Modal Edit Item Terapi */}
       {editingTerapi && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in" onClick={() => setEditingTerapi(null)}>
-          <div className="w-full max-w-sm rounded-3xl bg-white p-5 shadow-2xl space-y-4" onClick={(e) => e.stopPropagation()}>
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in overscroll-contain touch-none select-none"
+          onClick={() => setEditingTerapi(null)}
+        >
+          <div
+            className="w-full max-w-sm rounded-3xl bg-white p-5 shadow-2xl space-y-4 overscroll-contain touch-auto select-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <div>
                 <h3 className="text-sm font-bold text-ink">Edit Item Terapi</h3>
@@ -1270,8 +2035,14 @@ export default function PatientProfile() {
 
       {/* Modal Tambah Terapi Manual */}
       {addingTerapiNoteId && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in" onClick={() => setAddingTerapiNoteId(null)}>
-          <div className="w-full max-w-sm rounded-3xl bg-white p-5 shadow-2xl space-y-4" onClick={(e) => e.stopPropagation()}>
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in overscroll-contain touch-none select-none"
+          onClick={() => setAddingTerapiNoteId(null)}
+        >
+          <div
+            className="w-full max-w-sm rounded-3xl bg-white p-5 shadow-2xl space-y-4 overscroll-contain touch-auto select-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <div>
                 <h3 className="text-sm font-bold text-ink">Tambah Terapi / Plan Manual</h3>
@@ -1341,8 +2112,14 @@ export default function PatientProfile() {
 
       {/* Modal Edit Catatan CPPT */}
       {editingNote && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in" onClick={() => setEditingNote(null)}>
-          <div className="w-full max-w-md max-h-[90dvh] overflow-y-auto rounded-3xl bg-white p-5 shadow-2xl space-y-4" onClick={(e) => e.stopPropagation()}>
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in overscroll-contain touch-none select-none"
+          onClick={() => setEditingNote(null)}
+        >
+          <div
+            className="w-full max-w-md max-h-[90dvh] overflow-y-auto overscroll-contain rounded-3xl bg-white p-5 shadow-2xl space-y-4 touch-auto select-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <div>
                 <h3 className="text-sm font-bold text-ink">Edit Catatan CPPT</h3>
@@ -1408,6 +2185,17 @@ export default function PatientProfile() {
                 />
               </div>
 
+              <div>
+                <label className="block text-[11px] font-semibold text-ink-muted mb-1">Catatan Bebas (di luar SOAP)</label>
+                <textarea
+                  rows={2}
+                  value={editingNote.catatan}
+                  onChange={(e) => setEditingNote({ ...editingNote, catatan: e.target.value })}
+                  placeholder="Rencana KRS, konsul, extra, dll..."
+                  className="w-full rounded-xl border border-slate-200 p-2.5 text-xs text-ink outline-none focus:border-primary resize-y"
+                />
+              </div>
+
               <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
                 <button
                   type="button"
@@ -1428,6 +2216,539 @@ export default function PatientProfile() {
         </div>
       )}
 
+      {/* Modal Tambah / Edit Pemeriksaan Penunjang */}
+      {showAddPenunjangModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in overscroll-contain touch-none select-none"
+          onClick={() => setShowAddPenunjangModal(false)}
+        >
+          <div
+            className="w-full max-w-md max-h-[90dvh] overflow-y-auto overscroll-contain rounded-3xl bg-white p-5 shadow-2xl space-y-4 touch-auto select-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div>
+                <h3 className="text-sm font-bold text-ink">
+                  {penunjangForm.id ? 'Edit Pemeriksaan Penunjang' : 'Tambah Pemeriksaan Penunjang'}
+                </h3>
+                <p className="text-[11px] text-ink-muted">Kelola laboratorium, radiologi, dan penunjang diagnostik</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowAddPenunjangModal(false)}
+                className="rounded-full p-1.5 text-ink-muted hover:bg-slate-100 transition-colors cursor-pointer"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={handleSavePenunjang} className="space-y-3.5">
+              {/* Pilihan Kategori */}
+              <div>
+                <label className="block text-[11px] font-semibold text-ink-muted mb-1.5">Kategori Penunjang</label>
+                <div className="grid grid-cols-3 gap-2">
+                  {(['Laboratorium', 'Radiologi', 'Lainnya'] as const).map((kat) => (
+                    <button
+                      key={kat}
+                      type="button"
+                      onClick={() => setPenunjangForm({ ...penunjangForm, kategori: kat })}
+                      className={`py-2 px-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer border text-center ${
+                        penunjangForm.kategori === kat
+                          ? kat === 'Laboratorium'
+                            ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
+                            : kat === 'Radiologi'
+                            ? 'bg-purple-600 text-white border-purple-600 shadow-sm'
+                            : 'bg-slate-700 text-white border-slate-700 shadow-sm'
+                          : 'bg-white text-ink border-slate-200 hover:bg-slate-50'
+                      }`}
+                    >
+                      {kat === 'Laboratorium' ? '🔬 Lab' : kat === 'Radiologi' ? '🩻 Radiologi' : '📑 Lainnya'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Nama Pemeriksaan & Suggestions */}
+              <div>
+                <label className="block text-[11px] font-semibold text-ink-muted mb-1">Nama Pemeriksaan</label>
+                <input
+                  required
+                  value={penunjangForm.nama_pemeriksaan}
+                  onChange={(e) => setPenunjangForm({ ...penunjangForm, nama_pemeriksaan: e.target.value })}
+                  placeholder={
+                    penunjangForm.kategori === 'Laboratorium'
+                      ? 'mis. Darah Lengkap, GDS, Elektrolit...'
+                      : penunjangForm.kategori === 'Radiologi'
+                      ? 'mis. CT-Scan Kepala Non-Kontras, Foto Thorax AP...'
+                      : 'mis. EKG 12 Lead, EEG, Lumbal Pungsi...'
+                  }
+                  className="w-full h-9 rounded-xl border border-slate-200 px-3 text-xs text-ink outline-none focus:border-primary"
+                />
+                {/* Suggestions chips */}
+                <div className="flex items-center gap-1.5 overflow-x-auto pt-1.5 pb-0.5 scrollbar-none">
+                  {(penunjangForm.kategori === 'Laboratorium'
+                    ? LAB_SUGGESTIONS
+                    : penunjangForm.kategori === 'Radiologi'
+                    ? RADIOLOGI_SUGGESTIONS
+                    : LAINNYA_SUGGESTIONS
+                  ).slice(0, 6).map((sug) => (
+                    <button
+                      key={sug}
+                      type="button"
+                      onClick={() => setPenunjangForm({ ...penunjangForm, nama_pemeriksaan: sug })}
+                      className="px-2 py-0.5 rounded-lg bg-surface hover:bg-slate-200/80 text-[10px] font-semibold text-ink-muted hover:text-ink whitespace-nowrap cursor-pointer transition-colors shrink-0"
+                    >
+                      {sug}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Tanggal & Status */}
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-[11px] font-semibold text-ink-muted mb-1">Tanggal</label>
+                  <input
+                    type="date"
+                    required
+                    value={penunjangForm.tanggal}
+                    onChange={(e) => setPenunjangForm({ ...penunjangForm, tanggal: e.target.value })}
+                    className="w-full h-9 rounded-xl border border-slate-200 px-3 text-xs text-ink outline-none focus:border-primary"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-semibold text-ink-muted mb-1">Status Hasil</label>
+                  <select
+                    value={penunjangForm.status}
+                    onChange={(e) =>
+                      setPenunjangForm({
+                        ...penunjangForm,
+                        status: e.target.value as 'selesai' | 'menunggu',
+                      })
+                    }
+                    className="w-full h-9 rounded-xl border border-slate-200 px-2.5 text-xs bg-white text-ink outline-none focus:border-primary"
+                  >
+                    <option value="selesai">✓ Selesai (Ada Hasil)</option>
+                    <option value="menunggu">⏳ Menunggu Hasil</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Hasil / Temuan */}
+              <div>
+                <label className="block text-[11px] font-semibold text-ink-muted mb-1">
+                  Hasil / Kesimpulan Pemeriksaan
+                  {penunjangForm.status === 'menunggu' && (
+                    <span className="text-amber-600 font-normal ml-1">(opsional bila belum selesai)</span>
+                  )}
+                </label>
+                <textarea
+                  rows={3}
+                  value={penunjangForm.hasil}
+                  onChange={(e) => setPenunjangForm({ ...penunjangForm, hasil: e.target.value })}
+                  placeholder={
+                    penunjangForm.kategori === 'Laboratorium'
+                      ? 'mis. Hb 12.8, Leu 11.200, Plt 285.000, GDS 145...'
+                      : penunjangForm.kategori === 'Radiologi'
+                      ? 'mis. Infark luas di teritori MCA sinistra, tanda perdarahan (-)...'
+                      : 'mis. Irama sinus takikardia, HR 108 bpm, ST elevasi (-)...'
+                  }
+                  className="w-full rounded-xl border border-slate-200 p-2.5 text-xs text-ink outline-none focus:border-primary resize-y"
+                />
+              </div>
+
+              {/* Indikasi / Catatan Tambahan */}
+              <div>
+                <label className="block text-[11px] font-semibold text-ink-muted mb-1">Indikasi / Catatan Klinis (Opsional)</label>
+                <input
+                  value={penunjangForm.catatan}
+                  onChange={(e) => setPenunjangForm({ ...penunjangForm, catatan: e.target.value })}
+                  placeholder="mis. Curiga stroke hemoragik, evaluasi pasca koreksi K..."
+                  className="w-full h-9 rounded-xl border border-slate-200 px-3 text-xs text-ink outline-none focus:border-primary"
+                />
+              </div>
+
+              {/* Lampiran Gambar / Berkas */}
+              <div>
+                <label className="block text-[11px] font-semibold text-ink-muted mb-1">Foto Lampiran / Berkas Hasil</label>
+                <div className="flex items-center gap-2">
+                  <label className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 bg-surface hover:bg-slate-100 text-xs font-bold text-ink cursor-pointer transition-colors">
+                    <Upload size={14} className="text-primary" />
+                    <span>Upload Foto / Dokumen</span>
+                    <input
+                      type="file"
+                      accept="image/*,.pdf"
+                      className="hidden"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0]
+                        if (file) handleAttachPenunjangFile(file)
+                      }}
+                    />
+                  </label>
+                </div>
+                {penunjangForm.attachments.length > 0 && (
+                  <div className="flex items-center gap-2 pt-2 flex-wrap">
+                    {penunjangForm.attachments.map((att, idx) => (
+                      <div
+                        key={idx}
+                        className="flex items-center gap-1.5 pl-2 pr-1 py-1 rounded-xl bg-slate-100 border border-slate-200 text-[11px] text-ink"
+                      >
+                        <ImageIcon size={12} className="text-primary shrink-0" />
+                        <span className="truncate max-w-[120px]">{att.name}</span>
+                        <button
+                          type="button"
+                          onClick={() => handleRemovePenunjangAttachment(idx)}
+                          className="p-0.5 text-ink-muted hover:text-rose-600 rounded cursor-pointer"
+                        >
+                          <X size={12} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setShowAddPenunjangModal(false)}
+                  className="px-3.5 py-2 rounded-xl text-xs font-bold text-ink-muted hover:bg-slate-100 transition-colors cursor-pointer"
+                >
+                  Batal
+                </button>
+                <button
+                  type="submit"
+                  disabled={!penunjangForm.nama_pemeriksaan.trim()}
+                  className="px-4 py-2 rounded-xl bg-gradient-to-br from-primary to-primary-deep text-xs font-bold text-white shadow-md shadow-primary/25 disabled:opacity-40 active:scale-95 transition-all cursor-pointer"
+                >
+                  Simpan Penunjang
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Quick Isi Hasil */}
+      {showQuickHasilModal && quickHasilItem && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in overscroll-contain touch-none select-none"
+          onClick={() => setShowQuickHasilModal(false)}
+        >
+          <div
+            className="w-full max-w-sm rounded-3xl bg-white p-5 shadow-2xl space-y-4 touch-auto select-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div>
+                <h3 className="text-sm font-bold text-ink">Input Hasil Pemeriksaan</h3>
+                <p className="text-xs font-bold text-primary mt-0.5">{quickHasilItem.nama_pemeriksaan}</p>
+                <p className="text-[11px] text-ink-muted">{formatDate(quickHasilItem.tanggal)}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowQuickHasilModal(false)}
+                className="rounded-full p-1.5 text-ink-muted hover:bg-slate-100 transition-colors cursor-pointer"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveQuickHasil} className="space-y-3">
+              <div>
+                <label className="block text-[11px] font-semibold text-ink-muted mb-1">Hasil / Ekspertise</label>
+                <textarea
+                  autoFocus
+                  required
+                  rows={4}
+                  value={quickHasilText}
+                  onChange={(e) => setQuickHasilText(e.target.value)}
+                  placeholder="Ketik hasil pemeriksaan lab/radiologi di sini..."
+                  className="w-full rounded-xl border border-slate-200 p-2.5 text-xs text-ink outline-none focus:border-primary resize-y"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setShowQuickHasilModal(false)}
+                  className="px-3.5 py-2 rounded-xl text-xs font-bold text-ink-muted hover:bg-slate-100 transition-colors cursor-pointer"
+                >
+                  Batal
+                </button>
+                <button
+                  type="submit"
+                  disabled={!quickHasilText.trim()}
+                  className="px-4 py-2 rounded-xl bg-gradient-to-br from-primary to-primary-deep text-xs font-bold text-white shadow-md shadow-primary/25 disabled:opacity-40 active:scale-95 transition-all cursor-pointer"
+                >
+                  Simpan Hasil
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Preview Gambar Lampiran */}
+      {previewImage && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-in fade-in"
+          onClick={() => setPreviewImage(null)}
+        >
+          <div
+            className="max-w-2xl w-full max-h-[90dvh] bg-white rounded-3xl p-4 space-y-3 flex flex-col shadow-2xl overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+              <p className="text-xs font-bold text-ink truncate">{previewImage.title}</p>
+              <button
+                type="button"
+                onClick={() => setPreviewImage(null)}
+                className="p-1.5 rounded-full hover:bg-slate-100 text-ink-muted cursor-pointer"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <div className="flex-1 overflow-auto flex items-center justify-center min-h-[300px] bg-slate-50 rounded-2xl p-2">
+              <img
+                src={previewImage.url}
+                alt={previewImage.title}
+                className="max-h-[75dvh] max-w-full object-contain rounded-xl"
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Tandai Pasien KRS */}
+      {showKrsModal && patient && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in overscroll-contain"
+          onClick={() => setShowKrsModal(false)}
+        >
+          <div
+            className="w-full max-w-md bg-white rounded-3xl p-5 shadow-2xl space-y-4 max-h-[90dvh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div>
+                <h3 className="text-sm font-bold text-ink">Keterangan Pulang (KRS)</h3>
+                <p className="caption text-xs text-ink-muted">Pilih alasan pemulangan dan tanggal keluar rumah sakit</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowKrsModal(false)}
+                className="p-1 rounded-full hover:bg-slate-100 text-ink-muted cursor-pointer"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={handleConfirmKrs} className="space-y-4">
+              {/* Pilihan Alasan KRS */}
+              <div className="space-y-2">
+                <label className="block text-[11px] font-bold text-ink-muted">Keterangan / Alasan KRS</label>
+                <div className="grid grid-cols-1 gap-2">
+                  {[
+                    {
+                      key: 'Izin Dokter' as KeteranganKrs,
+                      title: 'Izin Dokter (PBJ)',
+                      desc: 'Pulang berobat jalan, perbaikan klinis / sembuh / target terapi tercapai.',
+                      badge: 'bg-emerald-100 text-emerald-800 border-emerald-300',
+                      borderSelected: 'border-emerald-500 bg-emerald-50/40 ring-2 ring-emerald-500/20',
+                    },
+                    {
+                      key: 'APS' as KeteranganKrs,
+                      title: 'APS (Pulang Paksa)',
+                      desc: 'Atas Permintaan Sendiri / pasien & keluarga menolak rawat inap lebih lanjut.',
+                      badge: 'bg-amber-100 text-amber-800 border-amber-300',
+                      borderSelected: 'border-amber-500 bg-amber-50/40 ring-2 ring-amber-500/20',
+                    },
+                    {
+                      key: 'Meninggal' as KeteranganKrs,
+                      title: 'Meninggal Dunia',
+                      desc: 'Pasien dinyatakan meninggal dunia / exitus letalis.',
+                      badge: 'bg-rose-100 text-rose-800 border-rose-300',
+                      borderSelected: 'border-rose-500 bg-rose-50/40 ring-2 ring-rose-500/20',
+                    },
+                    {
+                      key: 'Alih Rawat' as KeteranganKrs,
+                      title: 'Alih Rawat (Departemen Lain)',
+                      desc: 'Alih rawat ke departemen / divisi / DPJP spesialis lain di internal RS.',
+                      badge: 'bg-indigo-100 text-indigo-800 border-indigo-300',
+                      borderSelected: 'border-indigo-500 bg-indigo-50/40 ring-2 ring-indigo-500/20',
+                    },
+                    {
+                      key: 'Rujuk' as KeteranganKrs,
+                      title: 'Rujuk (Faskes Luar)',
+                      desc: 'Dirujuk ke RS luar / faskes rujukan tingkat lanjut.',
+                      badge: 'bg-sky-100 text-sky-800 border-sky-300',
+                      borderSelected: 'border-sky-500 bg-sky-50/40 ring-2 ring-sky-500/20',
+                    },
+                  ].map((opt) => {
+                    const isSelected = krsForm.keterangan_krs === opt.key
+                    return (
+                      <button
+                        type="button"
+                        key={opt.key}
+                        onClick={() =>
+                          setKrsForm((f) => ({
+                            ...f,
+                            keterangan_krs: opt.key,
+                            detail_krs: f.keterangan_krs === opt.key ? f.detail_krs : '',
+                          }))
+                        }
+                        className={`text-left p-3 rounded-2xl border transition-all cursor-pointer flex items-start gap-3 ${
+                          isSelected
+                            ? opt.borderSelected
+                            : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50/60'
+                        }`}
+                      >
+                        <div
+                          className={`mt-0.5 size-4 rounded-full border-2 flex items-center justify-center shrink-0 ${
+                            isSelected ? 'border-primary bg-primary' : 'border-slate-300'
+                          }`}
+                        >
+                          {isSelected && <span className="size-1.5 rounded-full bg-white" />}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-xs font-bold text-ink">{opt.title}</span>
+                            <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold border ${opt.badge}`}>
+                              {opt.key}
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-ink-muted mt-0.5 leading-snug">{opt.desc}</p>
+                        </div>
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+
+              {/* Input Spesifik Alih Rawat */}
+              {krsForm.keterangan_krs === 'Alih Rawat' && (
+                <div className="bg-indigo-50/60 p-3 rounded-2xl border border-indigo-200/80 space-y-2 animate-in fade-in">
+                  <label className="block text-[11px] font-bold text-indigo-950">
+                    Ke Departemen / Divisi / Spesialis
+                  </label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {[
+                      'Bedah Saraf',
+                      'Bedah Umum',
+                      'Penyakit Dalam (IPD)',
+                      'Jantung (ICCU)',
+                      'Paru',
+                      'ICU / Intensif',
+                      'Anak',
+                      'Obgyn',
+                      'Rehab Medik',
+                    ].map((dept) => (
+                      <button
+                        type="button"
+                        key={dept}
+                        onClick={() => setKrsForm((f) => ({ ...f, detail_krs: dept }))}
+                        className={`px-2 py-0.5 rounded-lg text-[11px] font-semibold transition-all cursor-pointer ${
+                          krsForm.detail_krs === dept
+                            ? 'bg-indigo-600 text-white shadow-2xs'
+                            : 'bg-white text-indigo-900 border border-indigo-200/70 hover:bg-indigo-100/50'
+                        }`}
+                      >
+                        {dept}
+                      </button>
+                    ))}
+                  </div>
+                  <input
+                    type="text"
+                    value={krsForm.detail_krs}
+                    onChange={(e) => setKrsForm((f) => ({ ...f, detail_krs: e.target.value }))}
+                    placeholder="Atau ketik departemen / nama dokter spesialis..."
+                    className="w-full h-9 rounded-xl border border-indigo-200 px-3 text-xs text-ink outline-none focus:border-indigo-500 bg-white"
+                  />
+                </div>
+              )}
+
+              {/* Input Spesifik Rujuk */}
+              {krsForm.keterangan_krs === 'Rujuk' && (
+                <div className="bg-sky-50/60 p-3 rounded-2xl border border-sky-200/80 space-y-2 animate-in fade-in">
+                  <label className="block text-[11px] font-bold text-sky-950">
+                    Tujuan Rujukan (Rumah Sakit / Faskes)
+                  </label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {[
+                      'RS Tipe A',
+                      'RSUD Dr. Soetomo',
+                      'RSUP Dr. Sardjito',
+                      'RSUP Dr. Kariadi',
+                      'RS Jantung Harapan Kita',
+                      'RS PON',
+                    ].map((rs) => (
+                      <button
+                        type="button"
+                        key={rs}
+                        onClick={() => setKrsForm((f) => ({ ...f, detail_krs: rs }))}
+                        className={`px-2 py-0.5 rounded-lg text-[11px] font-semibold transition-all cursor-pointer ${
+                          krsForm.detail_krs === rs
+                            ? 'bg-sky-600 text-white shadow-2xs'
+                            : 'bg-white text-sky-900 border border-sky-200/70 hover:bg-sky-100/50'
+                        }`}
+                      >
+                        {rs}
+                      </button>
+                    ))}
+                  </div>
+                  <input
+                    type="text"
+                    value={krsForm.detail_krs}
+                    onChange={(e) => setKrsForm((f) => ({ ...f, detail_krs: e.target.value }))}
+                    placeholder="Ketik nama rumah sakit / faskes rujukan..."
+                    className="w-full h-9 rounded-xl border border-sky-200 px-3 text-xs text-ink outline-none focus:border-sky-500 bg-white"
+                  />
+                </div>
+              )}
+
+              {/* Tanggal KRS */}
+              <div>
+                <label className="block text-[11px] font-bold text-ink-muted mb-1">Tanggal Keluar (KRS)</label>
+                <input
+                  type="date"
+                  value={krsForm.tgl_krs}
+                  onChange={(e) => setKrsForm((f) => ({ ...f, tgl_krs: e.target.value }))}
+                  required
+                  className="w-full h-10 rounded-2xl border border-slate-200 px-3 text-xs text-ink outline-none focus:border-primary bg-white"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setShowKrsModal(false)}
+                  className="px-4 py-2 rounded-xl text-xs font-bold text-ink-muted hover:bg-slate-100 transition-colors cursor-pointer"
+                >
+                  Batal
+                </button>
+                <button
+                  type="submit"
+                  className={`px-4 py-2 rounded-xl text-xs font-bold text-white shadow-md active:scale-95 transition-all cursor-pointer ${
+                    krsForm.keterangan_krs === 'Meninggal'
+                      ? 'bg-rose-600 hover:bg-rose-700 shadow-rose-600/25'
+                      : krsForm.keterangan_krs === 'APS'
+                      ? 'bg-amber-600 hover:bg-amber-700 shadow-amber-600/25'
+                      : krsForm.keterangan_krs === 'Alih Rawat'
+                      ? 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-600/25'
+                      : krsForm.keterangan_krs === 'Rujuk'
+                      ? 'bg-sky-600 hover:bg-sky-700 shadow-sky-600/25'
+                      : 'bg-primary hover:bg-primary-deep shadow-primary/25'
+                  }`}
+                >
+                  Konfirmasi KRS
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* Modal Visite Harian (Salin SOAP Cepat) */}
       {visiteModalOpen && patient && (
         <VisiteModal
@@ -1439,7 +2760,7 @@ export default function PatientProfile() {
       )}
 
       {toast && (
-        <aside aria-label="Notifikasi" className="fixed inset-x-0 bottom-24 z-[60] mx-auto w-fit max-w-[90%] rounded-2xl bg-ink/90 backdrop-blur-md px-5 py-2.5 text-xs font-semibold text-white shadow-2xl animate-in fade-in slide-in-from-bottom-2">
+        <aside aria-label="Notifikasi" className="fixed inset-x-0 bottom-24 z-[60] mx-auto w-fit max-w-[90%] rounded-2xl bg-gradient-to-r from-primary to-primary-deep px-5 py-2.5 text-xs font-bold text-white shadow-xl shadow-primary/35 border border-white/20 animate-in fade-in slide-in-from-bottom-2">
           {toast}
         </aside>
       )}

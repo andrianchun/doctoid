@@ -1,5 +1,20 @@
-import type { TerapiItem, DiagnosisItem, Jaminan, RegexRule } from './db'
+import { db, type TerapiItem, type DiagnosisItem, type Jaminan, type RegexRule, type RegexField } from './db'
 import { getLocalDateString } from './utils/dateFormat'
+
+/* Deteksi token jenis kelamin (L/P/Laki-laki/Perempuan) agar tidak pernah salah dibaca sebagai nama pasien */
+export function isGenderToken(str: string): boolean {
+  if (!str) return false
+  const clean = str.trim().toLowerCase().replace(/^[*_~#/:,.\s]+|[*_~#/:,.\s]+$/g, '')
+  return /^(?:l|p|lk|pr|laki|laki-laki|laki2|laki\s*-\s*laki|pria|perempuan|wanita|female|male)$/i.test(clean)
+}
+
+export function parseGender(str: string): 'L' | 'P' | '' {
+  if (!str) return ''
+  const clean = str.trim().toLowerCase().replace(/^[*_~#/:,.\s]+|[*_~#/:,.\s]+$/g, '')
+  if (/^(?:l|lk|laki|laki-laki|laki2|laki\s*-\s*laki|pria|male)$/i.test(clean)) return 'L'
+  if (/^(?:p|pr|perempuan|wanita|female)$/i.test(clean)) return 'P'
+  return ''
+}
 
 /* Parser lokal non-AI (hemat token): mendeteksi format konsultasi medis Indonesia secara komprehensif */
 
@@ -27,13 +42,17 @@ export interface ParsedSoap {
 
 export function lineToTerapi(line: string, today: string, defaultKategori?: TerapiItem['kategori']): TerapiItem {
   const clean = line.replace(/^[-•*•–—\d.)\]]+\s*/, '').trim()
+
+  // Strip prefiks verb diagnostik: "Cek BGA" → "BGA", "Periksa DL" → "DL", "Ambil kultur" → "Kultur"
+  const cleanDx = clean.replace(/^(?:cek|periksa|ambil|pro|rencana|lakukan|kirim|usul|order|request)\s+/i, '').trim()
+  const usedClean = (defaultKategori === 'Diagnostik' || /^(?:cek|periksa|ambil)\s+/i.test(clean)) ? cleanDx : clean
   
   // Deteksi nama dan dosis: mis. "Citicolin 500mg" -> "Citicolin" | "500mg"
   // atau "IVFD NS 0,9% 15 tpm" -> "IVFD NS 0,9%" | "15 tpm"
-  let nama_item = clean
+  let nama_item = usedClean
   let dosis_keterangan = ''
 
-  const matchDosis = clean.match(/^(.+?)\s+((?:\d+[.,]?\d*|\b(?:satu|dua|tiga)\b|\b(?:tab|kapsul|amp|vial|fls|tpm|gtt|mg|mcg|gr|ml|cc|x)\b).*)$/i)
+  const matchDosis = usedClean.match(/^(.+?)\s+((?:\d+[.,]?\d*|\b(?:satu|dua|tiga)\b|\b(?:tab|kapsul|amp|vial|fls|tpm|gtt|mg|mcg|gr|ml|cc|x)\b).*)$/i)
   if (matchDosis && matchDosis[1].length >= 2) {
     nama_item = matchDosis[1].trim()
     dosis_keterangan = matchDosis[2].trim()
@@ -41,7 +60,9 @@ export function lineToTerapi(line: string, today: string, defaultKategori?: Tera
 
   let kategori: TerapiItem['kategori'] = defaultKategori || 'Farmakologi'
   if (!defaultKategori) {
-    if (NON_FARMAKO_REGEX.test(clean) && !DRUG_INDICATORS.test(clean)) {
+    if (/^(?:cek|periksa|ambil|pro|rencana)\s+/i.test(clean)) {
+      kategori = 'Diagnostik'
+    } else if (NON_FARMAKO_REGEX.test(clean) && !DRUG_INDICATORS.test(clean)) {
       kategori = 'Non-Farmakologi'
     } else {
       kategori = 'Farmakologi'
@@ -79,13 +100,22 @@ export function classifyFragment(text: string): 'terapi' | 'penunjang' | 'catata
   return 'catatan'
 }
 
-/* Terapkan aturan regex yang dipelajari AI untuk satu field skalar; group 1 = value */
+/* Terapkan aturan regex yang dipelajari AI/User untuk satu field skalar; group 1 = value */
 function applyLearnedScalar(raw: string, field: RegexRule['field'], rules: RegexRule[]): string {
   for (const r of rules) {
     if (r.field !== field) continue
     try {
       const m = raw.match(new RegExp(r.pattern, r.flags))
-      if (m?.[1]) return m[1].trim()
+      if (m?.[1]) {
+        const val = m[1].trim()
+        if (val) {
+          if (field === 'nama_depan' && isGenderToken(val)) continue
+          if (r.id) {
+            db.regexRules.update(r.id, { hits: (r.hits || 0) + 1 }).catch(() => {})
+          }
+          return val
+        }
+      }
     } catch {
       // pattern rusak, abaikan
     }
@@ -272,61 +302,126 @@ export function extractDemografi(
   let usia = ''
   let no_rm = ''
   let jaminan: Jaminan | '' = ''
+  let detectedGender: 'L' | 'P' | '' = ''
 
-  // 1. Prioritas Utama: Format garis miring khas konsul pasien Indonesia:
-  // misal: "*Sdri.Santi/20 tahun/P/BPJS Ketenagakerjaan*"
-  // atau "Tn. Budi / 47 th / L / BPJS PBI"
-  // atau "*By. Ny. Siti / 3 hari / P / Umum*"
-  // atau "*dr. Handoko, Sp.S / 45 th / BPJS*"
-  const slashLineMatch = raw.match(
-    /[*_~#]*\s*(?:(dr|dok|dokter|Tn|Ny|Sdri|Sdr|An|By)\.?\s*)?([A-Za-z',.-]+(?:\s+[A-Za-z',.-]+)*)\s*\/\s*(\d{1,3}(?:\s*(?:th|thn|tahun|bln|bulan|hari|yo))?)\s*(?:\/\s*([LP]|Laki(?:-laki)?|Perempuan)\s*)?(?:\/\s*([^/\n*]+))?\*?/i
-  )
+  // 0. Prioritas Aturan yang Dipelajari Dokter (User-learned Rules) dulu
+  const userRules = learnedRules.filter((r) => (r as any).source === 'user')
+  const otherRules = learnedRules.filter((r) => (r as any).source !== 'user')
+  const prioritizedRules = [...userRules, ...otherRules]
 
-  if (slashLineMatch) {
-    const rawGelar = slashLineMatch[1]
-    const rawNama = slashLineMatch[2]?.trim()
-    const rawUsia = slashLineMatch[3]?.trim()
-    const rawJaminan = slashLineMatch[5]?.trim()
+  const learnedName = applyLearnedScalar(raw, 'nama_depan', prioritizedRules)
+  if (learnedName && !isGenderToken(learnedName)) {
+    nama_depan = learnedName
+  }
 
-    // Validasi bahwa rawNama bukan kata kunci medis/header seperti "SUBJEKTIF" / "DOKTER JAGA"
-    if (rawNama && !/^(?:dokter|perawat|bidan|subjektif|subjektive|objektif|assesment|assessment|planning|konsul|pemeriksa|rujukan)$/i.test(rawNama)) {
-      if (rawGelar) {
-        const lower = rawGelar.toLowerCase()
-        title = (lower === 'dr' || lower === 'dok' || lower === 'dokter') ? 'dr.' : lower.charAt(0).toUpperCase() + lower.slice(1) + (rawGelar.endsWith('.') ? '' : '.')
+  // 1. Analisis Baris Berisi Garis Miring (Format Konsul Pasien Indonesia):
+  // Menangani semua variasi:
+  // - "Tn. Budi / 47 th / L / BPJS"
+  // - "Tn. Budi / L / 47 th / BPJS"
+  // - "Ny. Siti / 50 th / BPJS"
+  // - "L / 62 th / BPJS" (baris ini hanya gender & usia & jaminan, BUKAN nama)
+  // - "62 th / L / BPJS"
+  // - "By. Ny. Siti / 3 hari / P / Umum"
+  const lines = raw.split(/\r?\n/)
+  for (const line of lines) {
+    const cleanLine = line.replace(/[*_~#]/g, '').trim()
+    if (!cleanLine.includes('/')) continue
+    // Abaikan baris url atau header chat WhatsApp ber-timestamp
+    if (/(?:^|\s)\[\d{1,2}[/-]\d{1,2}/.test(line) || /https?:\/\//i.test(line)) continue
+    // Abaikan baris TD / TTV misal "TD 120/80" atau "120/80"
+    if (/^\s*(?:td|tensi|vital\s*sign)?\s*[:=]?\s*\d{2,3}\/\d{2,3}\b/i.test(cleanLine)) continue
+
+    const segments = cleanLine.split('/').map((s) => s.trim()).filter(Boolean)
+    if (segments.length < 2) continue
+
+    for (const seg of segments) {
+      // A. Cek apakah segmen ini Jenis Kelamin
+      if (isGenderToken(seg)) {
+        if (!detectedGender) detectedGender = parseGender(seg)
+        continue // PASTI BUKAN NAMA
       }
-      nama_depan = rawNama.replace(/[/,*_–—|]/g, '').trim()
-      if (rawUsia) {
-        const numOnly = rawUsia.match(/\d+/)
-        usia = numOnly ? `${numOnly[0]} th` : rawUsia
+
+      // B. Cek apakah segmen ini Usia
+      const ageMatch = seg.match(/\b(\d{1,3})\s*(?:th|thn|tahun|bln|bulan|hari|yo)\b/i) || seg.match(/^(\d{1,3})$/)
+      if (ageMatch && !usia) {
+        const num = parseInt(ageMatch[1], 10)
+        if (num > 0 && num <= 125) {
+          usia = `${num} th`
+          continue // PASTI BUKAN NAMA
+        }
       }
-      if (rawJaminan) {
-        const jm = rawJaminan.toUpperCase()
+
+      // C. Cek apakah segmen ini Jaminan / Asuransi
+      const jmMatch = seg.match(/\b(BPJS(?:[\s\w]*)|JKN|KIS|Umum|Asuransi|Inhealth)\b/i)
+      if (jmMatch && !jaminan) {
+        const jm = jmMatch[1].toUpperCase()
         if (jm.includes('BPJS') || jm.includes('JKN') || jm.includes('KIS')) jaminan = 'BPJS'
         else if (jm.includes('UMUM')) jaminan = 'Umum'
-        else if (jm.includes('ASURANSI')) jaminan = 'Asuransi'
+        else if (jm.includes('ASURANSI') || jm.includes('INHEALTH')) jaminan = 'Asuransi'
+        continue // PASTI BUKAN NAMA
+      }
+
+      // D. Cek apakah segmen ini No RM
+      const rmSegMatch = seg.match(/\b(?:no\.?\s*rm|rm)?\s*([0-9]{2}[-./][0-9]{2}[-./][0-9]{2}|[0-9]{4,10})\b/i)
+      if (rmSegMatch && !no_rm && /[-./]|\d{5,}/.test(rmSegMatch[1])) {
+        no_rm = rmSegMatch[1].trim()
+        continue // PASTI BUKAN NAMA
+      }
+
+      // E. Jika belum ada nama, uji apakah segmen ini adalah Nama Pasien
+      if (!nama_depan) {
+        // Cek gelar di awal segmen
+        const titleCheck = seg.match(/^(dr|dok|dokter|Tn|Ny|Sdri|Sdr|An|By)\.?\s*(.+)$/i)
+        let candidateGelar = ''
+        let candidateNama = seg
+
+        if (titleCheck) {
+          candidateGelar = titleCheck[1].toLowerCase()
+          candidateNama = titleCheck[2].trim()
+        } else {
+          // Bersihkan prefix label seperti "Nama:", "Pasien:", "Px:"
+          candidateNama = candidateNama.replace(/^(?:nama(?:\s*pasien)?|pasien|px|identitas)\s*[:-]?\s*/i, '').trim()
+        }
+
+        // Validasi kelayakan nama: bukan gender token, bukan keyword medis/header
+        if (
+          candidateNama.length >= 2 &&
+          !isGenderToken(candidateNama) &&
+          !/^(?:dokter|perawat|bidan|subjektif|subjektive|objektif|assesment|assessment|planning|konsul|pemeriksa|rujukan|identitas|pasien|baru|lama|bangsal|ruangan|igd|rawat|tanggal|tgl|jam|pagi|siang|sore|malam)$/i.test(candidateNama)
+        ) {
+          if (candidateGelar) {
+            title = (candidateGelar === 'dr' || candidateGelar === 'dok' || candidateGelar === 'dokter')
+              ? 'dr.'
+              : candidateGelar.charAt(0).toUpperCase() + candidateGelar.slice(1) + (titleCheck![1].endsWith('.') ? '' : '.')
+          }
+          nama_depan = candidateNama.replace(/[/,*_–—|]/g, '').trim()
+        }
       }
     }
   }
 
-  // 2. Coba cari label nama eksplisit: "Nama: ...", "Pasien: ...", "Identitas: ..."
+  // 2. Coba cari label nama eksplisit: "Nama: ...", "Pasien: ...", "Identitas: ...", "Px: ..."
   if (!nama_depan) {
-    const labelMatch = raw.match(/(?:nama(?:\s*pasien)?|identitas|pasien)\s*[:-]\s*([A-Za-z][A-Za-z'.\s]{1,40}?)(?=\s*(?:,|\n|usia|umur|rm|\/|$))/i)
+    const labelMatch = raw.match(/(?:nama(?:\s*pasien)?|identitas|pasien|px)\s*[:-]\s*([A-Za-z][A-Za-z'.\s]{1,40}?)(?=\s*(?:,|\n|usia|umur|rm|\/|$))/i)
     if (labelMatch) {
       const candidate = labelMatch[1].trim()
-      const titleCheck = candidate.match(/^(dr|dok|dokter|Tn|Ny|Sdri|Sdr|An|By)\.?\s*(.+)$/i)
-      if (titleCheck) {
-        const lower = titleCheck[1].toLowerCase()
-        title = (lower === 'dr' || lower === 'dok' || lower === 'dokter') ? 'dr.' : lower.charAt(0).toUpperCase() + lower.slice(1) + (titleCheck[1].endsWith('.') ? '' : '.')
-        nama_depan = titleCheck[2].trim()
-      } else {
-        nama_depan = candidate
+      if (!isGenderToken(candidate)) {
+        const titleCheck = candidate.match(/^(dr|dok|dokter|Tn|Ny|Sdri|Sdr|An|By)\.?\s*(.+)$/i)
+        if (titleCheck) {
+          const lower = titleCheck[1].toLowerCase()
+          title = (lower === 'dr' || lower === 'dok' || lower === 'dokter')
+            ? 'dr.'
+            : lower.charAt(0).toUpperCase() + lower.slice(1) + (titleCheck[1].endsWith('.') ? '' : '.')
+          nama_depan = titleCheck[2].trim()
+        } else {
+          nama_depan = candidate
+        }
       }
     }
   }
 
-  // 3. Fallback nama dengan gelar di baris mandiri (cegah mencocokkan WhatsApp sender / dokter jaga / DPJP)
+  // 3. Fallback nama dengan gelar di baris mandiri (mis. "Tn. Budi", "Ny. Siti")
   if (!nama_depan) {
-    const lines = raw.split(/\r?\n/)
     for (const line of lines) {
       if (/dokter\s*(?:jaga|spesialis|ruangan|igd|konsulen|dpjp)|pemeriksa\s*:|asal\s*rujukan|mohon\s*ijin|mohon\s*izin/i.test(line)) continue
       if (/(?:^|\s)\[\d{1,2}[/-]\d{1,2}/.test(line)) continue // skip timestamp lines
@@ -335,8 +430,13 @@ export function extractDemografi(
       if (titleMatch) {
         const rawGelar = titleMatch[1].toLowerCase()
         const candidateName = titleMatch[2].replace(/[/,*_–—|]/g, '').trim()
-        if (!/^(?:jaga|spesialis|ruangan|pemeriksa|bella|konsul|igd|rawat|bangsal|dokter)/i.test(candidateName)) {
-          title = (rawGelar === 'dr' || rawGelar === 'dok' || rawGelar === 'dokter') ? 'dr.' : rawGelar.charAt(0).toUpperCase() + rawGelar.slice(1) + (titleMatch[1].endsWith('.') ? '' : '.')
+        if (
+          !isGenderToken(candidateName) &&
+          !/^(?:jaga|spesialis|ruangan|pemeriksa|bella|konsul|igd|rawat|bangsal|dokter)/i.test(candidateName)
+        ) {
+          title = (rawGelar === 'dr' || rawGelar === 'dok' || rawGelar === 'dokter')
+            ? 'dr.'
+            : rawGelar.charAt(0).toUpperCase() + rawGelar.slice(1) + (titleMatch[1].endsWith('.') ? '' : '.')
           nama_depan = candidateName
           break
         }
@@ -344,26 +444,40 @@ export function extractDemografi(
     }
   }
 
-  // Fallback aturan regex AI jika belum ditemukan
+  // 4. Fallback aturan regex AI jika belum ditemukan
   if (!nama_depan) {
-    nama_depan = applyLearnedScalar(raw, 'nama_depan', learnedRules)
+    const fallbackLearned = applyLearnedScalar(raw, 'nama_depan', prioritizedRules)
+    if (fallbackLearned && !isGenderToken(fallbackLearned)) {
+      nama_depan = fallbackLearned
+    }
   }
 
-  // Usia fallback
+  // 5. Gender eksplisit fallback jika belum terdeteksi dari slash
+  if (!detectedGender) {
+    const genderMatch = raw.match(/\b(?:jk|jenis\s*kelamin|sex)\s*[:-]?\s*([A-Za-z-]+)\b/i) ||
+                        raw.match(/\b(laki(?:-laki)?|pria|perempuan|wanita)\b/i)
+    if (genderMatch) {
+      detectedGender = parseGender(genderMatch[1])
+    }
+  }
+
+  // 6. Usia fallback
   if (!usia) {
     const usiaMatch = raw.match(/\b(?:usia|umur)?\s*(\d{1,3})\s*(?:th|thn|tahun|yo)\b/i) || raw.match(/\b(?:usia|umur)\s*[:-]?\s*(\d{1,3})\b/i)
-    usia = usiaMatch && usiaMatch[1] ? `${usiaMatch[1]} th` : applyLearnedScalar(raw, 'usia', learnedRules)
+    usia = usiaMatch && usiaMatch[1] ? `${usiaMatch[1]} th` : applyLearnedScalar(raw, 'usia', prioritizedRules)
   }
 
-  // No RM
-  const rmMatch = raw.match(/(?:no\.?\s*rm|no\.?\s*rekam\s*medis|rm)\s*[:-]?\s*([\d-/]{4,20})/i)
-  if (rmMatch) {
-    no_rm = rmMatch[1].trim()
-  } else {
-    no_rm = applyLearnedScalar(raw, 'no_rm', learnedRules)
+  // 7. No RM fallback
+  if (!no_rm) {
+    const rmMatch = raw.match(/(?:no\.?\s*rm|no\.?\s*rekam\s*medis|rm)\s*[:-]?\s*([\d-/]{4,20})/i)
+    if (rmMatch) {
+      no_rm = rmMatch[1].trim()
+    } else {
+      no_rm = applyLearnedScalar(raw, 'no_rm', prioritizedRules)
+    }
   }
 
-  // Jaminan fallback
+  // 8. Jaminan fallback
   if (!jaminan) {
     const jaminanMatch = raw.match(/\b(BPJS(?:[\s\w]*)|JKN|KIS|Umum|Asuransi)\b/i)
     if (jaminanMatch) {
@@ -373,14 +487,111 @@ export function extractDemografi(
       else if (jm.includes('ASURANSI')) jaminan = 'Asuransi'
     }
     if (!jaminan) {
-      jaminan = (applyLearnedScalar(raw, 'jaminan', learnedRules) as Jaminan | '') || ''
+      jaminan = (applyLearnedScalar(raw, 'jaminan', prioritizedRules) as Jaminan | '') || ''
     }
   }
 
-  // Tanggal MRS & Tanggal Onset
+  // 9. Tanggal MRS & Tanggal Onset
   const { tgl_mrs, tgl_onset } = extractDates(raw)
 
+  // 10. PROTEKSI MUTLAK: Nama Depan TIDAK BOLEH Gender Token!
+  if (isGenderToken(nama_depan)) {
+    if (!detectedGender) detectedGender = parseGender(nama_depan)
+    nama_depan = ''
+  }
+
+  // 11. Infer Title jika belum ada dan gender diketahui
+  if (!title && detectedGender) {
+    const numUsia = usia ? parseInt(usia, 10) : 0
+    const isAnak = numUsia > 0 && numUsia < 15
+    if (detectedGender === 'L') {
+      title = isAnak ? 'An.' : 'Tn.'
+    } else if (detectedGender === 'P') {
+      title = isAnak ? 'An.' : 'Ny.'
+    }
+  }
+
   return { title, nama_depan, usia, no_rm, jaminan, tgl_mrs, tgl_onset }
+}
+
+/* Sintesis pola regex otomatis saat dokter merevisi isian form secara manual */
+export function synthesizeRegexRule(
+  raw: string,
+  field: RegexField,
+  targetValue: string
+): { field: RegexField; pattern: string; flags: string } | null {
+  if (!raw || !targetValue || !targetValue.trim()) return null
+  const cleanTarget = targetValue.trim()
+  if (field === 'nama_depan' && isGenderToken(cleanTarget)) return null
+
+  const rawLower = raw.toLowerCase()
+  const targetLower = cleanTarget.toLowerCase()
+  const idx = rawLower.indexOf(targetLower)
+  if (idx === -1) return null
+
+  // Temukan awal dan akhir baris tempat targetValue ditemukan
+  const lineStart = raw.lastIndexOf('\n', idx) + 1
+  const lineEndIdx = raw.indexOf('\n', idx + cleanTarget.length)
+  const lineEnd = lineEndIdx === -1 ? raw.length : lineEndIdx
+
+  const lineBefore = raw.slice(lineStart, idx)
+  const lineAfter = raw.slice(idx + cleanTarget.length, lineEnd)
+
+  // Pola 1: Konteks prefix di depan targetValue pada baris yang sama
+  // Misal "Px : Suwandi" atau "Nama Pasien: Suwandi" atau "*Identitas:* Suwandi"
+  const cleanPrefix = lineBefore
+    .replace(/^[-*•~#\s]+/, '') // buang bullet / markdown di awal
+    .replace(/[:=–—\s]+$/, '') // buang titik dua / strip / spasi di ujung
+    .trim()
+
+  if (cleanPrefix.length >= 2) {
+    const escapedPrefix = cleanPrefix
+      .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      .replace(/\s+/g, '\\s+')
+
+    let pattern = ''
+    if (field === 'nama_depan') {
+      pattern = `(?:^|[\\r\\n])[ *_~#]*(?:${escapedPrefix})\\s*[:=–—]?\\s*([A-Za-z][A-Za-z'.,\\s]{1,40}?)(?=[/\\r\\n,]|$)`
+    } else if (field === 'no_rm') {
+      pattern = `(?:^|[\\r\\n])[ *_~#]*(?:${escapedPrefix})\\s*[:=–—]?\\s*([\\d\\-/]{4,20})`
+    } else if (field === 'usia') {
+      pattern = `(?:^|[\\r\\n])[ *_~#]*(?:${escapedPrefix})\\s*[:=–—]?\\s*(\\d{1,3}(?:\\s*(?:th|thn|tahun|bln|bulan|hari|yo))?)`
+    }
+
+    if (pattern) {
+      try {
+        const reg = new RegExp(pattern, 'i')
+        const m = raw.match(reg)
+        if (m?.[1] && m[1].trim().toLowerCase() === targetLower) {
+          return { field, pattern, flags: 'i' }
+        }
+      } catch {
+        // pattern invalid, lewati
+      }
+    }
+  }
+
+  // Pola 2: Target berada di awal baris bergaris miring
+  // Misal "Suwandi / L / 62 th"
+  if (lineAfter.trim().startsWith('/')) {
+    let pattern = ''
+    if (field === 'nama_depan') {
+      pattern = `(?:^|[\\r\\n])[ *_~#]*([A-Za-z][A-Za-z'.,\\s]{1,40}?)(?=\\s*\\/\\s*(?:[LP]|Laki|Perempuan|\\d{1,3}))`
+    }
+    if (pattern) {
+      try {
+        const reg = new RegExp(pattern, 'i')
+        const m = raw.match(reg)
+        if (m?.[1] && m[1].trim().toLowerCase() === targetLower) {
+          return { field, pattern, flags: 'i' }
+        }
+      } catch {
+        // pattern invalid, lewati
+      }
+    }
+  }
+
+  return null
 }
 
 interface RawSections {

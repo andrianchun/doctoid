@@ -1,6 +1,23 @@
 import { useEffect, useRef, useState, useMemo, useCallback } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { createPortal } from 'react-dom'
+import { Capacitor, registerPlugin } from '@capacitor/core'
 import { useLiveQuery } from 'dexie-react-hooks'
+
+interface ShareDataPayload {
+  text?: string
+  images?: { name: string; type: string; dataUrl: string }[]
+}
+
+interface ShareReceiverPlugin {
+  getPendingShare(): Promise<{ hasShare: boolean; data?: ShareDataPayload }>
+  clearPendingShare(): Promise<void>
+  addListener(eventName: 'shareReceived', listenerFunc: (data: ShareDataPayload) => void): Promise<any>
+}
+
+const ShareReceiver: ShareReceiverPlugin | null = Capacitor.isNativePlatform()
+  ? registerPlugin<ShareReceiverPlugin>('ShareReceiver')
+  : null
 import {
   Mic,
   Trash2, Loader2, X, FileText, ChevronDown, Send,
@@ -11,10 +28,11 @@ import Masked from '../components/Masked'
 import ResizableTextarea from '../components/ResizableTextarea'
 import AttachmentMenu from '../components/AttachmentMenu'
 import CustomSelect from '../components/CustomSelect'
-import { lineToTerapi, localParse, classifyFragment, type LocalParseResult } from '../parser'
+import { lineToTerapi, localParse, classifyFragment, synthesizeRegexRule, isGenderToken, type LocalParseResult } from '../parser'
 import { rapikan, analisisKasus } from '../ai'
 import { buatKonteks, catatTerapi, saranTerapi, type Suggestion } from '../styleLearning'
 import { formatDate, hariKe, getLocalDateString } from '../utils/dateFormat'
+import { useBodyScrollLock } from '../utils/useBodyScrollLock'
 
 const today = () => getLocalDateString()
 
@@ -92,6 +110,7 @@ const fileToBase64 = async (file: File): Promise<string> => {
 }
 
 export default function Brainstorm() {
+  const navigate = useNavigate()
   const [raw, setRaw] = useState('')
   const [form, setForm] = useState<FormState>(emptyForm())
   const [busy, setBusy] = useState<'' | 'ocr' | 'ai' | 'analisis'>('')
@@ -125,6 +144,7 @@ export default function Brainstorm() {
   const [detectedPatient, setDetectedPatient] = useState<Patient | null>(null)
   const [dismissedPatientId, setDismissedPatientId] = useState<number | null>(null)
   const [showSearchModal, setShowSearchModal] = useState(false)
+  useBodyScrollLock(showSearchModal)
   const [patientSearchQ, setPatientSearchQ] = useState('')
   const [stagedAnalysis, setStagedAnalysis] = useState<StagedAnalysis | null>(null)
 
@@ -133,6 +153,15 @@ export default function Brainstorm() {
   const [highlight, setHighlight] = useState<{ fields: Set<string>; variant: 'amber' | 'red' }>({ fields: new Set(), variant: 'amber' })
   const highlightTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const draftLoaded = useRef(false)
+  const lastParsedRef = useRef<{
+    raw: string
+    hospitalId?: number
+    fields: {
+      nama_depan: string
+      no_rm: string
+      usia: string
+    }
+  } | null>(null)
   const [dockSlot, setDockSlot] = useState<HTMLElement | null>(() =>
     typeof document !== 'undefined' ? document.getElementById('bottom-dock-addon') : null
   )
@@ -218,6 +247,63 @@ export default function Brainstorm() {
     })
   }, [])
 
+  const applyIncomingShare = useCallback(
+    (data: ShareDataPayload) => {
+      if (data.text && data.text.trim()) {
+        setRaw((prev) => (prev ? prev + '\n' + data.text!.trim() : data.text!.trim()))
+      }
+      if (data.images && data.images.length > 0) {
+        setAttachments((prev) => [
+          ...prev,
+          ...data.images!.map((img) => ({
+            id: Math.random().toString(36).substring(7),
+            name: img.name || 'Foto Lampiran',
+            type: img.type || 'image/jpeg',
+            dataUrl: img.dataUrl,
+            kategori: 'penunjang' as const,
+          })),
+        ])
+      }
+      notify('📥 Menerima kiriman berkas/teks dari aplikasi lain (WA/Galeri) ✓')
+    },
+    []
+  )
+
+  useEffect(() => {
+    // 1. Cek incoming share dari Android Capacitor Intent (WhatsApp/Galeri)
+    if (!ShareReceiver) return
+    try {
+      ShareReceiver.getPendingShare()
+        .then((res) => {
+          if (res?.hasShare && res.data) {
+            applyIncomingShare(res.data)
+          }
+        })
+        .catch(() => {})
+
+      const handle = ShareReceiver.addListener('shareReceived', (data) => {
+        if (data) {
+          applyIncomingShare(data)
+        }
+      })
+
+      return () => {
+        handle?.then?.((h: any) => h?.remove?.())
+      }
+    } catch {}
+  }, [applyIncomingShare])
+
+  useEffect(() => {
+    // 2. Cek incoming share dari PWA Web Share Target URL parameters
+    const urlParams = new URLSearchParams(window.location.search)
+    const sharedText = urlParams.get('text') || urlParams.get('title')
+    if (sharedText) {
+      setRaw((prev) => (prev ? prev + '\n' + sharedText : sharedText))
+      notify('📥 Menerima teks konsul dari kiriman luar')
+      window.history.replaceState({}, document.title, window.location.pathname + window.location.hash)
+    }
+  }, [])
+
   // Autosave draft (debounced) tiap ada perubahan, supaya pindah tab gak ngilangin isian
   useEffect(() => {
     if (!draftLoaded.current) return
@@ -270,7 +356,13 @@ export default function Brainstorm() {
     }
   }, [form.no_rm, form.nama_depan, allPatients, selectedPatient, dismissedPatientId])
 
-  const handleSelectExistingPatient = (p: Patient) => {
+  const handleSelectExistingPatient = (p: Patient, forceReadmisi = false) => {
+    if (p.status_rawat === 'aktif' && !forceReadmisi) {
+      setShowSearchModal(false)
+      setDetectedPatient(p)
+      notify(`Pasien ${p.nama_depan} sedang dirawat aktif. Anda dapat langsung Update CPPT Hari Ini.`)
+      return
+    }
     setSelectedPatient(p)
     set({
       title: p.title || form.title,
@@ -286,6 +378,147 @@ export default function Brainstorm() {
     setDetectedPatient(null)
     setShowSearchModal(false)
     notify(`Mode Readmisi: ${p.title ? p.title + ' ' : ''}${p.nama_depan} (RM ${p.no_rm})`)
+  }
+
+  const handleUpdateActivePatientSoap = async (p: Patient) => {
+    if (!p.id) return
+
+    try {
+      const todayStr = today()
+      const existingTodayNote = await db.progressNotes
+        .where('patient_id')
+        .equals(p.id)
+        .filter((n) => n.tanggal === todayStr)
+        .first()
+
+      if (existingTodayNote && existingTodayNote.id) {
+        // Gabungkan S (dengan jeda baris jika sudah ada catatan sebelumnya)
+        let mergedS = existingTodayNote.S || ''
+        if (form.S.trim()) {
+          mergedS = mergedS ? `${mergedS}\n\n${form.S.trim()}` : form.S.trim()
+        }
+
+        // Gabungkan O Pemfis
+        let mergedPemfis = existingTodayNote.O_pemfis || ''
+        if (form.O_pemfis.trim()) {
+          mergedPemfis = mergedPemfis ? `${mergedPemfis}\n${form.O_pemfis.trim()}` : form.O_pemfis.trim()
+        }
+
+        // Gabungkan O Penunjang
+        let mergedPenunjang = existingTodayNote.O_penunjang || ''
+        if (form.O_penunjang.trim()) {
+          mergedPenunjang = mergedPenunjang ? `${mergedPenunjang}\n${form.O_penunjang.trim()}` : form.O_penunjang.trim()
+        }
+
+        // Gabungkan A (Diagnosis) tanpa duplikasi nama
+        const existingDxNames = new Set(existingTodayNote.A.map((d) => d.nama_diagnosis.trim().toLowerCase()))
+        const newDx = form.A.filter((d) => d.nama_diagnosis.trim() && !existingDxNames.has(d.nama_diagnosis.trim().toLowerCase()))
+        const mergedA = [...existingTodayNote.A, ...newDx]
+
+        // Gabungkan P (Terapi & Advis) tanpa duplikasi nama
+        const existingPNames = new Set(existingTodayNote.P.map((item) => item.nama_item.trim().toLowerCase()))
+        const newP = form.P.filter((item) => item.nama_item.trim() && !existingPNames.has(item.nama_item.trim().toLowerCase()))
+        const mergedP = [...existingTodayNote.P, ...newP]
+
+        // Gabungkan Lampiran
+        const existingAtts = existingTodayNote.attachments || []
+        const newAtts = attachments.map((a) => ({ name: a.name, type: a.type, dataUrl: a.dataUrl, kategori: a.kategori }))
+        const mergedAtts = [...existingAtts, ...newAtts]
+
+        await db.progressNotes.update(existingTodayNote.id, {
+          S: mergedS,
+          O_pemfis: mergedPemfis,
+          O_penunjang: mergedPenunjang,
+          A: mergedA,
+          P: mergedP,
+          attachments: mergedAtts,
+        })
+      } else {
+        // Catatan pertama untuk hari ini
+        await db.progressNotes.add({
+          patient_id: p.id,
+          tanggal: todayStr,
+          S: form.S.trim(),
+          O_pemfis: form.O_pemfis.trim(),
+          O_penunjang: form.O_penunjang.trim(),
+          A: form.A.filter((d) => d.nama_diagnosis.trim()),
+          P: form.P,
+          attachments: attachments.map((a) => ({ name: a.name, type: a.type, dataUrl: a.dataUrl, kategori: a.kategori })),
+        })
+      }
+
+      // Simpan lampiran penunjang (EKG, Lab, Radiologi) ke tabel db.penunjang
+      const penunjangAtts = attachments.filter((a) => a.kategori === 'penunjang')
+      for (const att of penunjangAtts) {
+        let kat: 'Laboratorium' | 'Radiologi' | 'Lainnya' = 'Lainnya'
+        const lower = (att.name + ' ' + form.O_penunjang).toLowerCase()
+        if (/ct|mri|rontgen|foto|thorax|xray|radiologi/i.test(lower)) {
+          kat = 'Radiologi'
+        } else if (/lab|darah|urine|urin|gda|gds|elektrolit|se/i.test(lower)) {
+          kat = 'Laboratorium'
+        }
+        await db.penunjang.add({
+          patient_id: p.id,
+          tanggal: todayStr,
+          kategori: kat,
+          nama_pemeriksaan: att.name || (kat === 'Radiologi' ? 'Pemeriksaan Radiologi' : 'Pemeriksaan Penunjang'),
+          hasil: form.O_penunjang || 'Terlampir dokumen pemeriksaan',
+          status: 'selesai',
+          attachments: [{ name: att.name, type: att.type, dataUrl: att.dataUrl }],
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+      }
+
+      if (form.P.length > 0) {
+        await catatTerapi(
+          buatKonteks(form.S, form.A.map((d) => d.nama_diagnosis)),
+          form.P.map(({ nama_item, dosis_keterangan, kategori }) => ({ nama_item, dosis_keterangan, kategori })),
+        )
+      }
+
+      // Pelajari revisi regex bila ada teks mentah
+      if (lastParsedRef.current?.raw) {
+        const origRaw = lastParsedRef.current.raw
+        const origFields = lastParsedRef.current.fields
+        const currentNama = form.nama_depan.trim()
+
+        if (
+          currentNama &&
+          currentNama.length >= 2 &&
+          !isGenderToken(currentNama) &&
+          currentNama.toLowerCase() !== origFields.nama_depan.toLowerCase()
+        ) {
+          const rule = synthesizeRegexRule(origRaw, 'nama_depan', currentNama)
+          if (rule) {
+            await db.regexRules.add({
+              field: rule.field,
+              pattern: rule.pattern,
+              flags: rule.flags,
+              hospital_id: p.hospital_id || undefined,
+              source: 'user',
+              hits: 1,
+              created_at: new Date().toISOString(),
+            })
+          }
+        }
+        lastParsedRef.current = null
+      }
+
+      await db.brainstormDraft.delete(1)
+      setRaw('')
+      setAttachments([])
+      setKomentarAnalisis('')
+      setForm(emptyForm())
+      setSelectedPatient(null)
+      setDetectedPatient(null)
+      setHospitalId(0)
+      setWardId(0)
+      notify(`CPPT hari ini untuk ${p.nama_depan} berhasil diperbarui! ⚡`)
+      navigate(`/pasien/${p.id}`)
+    } catch (err: any) {
+      alert(err?.message || 'Gagal memperbarui CPPT pasien.')
+    }
   }
 
   // Sugesti terapi lokal (belajar dari riwayat kasus serupa, tanpa AI)
@@ -330,6 +563,47 @@ export default function Brainstorm() {
       notify('Gagal memproses file.')
     }
   }
+
+  const handlePaste = useCallback(async (e: React.ClipboardEvent | ClipboardEvent) => {
+    const clipData = 'clipboardData' in e ? e.clipboardData : null
+    if (!clipData) return
+
+    const items = clipData.items
+    const files = clipData.files
+    const imageFiles: File[] = []
+
+    if (items && items.length > 0) {
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i]
+        if (item.type.startsWith('image/')) {
+          const file = item.getAsFile()
+          if (file) imageFiles.push(file)
+        }
+      }
+    } else if (files && files.length > 0) {
+      for (let i = 0; i < files.length; i++) {
+        if (files[i].type.startsWith('image/')) {
+          imageFiles.push(files[i])
+        }
+      }
+    }
+
+    if (imageFiles.length > 0) {
+      e.preventDefault()
+      for (const file of imageFiles) {
+        await handleAttachFile(file, 'penunjang')
+      }
+      notify(`📷 ${imageFiles.length} foto disematkan ke Lampiran Penunjang (EKG/Lab/Radiologi) ✓`)
+    }
+  }, [])
+
+  useEffect(() => {
+    const onWindowPaste = (e: ClipboardEvent) => {
+      handlePaste(e)
+    }
+    window.addEventListener('paste', onWindowPaste)
+    return () => window.removeEventListener('paste', onWindowPaste)
+  }, [handlePaste])
 
   const runOcr = async (file: File) => {
     setBusy('ocr')
@@ -485,6 +759,16 @@ export default function Brainstorm() {
         const isNamaBeda = !!data.nama_depan && (!form.nama_depan || data.nama_depan.toLowerCase() !== form.nama_depan.toLowerCase())
         const isKasusPenuh = !!data.nama_depan && (!!data.S || !!data.O_pemfis) && (data.A.length > 0 || data.P.length > 0)
 
+        lastParsedRef.current = {
+          raw,
+          hospitalId: hospitalId || undefined,
+          fields: {
+            nama_depan: data.nama_depan || '',
+            no_rm: data.no_rm || '',
+            usia: data.usia || '',
+          },
+        }
+
         if (isDraftAktif && !isNamaBeda && !isKasusPenuh) {
           applyMerge(data)
           notify('Data ditambahkan ke form\nSilakan dicek sebelum disimpan')
@@ -522,6 +806,15 @@ export default function Brainstorm() {
       const r = await rapikan(raw, attachments, false)
       const tglMrs = r.tgl_mrs || today()
       const tglOnset = r.tgl_onset || tglMrs
+      lastParsedRef.current = {
+        raw,
+        hospitalId: hospitalId || undefined,
+        fields: {
+          nama_depan: r.nama_depan || '',
+          no_rm: r.no_rm || '',
+          usia: r.usia || '',
+        },
+      }
       set({
         ...r,
         jaminan: r.jaminan || 'BPJS',
@@ -593,16 +886,24 @@ export default function Brainstorm() {
       const previousEpisode: RawatEpisode = {
         id: crypto.randomUUID(),
         tgl_mrs: selectedPatient.tgl_mrs,
-        tgl_krs: selectedPatient.status_rawat === 'krs' ? today() : undefined,
+        tgl_krs: selectedPatient.tgl_krs || (selectedPatient.status_rawat === 'krs' ? today() : undefined),
         hospital_id: selectedPatient.hospital_id,
         ward_id: selectedPatient.lokasi_sekarang,
         diagnosis_utama: selectedPatient.diagnosis_utama,
+        keterangan_krs: selectedPatient.keterangan_krs,
+        detail_krs: selectedPatient.detail_krs,
       }
       const existingHistory = selectedPatient.riwayat_rawat || []
       const isAlreadyArchived = existingHistory.some(
         e => e.tgl_mrs === selectedPatient.tgl_mrs && e.diagnosis_utama === selectedPatient.diagnosis_utama
       )
       const updatedHistory = isAlreadyArchived ? existingHistory : [...existingHistory, previousEpisode]
+
+      const wardCount = await db.patients
+        .where('lokasi_sekarang')
+        .equals(wardId)
+        .filter((p) => p.status_rawat === 'aktif')
+        .count()
 
       await db.patients.update(selectedPatient.id, {
         hospital_id: hospitalId,
@@ -612,13 +913,23 @@ export default function Brainstorm() {
         no_rm: form.no_rm.trim(),
         tgl_mrs: form.tgl_mrs,
         tgl_onset: form.tgl_onset,
+        tgl_krs: undefined,
+        keterangan_krs: undefined,
+        detail_krs: undefined,
         diagnosis_utama: dxUtama.trim(),
         lokasi_sekarang: wardId,
         status_rawat: 'aktif',
         jaminan: form.jaminan,
         riwayat_rawat: updatedHistory,
+        order: wardCount + 1,
       })
     } else {
+      const wardCount = await db.patients
+        .where('lokasi_sekarang')
+        .equals(wardId)
+        .filter((p) => p.status_rawat === 'aktif')
+        .count()
+
       targetPatientId = await db.patients.add({
         hospital_id: hospitalId,
         title: form.title,
@@ -631,6 +942,7 @@ export default function Brainstorm() {
         lokasi_sekarang: wardId,
         status_rawat: 'aktif',
         jaminan: form.jaminan,
+        order: wardCount + 1,
       }) as number
     }
 
@@ -640,10 +952,93 @@ export default function Brainstorm() {
       S: form.S, O_pemfis: form.O_pemfis, O_penunjang: form.O_penunjang, A: form.A, P: form.P,
       attachments: attachments.map(a => ({ name: a.name, type: a.type, dataUrl: a.dataUrl, kategori: a.kategori })),
     })
+
+    // Simpan lampiran penunjang (EKG, Lab, Radiologi) ke tabel penunjang agar tertata rapi di tab Rekam Medis
+    const penunjangAtts = attachments.filter(a => a.kategori === 'penunjang')
+    for (const att of penunjangAtts) {
+      let kat: 'Laboratorium' | 'Radiologi' | 'Lainnya' = 'Lainnya'
+      const lower = (att.name + ' ' + form.O_penunjang).toLowerCase()
+      if (/ct|mri|rontgen|foto|thorax|xray|radiologi/i.test(lower)) {
+        kat = 'Radiologi'
+      } else if (/lab|darah|urine|urin|gda|gds|elektrolit|se/i.test(lower)) {
+        kat = 'Laboratorium'
+      }
+      await db.penunjang.add({
+        patient_id: targetPatientId,
+        tanggal: today(),
+        kategori: kat,
+        nama_pemeriksaan: att.name || (kat === 'Radiologi' ? 'Pemeriksaan Radiologi' : 'Pemeriksaan Penunjang'),
+        hasil: form.O_penunjang || 'Terlampir dokumen pemeriksaan',
+        status: 'selesai',
+        attachments: [{ name: att.name, type: att.type, dataUrl: att.dataUrl }],
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+    }
+
     await catatTerapi(
       buatKonteks(form.S, form.A.map((d) => d.nama_diagnosis)),
       form.P.map(({ nama_item, dosis_keterangan, kategori }) => ({ nama_item, dosis_keterangan, kategori })),
     )
+
+    // Cek dan pelajari pola ketikan IGD jika dokter merevisi isian form manual
+    let learnedNewRule = false
+    if (lastParsedRef.current?.raw) {
+      const origRaw = lastParsedRef.current.raw
+      const origFields = lastParsedRef.current.fields
+      const currentNama = form.nama_depan.trim()
+      const currentRm = form.no_rm.trim()
+      const currentUsia = form.usia.trim()
+
+      const learnedRulesToSave: { field: RegexField; pattern: string; flags: string }[] = []
+
+      // A. Cek revisi nama
+      if (
+        currentNama &&
+        currentNama.length >= 2 &&
+        !isGenderToken(currentNama) &&
+        currentNama.toLowerCase() !== origFields.nama_depan.toLowerCase()
+      ) {
+        const rule = synthesizeRegexRule(origRaw, 'nama_depan', currentNama)
+        if (rule) learnedRulesToSave.push(rule)
+      }
+
+      // B. Cek revisi No. RM
+      if (currentRm && currentRm.length >= 4 && currentRm !== origFields.no_rm) {
+        const rule = synthesizeRegexRule(origRaw, 'no_rm', currentRm)
+        if (rule) learnedRulesToSave.push(rule)
+      }
+
+      // C. Cek revisi Usia
+      if (currentUsia && currentUsia !== origFields.usia) {
+        const numOnly = currentUsia.match(/\d+/)
+        if (numOnly) {
+          const rule = synthesizeRegexRule(origRaw, 'usia', numOnly[0])
+          if (rule) learnedRulesToSave.push(rule)
+        }
+      }
+
+      if (learnedRulesToSave.length > 0) {
+        for (const r of learnedRulesToSave) {
+          const dup = (regexRules ?? []).some(
+            (e) => e.field === r.field && e.pattern === r.pattern
+          )
+          if (!dup) {
+            await db.regexRules.add({
+              field: r.field,
+              pattern: r.pattern,
+              flags: r.flags,
+              hospital_id: hospitalId || undefined,
+              source: 'user',
+              hits: 1,
+              created_at: new Date().toISOString(),
+            })
+            learnedNewRule = true
+          }
+        }
+      }
+    }
+    lastParsedRef.current = null
 
     await db.brainstormDraft.delete(1)
     setRaw('')
@@ -655,12 +1050,13 @@ export default function Brainstorm() {
     // Faskes & ruangan sengaja dikosongkan lagi tiap pasien baru — cegah salah kamar kalau lupa ganti
     setHospitalId(0)
     setWardId(0)
-    notify(selectedPatient ? 'Readmisi pasien tersimpan & riwayat tersambung 🎉' : 'Pasien baru tersimpan 🎉')
+    const learnTag = learnedNewRule ? ' (Pola IGD dipelajari ✓)' : ''
+    notify(selectedPatient ? `Readmisi pasien tersimpan & riwayat tersambung 🎉${learnTag}` : `Pasien baru tersimpan 🎉${learnTag}`)
   }
 
   return (
     <>
-    <main className="space-y-5 p-5 pb-56">
+    <main className="space-y-5 p-5 pb-36">
 
       {/* Banner Utama — 1 Baris */}
       <div className="glass-blue-hero rounded-3xl px-5 py-4 text-white shadow-xl flex items-center justify-between">
@@ -678,25 +1074,57 @@ export default function Brainstorm() {
         )}
       </div>
 
-      {/* Banner Deteksi Pasien Lama Realtime */}
+      {/* Banner Deteksi Pasien Lama / Aktif Realtime */}
       {detectedPatient && !selectedPatient && (
-        <div className="glass-card rounded-3xl border border-primary-soft/40 p-4 shadow-lg animate-in fade-in slide-in-from-top-2">
+        <div className={`glass-card rounded-3xl border p-4 shadow-lg animate-in fade-in slide-in-from-top-2 ${
+          detectedPatient.status_rawat === 'aktif'
+            ? 'border-emerald-500/40 bg-emerald-500/10'
+            : 'border-primary-soft/40'
+        }`}>
           <div className="min-w-0 flex-1">
-            <p className="text-xs font-bold text-ink">Pasien Lama Terdeteksi di Rekam Medis</p>
-            <p className="caption text-ink-muted mt-0.5">
+            <div className="flex items-center gap-2">
+              <span className={`inline-block size-2 rounded-full ${detectedPatient.status_rawat === 'aktif' ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'}`} />
+              <p className="text-xs font-bold text-ink">
+                {detectedPatient.status_rawat === 'aktif' ? 'Pasien Sedang Dirawat Aktif di Bangsal' : 'Pasien Lama Terdeteksi di Rekam Medis'}
+              </p>
+            </div>
+            <p className="caption text-ink-muted mt-1">
               Ditemukan data <b>{detectedPatient.title} <Masked value={detectedPatient.nama_depan} type="name" /></b> (RM: <Masked value={detectedPatient.no_rm} type="rm" />)
             </p>
             <p className="caption text-ink-muted">
-              Terakhir dirawat: {formatDate(detectedPatient.tgl_mrs)} {detectedPatient.diagnosis_utama ? `· Dx: ${detectedPatient.diagnosis_utama}` : ''}
+              {detectedPatient.status_rawat === 'aktif'
+                ? `Dirawat sejak: ${formatDate(detectedPatient.tgl_mrs)} · Dx: ${detectedPatient.diagnosis_utama || '-'}`
+                : `Terakhir dirawat: ${formatDate(detectedPatient.tgl_mrs)} ${detectedPatient.diagnosis_utama ? `· Dx: ${detectedPatient.diagnosis_utama}` : ''}`
+              }
             </p>
-            <div className="mt-2.5 flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => handleSelectExistingPatient(detectedPatient)}
-                className="rounded-xl bg-gradient-to-br from-primary to-primary-deep px-3.5 py-1.5 text-xs font-bold text-white shadow-md shadow-primary/20 hover:brightness-110 active:scale-95 transition-all cursor-pointer"
-              >
-                Jadikan Readmisi (Rawat Lagi)
-              </button>
+            <div className="mt-2.5 flex flex-wrap items-center gap-2">
+              {detectedPatient.status_rawat === 'aktif' ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => handleUpdateActivePatientSoap(detectedPatient)}
+                    className="rounded-xl bg-gradient-to-br from-emerald-600 to-teal-700 px-3.5 py-1.5 text-xs font-bold text-white shadow-md shadow-emerald-700/20 hover:brightness-110 active:scale-95 transition-all cursor-pointer flex items-center gap-1.5"
+                  >
+                    <span>⚡</span>
+                    Update CPPT Hari Ini ({detectedPatient.nama_depan})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleSelectExistingPatient(detectedPatient, true)}
+                    className="rounded-xl bg-surface px-3 py-1.5 text-xs font-semibold text-ink-muted hover:bg-surface/80 active:scale-95 transition-all cursor-pointer"
+                  >
+                    Jadikan Readmisi Baru
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => handleSelectExistingPatient(detectedPatient)}
+                  className="rounded-xl bg-gradient-to-br from-primary to-primary-deep px-3.5 py-1.5 text-xs font-bold text-white shadow-md shadow-primary/20 hover:brightness-110 active:scale-95 transition-all cursor-pointer"
+                >
+                  Jadikan Readmisi (Rawat Lagi)
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => {
@@ -1490,44 +1918,74 @@ export default function Brainstorm() {
             )}
 
             {/* Kotak Input Putih Bersih — dengan Fade Shadow Lembut ke Atas agar Terpisah Tegas dari Objek Belakang */}
-            <div className="flex items-end gap-2 rounded-t-3xl rounded-b-none bg-white border-t border-x border-slate-300/80 border-b-0 p-2.5 transition-shadow w-full relative z-20 shadow-[0_-12px_36px_-6px_rgba(15,23,42,0.18),0_-4px_14px_-2px_rgba(15,23,42,0.08)]">
-              {/* Radial Fan Attachment Menu (Kamera, Galeri, Dikte ala Lomeal) */}
-              <AttachmentMenu
-                disabled={busy === 'ai'}
-                isListening={listening}
-                onSelectCamera={() => ocrCameraRef.current?.click()}
-                onSelectGallery={() => ocrGalleryRef.current?.click()}
-                onSelectMic={toggleMic}
-              />
+            <div className="flex flex-col rounded-t-3xl rounded-b-none bg-white border-t border-x border-slate-300/80 border-b-0 p-2.5 transition-shadow w-full relative z-20 shadow-[0_-12px_36px_-6px_rgba(15,23,42,0.18),0_-4px_14px_-2px_rgba(15,23,42,0.08)]">
+              {/* Preview Lampiran Gambar yang Ditempel / Diunggah */}
+              {attachments.length > 0 && (
+                <div className="flex items-center gap-2 mb-2 pb-2 border-b border-slate-100 overflow-x-auto w-full hide-scrollbar">
+                  <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider shrink-0 flex items-center gap-1 bg-slate-100 px-2 py-1 rounded-lg">
+                    <FileText size={11} className="text-primary" /> {attachments.length} Lampiran:
+                  </span>
+                  {attachments.map((a) => (
+                    <div key={a.id} className="relative size-11 rounded-xl bg-slate-50 border border-slate-200 overflow-hidden shrink-0 group shadow-xs">
+                      {a.type.startsWith('image/') ? (
+                        <img src={a.dataUrl} className="size-full object-cover" alt={a.name} />
+                      ) : (
+                        <div className="flex size-full items-center justify-center text-[9px] font-bold text-slate-500 uppercase">
+                          {a.name.split('.').pop() || 'FILE'}
+                        </div>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => setAttachments((prev) => prev.filter((x) => x.id !== a.id))}
+                        className="absolute top-0.5 right-0.5 size-4 bg-slate-900/80 text-white rounded-full flex items-center justify-center hover:bg-rose-500 transition-colors cursor-pointer"
+                        title="Hapus lampiran"
+                      >
+                        <X size={9} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
 
-              {/* Textarea Auto-Expand tanpa resize handle */}
-              <textarea
-                ref={textRef}
-                value={raw}
-                onChange={(e) => {
-                  setRaw(e.target.value)
-                  adjustTextHeight()
-                }}
-                onFocus={() => setIsTextFocused(true)}
-                onBlur={() => setIsTextFocused(false)}
-                onKeyDown={(e) => {
-                  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-                    e.preventDefault()
-                    if ((raw.trim() || attachments.length > 0) && busy !== 'ai') {
-                      parseAi()
+              <div className="flex items-end gap-2 w-full">
+                {/* Radial Fan Attachment Menu (Kamera, Galeri, Dikte ala Lomeal) */}
+                <AttachmentMenu
+                  disabled={busy === 'ai'}
+                  isListening={listening}
+                  onSelectCamera={() => ocrCameraRef.current?.click()}
+                  onSelectGallery={() => ocrGalleryRef.current?.click()}
+                  onSelectMic={toggleMic}
+                />
+
+                {/* Textarea Auto-Expand tanpa resize handle */}
+                <textarea
+                  ref={textRef}
+                  value={raw}
+                  onChange={(e) => {
+                    setRaw(e.target.value)
+                    adjustTextHeight()
+                  }}
+                  onPaste={handlePaste}
+                  onFocus={() => setIsTextFocused(true)}
+                  onBlur={() => setIsTextFocused(false)}
+                  onKeyDown={(e) => {
+                    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                      e.preventDefault()
+                      if ((raw.trim() || attachments.length > 0) && busy !== 'ai') {
+                        parseAi()
+                      }
                     }
-                  }
-                }}
-                placeholder="Masukkan laporan pasien..."
-                rows={isTextFocused || raw ? 3 : 1}
-                maxLength={10000}
-                style={{
-                  height: (isTextFocused || raw) ? '70px' : '42px',
-                  minHeight: (isTextFocused || raw) ? '70px' : '42px',
-                  maxHeight: '145px'
-                }}
-                className="flex-1 resize-none bg-slate-50 border border-slate-200 rounded-2xl p-2.5 px-3 text-xs outline-none text-slate-900 font-medium placeholder:text-slate-400 placeholder:font-normal focus:bg-white focus:border-primary focus:ring-2 focus:ring-primary/20 transition-colors leading-relaxed overflow-y-auto hide-scrollbar"
-              />
+                  }}
+                  placeholder="Ketik/tempel laporan medis atau paste foto EKG/Lab/Radiologi..."
+                  rows={isTextFocused || raw ? 3 : 1}
+                  maxLength={10000}
+                  style={{
+                    height: (isTextFocused || raw) ? '70px' : '42px',
+                    minHeight: (isTextFocused || raw) ? '70px' : '42px',
+                    maxHeight: '145px'
+                  }}
+                  className="flex-1 resize-none bg-slate-50 border border-slate-200 rounded-2xl p-2.5 px-3 text-xs outline-none text-slate-900 font-medium placeholder:text-slate-400 placeholder:font-normal focus:bg-white focus:border-primary focus:ring-2 focus:ring-primary/20 transition-colors leading-relaxed overflow-y-auto hide-scrollbar"
+                />
 
               {/* Murni Tombol Send di sebelah kanan */}
               <div className="shrink-0 flex items-center mb-0.5">
@@ -1551,7 +2009,8 @@ export default function Brainstorm() {
               </div>
             </div>
           </div>
-        )
+        </div>
+      )
 
         return dockSlot ? (
           createPortal(inputBarJsx, dockSlot)
@@ -1566,8 +2025,14 @@ export default function Brainstorm() {
 
       {/* Modal Pilih Pasien Lama / Readmisi */}
       {showSearchModal && (
-        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-ink/50 backdrop-blur-sm p-0 sm:p-4 animate-in fade-in" onClick={() => setShowSearchModal(false)}>
-          <div className="flex h-[80dvh] max-h-[600px] w-full max-w-lg flex-col rounded-t-3xl sm:rounded-3xl bg-white shadow-2xl overflow-hidden border border-slate-300" onClick={(e) => e.stopPropagation()}>
+        <div
+          className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-ink/50 backdrop-blur-sm p-0 sm:p-4 animate-in fade-in overscroll-contain touch-none select-none"
+          onClick={() => setShowSearchModal(false)}
+        >
+          <div
+            className="flex h-[80dvh] max-h-[600px] w-full max-w-lg flex-col rounded-t-3xl sm:rounded-3xl bg-white shadow-2xl border border-slate-300 overscroll-contain touch-auto select-auto overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="flex items-center justify-between border-b border-slate-200 p-4">
               <div>
                 <p className="text-xs font-bold text-ink">Pilih Pasien Lama (Readmisi)</p>
@@ -1591,7 +2056,7 @@ export default function Brainstorm() {
               </div>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-3 space-y-2">
+            <div className="flex-1 overflow-y-auto overscroll-contain p-3 space-y-2">
               {filteredPatients.map((p) => {
                 const h = hospitals?.find(x => x.id === p.hospital_id)
                 return (
@@ -1616,7 +2081,7 @@ export default function Brainstorm() {
                           <span className="rounded-full bg-primary/10 px-2 py-0.5 text-primary-deep">{p.jaminan}</span>
                           {h && <span className="rounded-full bg-surface px-2 py-0.5 text-ink-muted">{h.nama}</span>}
                           <span className={`rounded-full px-2 py-0.5 ${p.status_rawat === 'aktif' ? 'bg-emerald-100 text-emerald-700' : 'bg-surface text-ink-muted'}`}>
-                            {p.status_rawat === 'aktif' ? 'Sedang Dirawat' : 'KRS'}
+                            {p.status_rawat === 'aktif' ? 'Sedang Dirawat' : (p.keterangan_krs ? (p.detail_krs ? `${p.keterangan_krs}: ${p.detail_krs}` : `KRS: ${p.keterangan_krs}`) : 'KRS')}
                           </span>
                           <span className="rounded-full bg-surface px-2 py-0.5 text-ink-muted">
                             MRS: {formatDate(p.tgl_mrs)}

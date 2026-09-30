@@ -35,9 +35,27 @@ ATURAN WAJIB (CONCISENESS):
      b) Jika teks menyebutkan durasi jam atau waktu akut, misal "X jam sebelum MRS / X jam SMRS / beberapa jam lalu / tadi pagi / tadi malam", maka tgl_onset adalah SAMA DENGAN tgl_mrs.
      c) Jika tidak ada keterangan onset sama sekali di dalam teks, tgl_onset WAJIB DISAMAKAN dengan tgl_mrs (JANGAN PERNAH biarkan kosong "").
 6. ATURAN PARSING CHAT KONSULTASI WHATSAPP & ADVIS SPESIALIS:
-   - Identitas Pasien: Cari baris identitas pasien asli (misal: "*Gelar.Nama/Usia/Gender/Jaminan*" atau "Nama: ..."). JANGAN PERNAH mengambil nama pengirim chat, dokter jaga, atau pemohon konsul (misal "DOKTER JAGA IGD", "Iship Bella", "dr. Jaga") sebagai nama pasien!
+   - Identitas Pasien: Cari baris identitas pasien asli (misal: "*Gelar.Nama/Usia/Gender/Jaminan*" atau "Nama: ..."). JANGAN PERNAH mengambil nama pengirim chat, dokter jaga, atau pemohon konsul (misal "DOKTER JAGA IGD", "Iship Bella", "dr. Jaga") sebagai nama pasien! DILARANG KERAS mengisi "nama_depan" dengan jenis kelamin atau inisial gender ("L", "P", "Lk", "Pr", "Laki-laki", "Perempuan", "Pria", "Wanita"). Field "nama_depan" HANYA untuk nama asli orang. Jika di teks hanya ada jenis kelamin tanpa nama orang, kosongkan "nama_depan" (""). Untuk "title": Jika jenis kelamin pasien Laki-laki / L, gunakan "Tn." (atau "An." jika anak/usia < 18 th); jika Perempuan / P, gunakan "Ny." (atau "Sdri."/"An.").
    - S vs O: Suhu tubuh seperti "S : 36 C" / "S: 36.5" / "S: afebris" adalah PEMERIKSAAN FISIK (O_pemfis), BUKAN Anamnesis / Subjektif (S). Anamnesis riwayat keluhan adalah Subjektif (S).
    - Prioritas Advis / Revisi Spesialis: Jika di dalam teks terdapat balasan/revisi dari dokter spesialis / konsulen (misal diawali "[waktu] Nama: A: ... PDx: ... PTx: ..." atau "Advis: ..."), maka diagnosis (A) dan terapi (P) WAJIB MENGGUNAKAN revisi/advis definitif dari dokter spesialis tersebut (menggantikan draft awal dokter IGD/pemohon konsul agar tidak terjadi duplikasi resep).
+7. ATURAN PEMILAHAN LAMPIRAN GAMBAR/FOTO MULTIMODAL (EKG, LAB, RADIOLOGI, CT SCAN, X-RAY):
+   - Jika terdapat gambar/foto yang dilampirkan: identifikasi jenis modalitas klinisnya secara otomatis dan masukkan ke "O_penunjang" dengan label terstruktur:
+     a) EKG / ECG (gelombang P-QRS-T, irama strip): tuliskan "[EKG] Irama ..., HR ... bpm, Axis ..., Gelombang/ST/T: ..., Kesan: ...".
+     b) Laboratorium (kertas printout lab, foto hasil): ekstrak nilai abnormal dan nilai kritis pada "[Laboratorium] Hb ..., Leu ..., Plt ..., GDA ..., Ureum/Cr ..., Elektrolit (Na/K/Cl) ..., dll.".
+     c) CT Scan Kepala / MRI / Neuroimaging: tuliskan temuan pada "[Radiologi - CT Scan] Kesan: ... (misal: Infark luas hemisfer kiri / Perdarahan intraserebral)".
+     d) Foto Rontgen / X-Ray Thorax: tuliskan pada "[Radiologi - Thorax] Kesan: ... (misal: Kardiomegali, Infiltrat pulmonal)".
+     e) Foto Luka / Fisik Klinis: tuliskan deskripsinya pada "O_pemfis" pada bagian status lokalis.
+8. ATURAN FOTO MONITOR SIMRS (CPPT SIMRS) & SCREENSHOT CHAT WA LAPORAN RUANGAN / ADVIS MALAM:
+   - JIKA GAMBAR ADALAH FOTO LAYAR MONITOR SIMRS (Khanza, Medifirst, SIMETRIS, TrustMedis, dll.):
+     - Transkrip kolom S (Subjektif), O (Objektif), A (Asesmen), dan P (Planning) secara presisi dari form/tabel SIMRS.
+     - Buang teks tombol UI SIMRS seperti "Simpan", "Batal", "Hapus", "Cari Pasien", "Cetak".
+   - JIKA GAMBAR ADALAH SCREENSHOT CHAT WHATSAPP LAPORAN PERAWAT / ADVIS MALAM / PERBURUKAN AKUT (mis. Hematemesis Melena, Kejang, Penurunan Kesadaran, Syok):
+     - Deteksi stempel waktu aktual percakapan (misal "21:45" atau "[30/09, 21:45]").
+     - Awali catatan S dengan header waktu aktual: "[Pukul HH:mm WIB - Laporan Ruangan & Advis Dokter]".
+     - S: Keluhan perburukan/kondisi akut (mis. muntah darah kehitaman 100cc, kejang 2x).
+     - O: TTV darurat yang dilaporkan perawat (TD, HR, RR, SpO2, GCS, pupil).
+     - A: Diagnosis kerja komplikasi baru (mis. "Hematemesis Melena ec susp Stress Ulcer", "Status Konvulsivus").
+     - P: Advis dokter spesialis di chat (obat darurat, pasang NGT, cek DL cito, transfusi, konsul spesialis lain).
 
 Balas HANYA JSON valid dengan skema persis:
 {

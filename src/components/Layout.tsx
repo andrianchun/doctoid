@@ -81,13 +81,15 @@ export default function Layout() {
     >
       {/* Konten Utama */}
       <div className="flex-1 pb-[calc(7rem+env(safe-area-inset-bottom,0px))]">
-        <Outlet />
+        <div key={location.pathname} className="animate-in fade-in duration-100">
+          <Outlet />
+        </div>
       </div>
 
       {/* Floating Unified Dock Container */}
       <div
         id="bottom-dock-container"
-        className="fixed inset-x-4 bottom-[max(1rem,env(safe-area-inset-bottom,0px))] z-40 mx-auto max-w-sm pointer-events-none flex flex-col items-center"
+        className="fixed inset-x-2 bottom-[max(1rem,env(safe-area-inset-bottom,0px))] z-40 mx-auto max-w-sm pointer-events-none flex flex-col items-center"
       >
         {/* Slot Input AI di bagian atas (hanya saat di Brainstorm) */}
         <div id="bottom-dock-addon" className="w-full pointer-events-auto" />

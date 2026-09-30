@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { AlertCircle, X, DownloadCloud } from 'lucide-react'
 import { Capacitor, registerPlugin } from '@capacitor/core'
 import { CapacitorUpdater } from '@capgo/capacitor-updater'
+import { useBodyScrollLock } from '../utils/useBodyScrollLock'
 
 interface OtaManifest {
   ota_version: string
@@ -56,6 +57,8 @@ export default function UpdaterAlert() {
   const [manifest, setManifest] = useState<OtaManifest | null>(null)
   const [downloadProgress, setDownloadProgress] = useState<number | null>(null)
   const [errorMsg, setErrorMsg] = useState('')
+
+  useBodyScrollLock(Boolean(updateAvailable && manifest?.is_forced))
 
   // Versi bundle JS yang sedang aktif berjalan di aplikasi
   const currentVersion = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '0.1.0'
@@ -268,8 +271,8 @@ export default function UpdaterAlert() {
   // Mode 1: FORCED UPDATE (Modal memblokir jika is_forced == true, tidak bisa ditutup)
   if (manifest.is_forced) {
     return (
-      <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/75 p-4 backdrop-blur-md animate-in fade-in duration-300">
-        <div className="w-full max-w-sm rounded-3xl border border-white/20 bg-card p-6 shadow-2xl space-y-4 animate-in zoom-in-95 duration-300 text-center">
+      <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/75 p-4 backdrop-blur-md animate-in fade-in duration-300 overscroll-contain touch-none select-none">
+        <div className="w-full max-w-sm rounded-3xl border border-white/20 bg-card p-6 shadow-2xl space-y-4 animate-in zoom-in-95 duration-300 text-center overscroll-contain touch-auto select-auto">
           <div className="flex flex-col items-center gap-2 pt-2">
             {/* Ikon D Khas Doctoid — Bukan Icon Generik */}
             <img

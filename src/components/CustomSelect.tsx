@@ -91,7 +91,7 @@ export default function CustomSelect({
       {isOpen && (
         <div
           role="listbox"
-          className={`absolute left-0 top-full z-50 mt-1.5 w-full min-w-[120px] rounded-2xl border border-slate-200/90 bg-white p-1.5 shadow-xl backdrop-blur-xl animate-in fade-in zoom-in-95 duration-100 max-h-60 overflow-y-auto hide-scrollbar ${dropdownClassName}`}
+          className={`absolute left-0 top-full z-50 mt-1.5 w-full min-w-[120px] rounded-2xl border border-slate-200/90 bg-white p-1.5 shadow-xl backdrop-blur-xl animate-in fade-in zoom-in-95 duration-100 max-h-60 overflow-y-auto overscroll-contain hide-scrollbar ${dropdownClassName}`}
         >
           {placeholder && !normalizedOptions.some((o) => o.value === '') && (
             <button

@@ -1,4 +1,4 @@
-import { useMemo, useState, useRef, useEffect } from 'react'
+import { useMemo, useState, useRef, useEffect, useLayoutEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { Search, ChevronRight, Pill, Clock } from 'lucide-react'
@@ -6,6 +6,7 @@ import { db } from '../db'
 import Masked from '../components/Masked'
 import CustomSelect from '../components/CustomSelect'
 import { formatDate } from '../utils/dateFormat'
+import { appCache, cacheHospitals, cacheWards, cacheAllPatients, cacheNotes } from '../utils/dataCache'
 
 const hariKe = (iso: string) =>
   Math.max(1, Math.floor((Date.now() - new Date(iso).getTime()) / 86400000) + 1)
@@ -19,13 +20,25 @@ export default function RekamMedis() {
   const [filterJaminan, setFilterJaminan] = useState<string>('semua')
   const [filterStatus, setFilterStatus] = useState<string>('semua')
 
-  const patients = useLiveQuery(() => db.patients.toArray(), [], [])
-  const wards = useLiveQuery(() => db.wards.toArray(), [], [])
-  const hospitals = useLiveQuery(() => db.hospitals.toArray(), [], [])
-  const allNotes = useLiveQuery(() => db.progressNotes.toArray(), [], [])
+  const patients = useLiveQuery(() => db.patients.toArray(), [], appCache.allPatients || appCache.aktifPatients)
+  const wards = useLiveQuery(() => db.wards.toArray(), [], appCache.wards)
+  const hospitals = useLiveQuery(() => db.hospitals.toArray(), [], appCache.hospitals)
+  const allNotes = useLiveQuery(() => db.progressNotes.toArray(), [], appCache.allNotes)
+
+  useEffect(() => {
+    if (hospitals) cacheHospitals(hospitals)
+  }, [hospitals])
+  useEffect(() => {
+    if (wards) cacheWards(wards)
+  }, [wards])
+  useEffect(() => {
+    if (patients) cacheAllPatients(patients)
+  }, [patients])
+  useEffect(() => {
+    if (allNotes) cacheNotes(allNotes)
+  }, [allNotes])
 
   const hasRestoredScroll = useRef(false)
-  const isRestoringScroll = useRef(false)
 
   // Rekam posisi scroll di Rekam Medis
   useEffect(() => {
@@ -33,7 +46,6 @@ export default function RekamMedis() {
     const onScroll = () => {
       clearTimeout(timer)
       timer = setTimeout(() => {
-        if (isRestoringScroll.current) return
         sessionStorage.setItem('doctoid_rm_scroll_y', String(window.scrollY))
       }, 100)
     }
@@ -41,34 +53,23 @@ export default function RekamMedis() {
     return () => {
       clearTimeout(timer)
       window.removeEventListener('scroll', onScroll)
-      if (!isRestoringScroll.current && window.scrollY > 0) {
+      if (window.scrollY > 0) {
         sessionStorage.setItem('doctoid_rm_scroll_y', String(window.scrollY))
       }
     }
   }, [])
 
-  // Restorasi scroll saat data patients selesai dimuat
-  useEffect(() => {
+  // Restorasi scroll saat data patients selesai dimuat (sebelum paint)
+  useLayoutEffect(() => {
     if (hasRestoredScroll.current) return
-    if (patients === undefined) return
-
-    const savedYStr = sessionStorage.getItem('doctoid_rm_scroll_y')
-    const savedY = savedYStr ? parseInt(savedYStr, 10) : 0
-    if (!savedY) {
+    if (patients && patients.length > 0) {
+      const savedYStr = sessionStorage.getItem('doctoid_rm_scroll_y')
+      const savedY = savedYStr ? parseInt(savedYStr, 10) : 0
+      if (savedY > 0) {
+        window.scrollTo(0, savedY)
+      }
       hasRestoredScroll.current = true
-      return
     }
-
-    isRestoringScroll.current = true
-    const timer = setTimeout(() => {
-      window.scrollTo({ top: savedY, behavior: 'instant' })
-      hasRestoredScroll.current = true
-      setTimeout(() => {
-        isRestoringScroll.current = false
-      }, 150)
-    }, 50)
-
-    return () => clearTimeout(timer)
   }, [patients])
 
   const wardMap = useMemo(() => {
@@ -106,7 +107,17 @@ export default function RekamMedis() {
         (v) => v && v.toLowerCase().includes(s)
       )
       const matchesJaminan = filterJaminan === 'semua' || p.jaminan === filterJaminan
-      const matchesStatus = filterStatus === 'semua' || p.status_rawat === filterStatus
+      const matchesStatus = (() => {
+        if (filterStatus === 'semua') return true
+        if (filterStatus === 'aktif') return p.status_rawat === 'aktif'
+        if (filterStatus === 'krs') return p.status_rawat === 'krs'
+        if (filterStatus === 'krs_izin') return p.status_rawat === 'krs' && (!p.keterangan_krs || p.keterangan_krs === 'Izin Dokter')
+        if (filterStatus === 'krs_aps') return p.status_rawat === 'krs' && p.keterangan_krs === 'APS'
+        if (filterStatus === 'krs_meninggal') return p.status_rawat === 'krs' && p.keterangan_krs === 'Meninggal'
+        if (filterStatus === 'krs_alih') return p.status_rawat === 'krs' && p.keterangan_krs === 'Alih Rawat'
+        if (filterStatus === 'krs_rujuk') return p.status_rawat === 'krs' && p.keterangan_krs === 'Rujuk'
+        return true
+      })()
       return matchesSearch && matchesJaminan && matchesStatus
     })
   }, [q, patients, filterJaminan, filterStatus])
@@ -129,9 +140,14 @@ export default function RekamMedis() {
             options={[
               { value: 'semua', label: 'Semua Status' },
               { value: 'aktif', label: 'Rawat Aktif' },
-              { value: 'krs', label: 'Sudah KRS' }
+              { value: 'krs', label: 'Semua KRS' },
+              { value: 'krs_izin', label: 'KRS: Izin Dokter' },
+              { value: 'krs_aps', label: 'KRS: APS' },
+              { value: 'krs_meninggal', label: 'KRS: Meninggal' },
+              { value: 'krs_alih', label: 'KRS: Alih Rawat' },
+              { value: 'krs_rujuk', label: 'KRS: Rujuk' },
             ]}
-            className="w-36"
+            className="w-40"
           />
 
           {/* Filter Jaminan */}
@@ -197,6 +213,12 @@ export default function RekamMedis() {
             <Link
               key={p.id}
               to={`/rekammedis/${p.id}`}
+              state={{
+                patient: p,
+                latestNote,
+                ward: p.lokasi_sekarang ? appCache.wardsMap.get(p.lokasi_sekarang) : undefined,
+                hospital: p.hospital_id ? appCache.hospitalsMap.get(p.hospital_id) : undefined,
+              }}
               onClick={() => {
                 sessionStorage.setItem('doctoid_rm_scroll_y', String(window.scrollY))
               }}
@@ -234,18 +256,34 @@ export default function RekamMedis() {
                       <span className="rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-bold text-primary">
                         {p.jaminan}
                       </span>
-                      <span
-                        className={`rounded-full px-2.5 py-0.5 text-xs font-bold ${
-                          p.status_rawat === 'aktif'
-                            ? 'bg-emerald-50 text-emerald-700 border border-emerald-200/60'
-                            : 'bg-surface text-ink-muted'
-                        }`}
-                      >
-                        {p.status_rawat === 'aktif' ? `Perawatan P-${hariKe(p.tgl_mrs)}` : 'Sudah KRS'}
-                      </span>
                       {p.tgl_onset && (
-                        <span className="rounded-full bg-amber-50 text-amber-800 border border-amber-200/60 px-2.5 py-0.5 text-xs font-bold">
+                        <span className="rounded-full bg-surface px-2.5 py-0.5 text-xs font-semibold text-ink-muted">
                           Onset OH-{hariKe(p.tgl_onset)}
+                        </span>
+                      )}
+                      {p.status_rawat === 'aktif' ? (
+                        <span className="rounded-full px-2.5 py-0.5 text-xs font-bold bg-amber-50 text-amber-700 border border-amber-200/60">
+                          Perawatan P-{hariKe(p.tgl_mrs)}
+                        </span>
+                      ) : p.keterangan_krs === 'Meninggal' ? (
+                        <span className="rounded-full px-2.5 py-0.5 text-xs font-extrabold bg-rose-100 text-rose-800 border border-rose-300">
+                          Meninggal {p.tgl_krs ? `· ${formatDate(p.tgl_krs)}` : ''}
+                        </span>
+                      ) : p.keterangan_krs === 'APS' ? (
+                        <span className="rounded-full px-2.5 py-0.5 text-xs font-bold bg-amber-100 text-amber-800 border border-amber-300">
+                          KRS: APS {p.tgl_krs ? `· ${formatDate(p.tgl_krs)}` : ''}
+                        </span>
+                      ) : p.keterangan_krs === 'Alih Rawat' ? (
+                        <span className="rounded-full px-2.5 py-0.5 text-xs font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                          Alih Rawat {p.detail_krs ? `→ ${p.detail_krs}` : ''} {p.tgl_krs ? `· ${formatDate(p.tgl_krs)}` : ''}
+                        </span>
+                      ) : p.keterangan_krs === 'Rujuk' ? (
+                        <span className="rounded-full px-2.5 py-0.5 text-xs font-bold bg-sky-50 text-sky-700 border border-sky-200">
+                          Rujuk {p.detail_krs ? `→ ${p.detail_krs}` : ''} {p.tgl_krs ? `· ${formatDate(p.tgl_krs)}` : ''}
+                        </span>
+                      ) : (
+                        <span className="rounded-full px-2.5 py-0.5 text-xs font-bold bg-slate-100 text-slate-700 border border-slate-200">
+                          {p.keterangan_krs ? `KRS: ${p.keterangan_krs}` : 'Sudah KRS'} {p.tgl_krs ? `· ${formatDate(p.tgl_krs)}` : ''}
                         </span>
                       )}
                       {wardInfo && (

@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Download } from 'lucide-react';
+import { useBodyScrollLock } from '../utils/useBodyScrollLock';
 
 interface PwaInstallPromptProps {
   appName?: string;
@@ -21,6 +22,8 @@ export default function PwaInstallPrompt({
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
   const [show, setShow] = useState(false);
   const [imgSrc, setImgSrc] = useState(appLogo);
+
+  useBodyScrollLock(show && Boolean(deferredPrompt));
 
   useEffect(() => {
     // Jangan muncul jika sudah mode standalone (sudah terinstal) atau di dalam navigator standalone
@@ -68,8 +71,16 @@ export default function PwaInstallPrompt({
   };
 
   return (
-    <div className="fixed inset-0 z-[200] flex items-end justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
-      <div className="w-full max-w-sm rounded-3xl p-6 shadow-2xl flex flex-col items-center text-center animate-in slide-in-from-bottom-8 duration-300 bg-white border border-slate-200 text-slate-800">
+    <div
+      className="fixed inset-0 z-[200] flex items-end justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200 overscroll-contain touch-none select-none"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) handleDismiss();
+      }}
+    >
+      <div
+        className="w-full max-w-sm rounded-3xl p-6 shadow-2xl flex flex-col items-center text-center animate-in slide-in-from-bottom-8 duration-300 bg-white border border-slate-200 text-slate-800 overscroll-contain touch-auto select-auto"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="w-20 h-20 rounded-2xl mb-4 shadow-xl border border-slate-100 bg-slate-50 p-3 flex items-center justify-center overflow-hidden">
           <img
             src={imgSrc}

@@ -34,23 +34,207 @@ function segmentNarrative(raw: string): string[] {
   const clean = raw
     .replace(/\b(?:RPD|RPO|Alergi|Riwayat\s*(?:Penyakit|Pengobatan))\s*[:-][\s\S]*$/i, '')
     .replace(/^(?:s|subjektif|keluhan)\s*:\s*/i, '')
-    .replace(/^\s*[\/\\-]\s*/gm, '')
+    .replace(/^\s*[/\\-]\s*/gm, '')
     .trim()
 
-  // Standardize boundaries before/after negation symbols
+  // Standardize boundaries before/after negation symbols & sentence periods
   const withBoundaries = clean
-    .replace(/(\(\s*-\s*\))([A-Za-z])/g, '$1 , $2')
-    .replace(/\b(disangkal|dbn|nihil)\b/gi, '$1 , ')
+    .replace(/\.\s+/g, ' , ') // Split sentences on period
     .replace(/(\(\s*-\s*\))/g, ' $1 , ')
+    .replace(/\b(disangkal|dbn|nihil)\b/gi, ' $1 , ')
+    .replace(/\b(tidak\s*(?:ada|didapatkan|dirasakan|ditemukan|mengeluh)?|tanpa|bebas)\b/gi, ' , $1 ')
+    .replace(/([A-Za-z0-9]+)\s+(disangkal|\(\s*-\s*\))/gi, ' , $1 $2 , ')
 
   return withBoundaries
     .split(/[,;\n•·]+/)
     .map((c) => c.trim())
-    .filter(Boolean)
+    .filter((c) => c.length > 0 && c !== '.')
 }
 
 function isClauseNegated(c: string): boolean {
-  return /\(\s*-\s*\)|\b(?:disangkal|tidak\s*(?:ada|didapatkan|dirasakan|ditemukan|mengeluh)|dbn|dalam\s*batas\s*normal|nihil|negatif|tanpa|bebas)\b/i.test(c)
+  return /\(\s*-\s*\)|\b(?:disangkal|tidak\s*(?:ada|didapatkan|dirasakan|ditemukan|mengeluh)?|dbn|dalam\s*batas\s*normal|nihil|negatif|tanpa|bebas)\b/i.test(c)
+}
+
+/**
+ * Memformat evaluasi subjektif kunjungan harian (format baris per-keluhan dengan +/-/progres)
+ * menjadi ringkasan yang rapi untuk kartu dasbor.
+ * Contoh input:
+ * mual + berkurang
+ * muntah -
+ * pusing -
+ * lemah separuh badan kiri membaik
+ *
+ * Output:
+ * ['Mual berkurang', 'Muntah (-)', 'Pusing (-)', 'Lemah separuh badan kiri membaik']
+ */
+export function formatVisiteSummaryForDashboard(rawS?: string): string[] | null {
+  if (!rawS || !rawS.trim()) return null
+  const lines = rawS.split('\n').map((l) => l.trim()).filter(Boolean)
+
+  const isVisiteFormat =
+    lines.length >= 2 &&
+    lines.every((l) => l.length < 65 && !/\b(?:pasien\s*datang|ke\s*igd|rpd|rpo)\b/i.test(l)) &&
+    lines.some((l) => /(?:[+-]|membaik|berkurang|perbaikan|memberat|hilang|sama|lancar|stabil)/i.test(l))
+
+  if (!isVisiteFormat) return null
+
+  return lines.map((line) => {
+    let clean = line.replace(/^[-•*]\s*/, '').trim()
+    clean = clean.replace(/\s*\+\s*berkurang\b/i, ' berkurang')
+    clean = clean.replace(/\s*\+\s*membaik\b/i, ' membaik')
+    clean = clean.replace(/\s*\+\s*perbaikan\b/i, ' membaik')
+    clean = clean.replace(/\s*\+\s*sama\b/i, ' tetap')
+    clean = clean.replace(/\s*\+\s*tetap\b/i, ' tetap')
+    clean = clean.replace(/\s*\+\s*memberat\b/i, ' memberat')
+    clean = clean.replace(/\s*-\s*$/i, ' (-)')
+    clean = clean.replace(/\s*\+\s*$/i, ' (+)')
+    return clean.charAt(0).toUpperCase() + clean.slice(1)
+  })
+}
+
+/**
+ * Mengekstrak keluhan positif pasien saat awal masuk RS (MRS) dari narasi IGD/admission.
+ * Digunakan untuk membuat daftar evaluasi keluhan default per baris saat dokter visite.
+ */
+export function extractAdmissionComplaints(raw?: string): string[] {
+  if (!raw || !raw.trim()) return []
+
+  // Strip RPD, RPO, Alergi and headers
+  const clean = raw
+    .replace(/\b(?:RPD|RPO|Alergi|Riwayat\s*(?:Penyakit|Pengobatan))\s*[:-][\s\S]*$/i, '')
+    .replace(/^(?:s|subjektif|keluhan)\s*:\s*/i, '')
+    .trim()
+
+  // Split into sentences / clauses
+  const withBoundaries = clean
+    .replace(/\.\s+/g, ' , ')
+    .replace(/(\(\s*-\s*\))/g, ' $1 , ')
+    .replace(/\b(disangkal|dbn|nihil)\b/gi, ' $1 , ')
+    .replace(/\b(tidak\s*(?:ada|didapatkan|dirasakan|ditemukan|mengeluh)?|tanpa|bebas)\b/gi, ' , $1 ')
+    .replace(/([A-Za-z0-9]+)\s+(disangkal|\(\s*-\s*\))/gi, ' , $1 $2 , ')
+
+  const clauses = withBoundaries
+    .split(/[,;\n•·]+/)
+    .map((c) => c.trim())
+    .filter((c) => c.length > 0 && c !== '.')
+
+  const isNegated = (c: string) =>
+    /\(\s*-\s*\)|\b(?:disangkal|tidak\s*(?:ada|didapatkan|dirasakan|ditemukan|mengeluh)?|dbn|dalam\s*batas\s*normal|nihil|negatif|tanpa|bebas)\b/i.test(
+      c
+    )
+  const positiveClauses = clauses.filter((c) => !isNegated(c))
+  const positiveText = positiveClauses.join(' , ').toLowerCase()
+
+  const items: string[] = []
+  const add = (label: string) => {
+    if (label && !items.includes(label)) items.push(label)
+  }
+
+  // 1. Mual & Muntah
+  if (/\bmual\b/i.test(positiveText)) add('mual')
+  if (/\bmuntah\b/i.test(positiveText)) add('muntah')
+
+  // 2. Pusing / Nyeri kepala
+  if (/\b(?:pusing\s*berputar|vertigo)\b/i.test(positiveText)) add('pusing berputar')
+  else if (/\b(?:pusing|kliyengan)\b/i.test(positiveText)) add('pusing')
+  if (/\b(?:nyeri\s*kepala|sakit\s*kepala|cephalgia)\b/i.test(positiveText)) add('nyeri kepala')
+
+  // 3. Motorik / Lemah
+  const lemasMatch = positiveText.match(
+    /\b(?:lemah|lemas|lumpuh|hemiparesis|hemiplegia)\s*(separuh\s*badan\s*(?:kiri|kanan)?|tangan\s*dan\s*kaki\s*(?:kiri|kanan)?|ekstr[ei]mitas\s*(?:kiri|kanan)?|sisi\s*(?:kiri|kanan)|kiri|kanan)?/i
+  )
+  if (lemasMatch) {
+    const detail = (lemasMatch[1] || '').trim()
+    add(`lemah ${detail || 'separuh badan'}`.trim())
+  }
+
+  // 4. Bicara
+  if (/\b(?:pelo|disartria)\b/i.test(positiveText)) add('bicara pelo')
+  else if (/\bafasia\b/i.test(positiveText)) add('afasia')
+  else if (/\b(?:bicara\s*berat|sulit\s*bicara)\b/i.test(positiveText)) add('bicara berat')
+
+  // 5. Menelan
+  if (/\b(?:susah|sulit|gangguan)\s*menelan\b/i.test(positiveText)) add('susah menelan')
+  else if (/\btersedak\b/i.test(positiveText)) add('tersedak')
+
+  // 6. Mulut Mencong
+  if (/\b(?:mencong|merot|wajah\s*asimetris|mulut\s*miring)\b/i.test(positiveText)) add('mulut mencong')
+
+  // 7. Kesadaran & Kejang
+  if (/\b(?:penurunan\s*kesadaran|tidak\s*sadar|pingsan|somnolen|mengantuk\s*terus)\b/i.test(positiveText))
+    add('penurunan kesadaran')
+  if (/\bkejang\b/i.test(positiveText)) add('kejang')
+
+  // 8. Sesak & Nyeri Dada
+  if (/\b(?:sesak\s*nafas|sesak|dispnea)\b/i.test(positiveText)) add('sesak')
+  if (/\b(?:nyeri\s*dada|angina)\b/i.test(positiveText)) add('nyeri dada')
+
+  // 9. Batuk
+  if (/\b(?:batuk\s*darah|hemoptoe)\b/i.test(positiveText)) add('batuk darah')
+  else if (/\bbatuk\b/i.test(positiveText)) add('batuk')
+
+  // 10. Demam
+  if (/\b(?:demam|meriang|panas\s*badan)\b/i.test(positiveText)) add('demam')
+
+  // 11. Perut & Pencernaan
+  if (/\b(?:melena|bab\s*hitam)\b/i.test(positiveText)) add('BAB hitam / melena')
+  if (/\b(?:hematemesis|muntah\s*darah)\b/i.test(positiveText)) add('muntah darah')
+  if (/\b(?:nyeri\s*perut|nyeri\s*ulu\s*hati|sakit\s*perut)\b/i.test(positiveText)) add('nyeri perut')
+  if (/\b(?:diare|mencret)\b/i.test(positiveText)) add('diare')
+
+  // 12. Sensorik
+  if (/\b(?:kebas|baal|kesemutan)\b/i.test(positiveText)) {
+    const sisi = positiveText.match(/\b(kanan|kiri|separuh)\b/i)
+    add(`kebas/kesemutan${sisi ? ' ' + sisi[1] : ''}`)
+  }
+
+  // 13. Bengkak
+  if (/\b(?:bengkak|edema)\b/i.test(positiveText)) {
+    const loc = positiveText.match(/\b(kaki|tungkai|wajah|mata)\b/i)
+    add(`bengkak${loc ? ' ' + loc[1] : ''}`)
+  }
+
+  return items
+}
+
+/**
+ * Menghasilkan teks awal (pre-fill) untuk field S di VisiteModal.
+ * Jika S catatan sebelumnya masih berupa narasi mentah panjang dari IGD/admission,
+ * otomatis diekstrak menjadi daftar keluhan positif per baris:
+ * mual +
+ * muntah +
+ * lemah separuh badan kiri +
+ *
+ * Jika sudah berupa format evaluasi kunjungan harian, dipertahankan agar dokter
+ * bisa langsung melanjutkan update progres harian.
+ */
+export function getVisiteSubjectivePrefill(latestS?: string): string {
+  if (!latestS || !latestS.trim()) return ''
+
+  const trimmed = latestS.trim()
+
+  // Jika sudah berformat evaluasi visite (beberapa baris dengan tanda +/- atau kata progres)
+  const isAlreadyVisiteFormat =
+    trimmed.includes('\n') &&
+    /(?:[+-]|membaik|berkurang|perbaikan|memberat|hilang|sama)/i.test(trimmed) &&
+    !/\b(?:pasien\s*datang|ke\s*igd|rpd|rpo|alergi)\b/i.test(trimmed)
+
+  if (isAlreadyVisiteFormat) {
+    return trimmed
+  }
+
+  // Ekstrak keluhan awal positif pasien saat masuk
+  const complaints = extractAdmissionComplaints(trimmed)
+  if (complaints.length > 0) {
+    return complaints.map((c) => `${c} +`).join('\n')
+  }
+
+  // Fallback jika teksnya pendek dan bukan narasi panjang
+  if (trimmed.length < 50 && !/\b(?:pasien\s*datang|ke\s*igd)\b/i.test(trimmed)) {
+    return trimmed
+  }
+
+  return ''
 }
 
 /**
@@ -59,6 +243,12 @@ function isClauseNegated(c: string): boolean {
  */
 export function extractSubjectivePositives(rawS?: string): string[] {
   if (!rawS || !rawS.trim()) return []
+
+  // 0. Format evaluasi visite harian (per-baris keluhan dengan status +/-/progres)
+  const visiteSummary = formatVisiteSummaryForDashboard(rawS)
+  if (visiteSummary && visiteSummary.length > 0) {
+    return visiteSummary
+  }
 
   const clauses = segmentNarrative(rawS)
   // Filter out any clause that contains negative / disangkal / (-) markers
@@ -80,15 +270,17 @@ export function extractSubjectivePositives(rawS?: string): string[] {
   check(
     /\b(?:hemiparesis|hemiplegia|lemas\s*(?:ekstr[ei]mitas|anggota\s*gerak|separuh|tangan|kaki|badan)?|berat\s*(?:ekstr[ei]mitas|tangan|kaki)|lumpuh)\b/i,
     () => {
+      const isMembaik = /\b(?:lemas|motorik|ekstr[ei]mitas|gerak)\s*(?:membaik|berkurang|perbaikan)\b|\b(?:membaik|berkurang)\b/i.test(positiveText)
+      const prog = isMembaik ? ' (membaik)' : ''
       const sisiMatch = positiveText.match(/\b(dextra|sinistra|kanan|kiri)\b/i)
       const sisi = sisiMatch ? sisiMatch[1].toLowerCase() : ''
       const bagianMatch = positiveText.match(/\b(ekstr[ei]mitas|tangan\s*dan\s*kaki|tangan|kaki|separuh\s*badan)\b/i)
       const bagian = bagianMatch ? bagianMatch[1].replace('ekstrimitas', 'ekstremitas') : 'ekstremitas'
 
       if (/\bhemiparesis\b/i.test(positiveText)) {
-        return `Hemiparesis${sisi ? ` (${sisi})` : ''}`
+        return `Hemiparesis${sisi ? ` (${sisi})` : ''}${prog}`
       }
-      return `Lemas ${bagian}${sisi ? ` ${sisi}` : ''}`
+      return `Lemas ${bagian}${sisi ? ` ${sisi}` : ''}${prog}`
     }
   )
 
@@ -96,10 +288,12 @@ export function extractSubjectivePositives(rawS?: string): string[] {
   check(
     /\b(?:pelo|disartria|afasia|rero|bicara\s*(?:terasa\s*)?(?:berat|tidak\s*lancar|tidak\s*jelas|pelo|sulit|patah-patah)|sulit\s*bicara)\b/i,
     (m) => {
-      if (/\bafasia\b/i.test(m[0])) return 'Afasia'
-      if (/\bberat\b/i.test(m[0])) return 'Bicara berat'
-      if (/\btidak\s*lancar\b/i.test(m[0])) return 'Bicara tidak lancar'
-      return 'Bicara pelo'
+      const isMembaik = /\b(?:pelo|bicara|disartria)\s+(?:membaik|berkurang|perbaikan)\b|\b(?:membaik|berkurang|lebih\s*jelas)\b/i.test(positiveText)
+      if (/\bpelo\b/i.test(m[0])) return isMembaik ? 'Pelo membaik' : 'Bicara pelo'
+      if (/\bafasia\b/i.test(m[0])) return isMembaik ? 'Afasia (membaik)' : 'Afasia'
+      if (/\bberat\b/i.test(m[0])) return isMembaik ? 'Bicara berat (membaik)' : 'Bicara berat'
+      if (/\btidak\s*lancar\b/i.test(m[0])) return isMembaik ? 'Bicara lancar' : 'Bicara tidak lancar'
+      return isMembaik ? 'Bicara membaik' : 'Bicara pelo'
     }
   )
 
@@ -119,11 +313,13 @@ export function extractSubjectivePositives(rawS?: string): string[] {
   check(
     /\b(?:nyeri\s*kepala|sakit\s*kepala|cephalgia|sefalgia|pusing\s*cekot)\b/i,
     () => {
+      const isMembaik = /\b(?:nyeri|sakit|pusing)\s+(?:membaik|berkurang|mereda)\b/i.test(positiveText)
+      const prog = isMembaik ? ' (berkurang)' : ''
       const vasMatch = rawS.match(/\bVAS\s*[:=-]?\s*(\d{1,2}(?:\s*-\s*\d{1,2})?)\b/i)
       const vas = vasMatch ? `VAS ${vasMatch[1]}` : ''
       const sifatMatch = rawS.match(/\b(?:cekot[\s-]*cekot|berdenyut|hebat|menusuk)\b/i)
       const sifat = sifatMatch ? sifatMatch[0] : ''
-      const extra = [vas, sifat].filter(Boolean).join(', ')
+      const extra = [vas, sifat, prog ? 'berkurang' : ''].filter(Boolean).join(', ')
       return `Nyeri kepala${extra ? ` (${extra})` : ''}`
     }
   )
@@ -141,9 +337,11 @@ export function extractSubjectivePositives(rawS?: string): string[] {
   // 7. Mual & Muntah (Hanya jika lolos clause positif)
   const hasMual = /\bmual\b/i.test(positiveText)
   const hasMuntah = /\bmuntah\b/i.test(positiveText)
-  if (hasMual && hasMuntah) entities.push('Mual & muntah')
-  else if (hasMuntah) entities.push('Muntah')
-  else if (hasMual) entities.push('Mual')
+  const isMualMembaik = /\b(?:mual|muntah)\s+(?:membaik|berkurang)\b/i.test(positiveText)
+  const mualProg = isMualMembaik ? ' (berkurang)' : ''
+  if (hasMual && hasMuntah) entities.push(`Mual & muntah${mualProg}`)
+  else if (hasMuntah) entities.push(`Muntah${mualProg}`)
+  else if (hasMual) entities.push(`Mual${mualProg}`)
 
   // 8. Demam / Meriang
   check(
@@ -160,7 +358,8 @@ export function extractSubjectivePositives(rawS?: string): string[] {
   check(/\b(?:penurunan\s*kesadaran|tidak\s*sadar|pingsan|sinkop|somnolen|mengantuk\s*terus)\b/i, 'Penurunan kesadaran')
 
   // 10. Sesak & Nyeri Dada
-  check(/\b(?:sesak\s*nafas|sesak|dispnea)\b/i, 'Sesak nafas')
+  const sesakMembaik = /\bsesak\s+(?:membaik|berkurang|lega)\b/i.test(positiveText)
+  check(/\b(?:sesak\s*nafas|sesak|dispnea)\b/i, sesakMembaik ? 'Sesak nafas (berkurang)' : 'Sesak nafas')
   check(/\b(?:nyeri\s*dada|angina)\b/i, 'Nyeri dada')
 
   // 11. Defisit Sensorik (Kesemutan / Baal / Hipoestesi)
@@ -176,7 +375,16 @@ export function extractSubjectivePositives(rawS?: string): string[] {
   check(/\b(?:diplopia|pandangan\s*(?:ganda|kabur|dobel)|mata\s*kabur)\b/i, (m) => /\bdiplopia\b/i.test(m[0]) ? 'Diplopia' : 'Pandangan kabur')
 
   // 13. Sulit Menelan / Tersedak
-  check(/\b(?:disfagia|sulit\s*menelan|tersedak)\b/i, (m) => /\btersedak\b/i.test(m[0]) ? 'Tersedak' : 'Sulit menelan')
+  check(
+    /\b(?:disfagia|sulit\s*menelan|susah\s*menelan|gangguan\s*menelan|tersedak)\b/i,
+    (m) => {
+      const isMembaik = /\b(?:menelan|tersedak)\s+(?:membaik|berkurang)\b/i.test(positiveText)
+      const prog = isMembaik ? ' (membaik)' : ''
+      if (/\btersedak\b/i.test(m[0])) return `Tersedak${prog}`
+      if (/\bsusah\b/i.test(m[0])) return `Susah menelan${prog}`
+      return `Sulit menelan${prog}`
+    }
+  )
 
   // 14. Batuk / Batuk Darah
   check(/\b(?:batuk|cough|hemoptoe)\b/i, (m) => /\b(?:berdarah|hemoptoe)\b/i.test(m[0]) ? 'Batuk darah' : 'Batuk')
@@ -208,14 +416,23 @@ export function extractSubjectivePositives(rawS?: string): string[] {
     for (const prefix of FILLER_PREFIXES) {
       clause = clause.replace(prefix, '').trim()
     }
+    // Strip konteks waktu/lokasi di awal (sejak, kemarin, tadi, dll)
     if (/^(?:sejak|kemarin|tadi|sudah|namun|tapi|pagi|malam|hari|jam)\b/i.test(clause)) continue
 
     let cleanClause = clause
       .replace(/\(\s*\+\s*\)/g, '')
-      .replace(/^(?:adanya|terdapat|ada|mengeluh|keluhan)\s+/i, '')
+      .replace(/^(?:adanya|terdapat|ada|mengeluh|keluhan|dengan\s*keluhan|ke\s*igd\s*(?:dengan\s*(?:keluhan)?)?)\s+/i, '')
       .trim()
 
-    if (cleanClause.length > 2 && cleanClause.length <= 40) {
+    // Potong frase panjang di batas waktu/lokasi (sejak, kemudian, lalu, sebelum)
+    if (cleanClause.length > 45) {
+      const cutIdx = cleanClause.search(/\b(?:sejak|sebelum|kemudian|lalu|selama|sudah|yang|pagi|malam|saat|kurang\s*lebih)\b/i)
+      if (cutIdx > 5) {
+        cleanClause = cleanClause.substring(0, cutIdx).trim().replace(/\s+$/, '')
+      }
+    }
+
+    if (cleanClause.length > 2 && cleanClause.length <= 60) {
       cleanClause = cleanClause.charAt(0).toUpperCase() + cleanClause.slice(1)
       if (!candidates.some((c) => c.toLowerCase() === cleanClause.toLowerCase())) {
         candidates.push(cleanClause)
@@ -226,205 +443,328 @@ export function extractSubjectivePositives(rawS?: string): string[] {
   return candidates.slice(0, 3)
 }
 
+interface PrioritizedFinding {
+  text: string
+  priority: number
+}
+
 /**
- * Mengekstrak temuan objektif positif & abnormal dari Pemeriksaan Fisik & Penunjang (O).
+ * Mengekstrak temuan objektif positif & abnormal dari Pemeriksaan Fisik & Penunjang (O)
+ * dengan sistem pemeringkatan urgensi klinis (GCS/koma, lateralisasi, NIHSS, pupil, tanda vital kritis).
  */
 export function extractObjectivePositives(rawPemfis?: string, rawPenunjang?: string): string[] {
-  const findings: string[] = []
+  const items: PrioritizedFinding[] = []
   const text = `${rawPemfis || ''}\n${rawPenunjang || ''}`
   if (!text.trim()) return []
 
-  // 1. Tanda Vital Abnormal
-  // Tekanan Darah (TD / BP)
-  const tdMatch = text.match(/\b(?:TD|BP|Tens[ie])\s*[:-]?\s*(\d{2,3})\s*[\/x]\s*(\d{2,3})\b/i)
-  if (tdMatch) {
-    const sys = parseInt(tdMatch[1], 10)
-    const dia = parseInt(tdMatch[2], 10)
-    if (sys >= 140 || sys <= 95 || dia >= 90 || dia <= 60) {
-      findings.push(`TD ${sys}/${dia}`)
+  const add = (findingText: string, priority: number) => {
+    if (!findingText || !findingText.trim()) return
+    const clean = findingText.trim()
+    const exists = items.some(
+      (it) => it.text.toLowerCase() === clean.toLowerCase() ||
+              (it.text.toLowerCase().includes(clean.toLowerCase()) && Math.abs(it.text.length - clean.length) < 5)
+    )
+    if (!exists) {
+      items.push({ text: clean, priority })
     }
   }
 
-  // Laju Nadi (HR / Nadi) abnormal
-  const hrMatch = text.match(/\b(?:HR|Nadi|Pulse)\s*[:-]?\s*(\d{2,3})\s*(?:x\/m|bpm|x)?\b/i)
-  if (hrMatch) {
-    const hr = parseInt(hrMatch[1], 10)
-    if (hr > 100 || hr < 60) {
-      findings.push(`HR ${hr}x/m`)
+  // 1. GCS (Glasgow Coma Scale) & Penurunan Kesadaran
+  // Format EVM: GCS E1V1M1, E2V2M4, dll.
+  const evmMatch = text.match(/\b(?:GCS\s*[:-]?\s*)?E([1-4])\s*V([1-5X]|ett|afasia)?\s*M([1-6])\b/i)
+  if (evmMatch) {
+    const e = parseInt(evmMatch[1], 10)
+    const vStr = evmMatch[2] || '1'
+    const v = parseInt(vStr, 10) || 1
+    const m = parseInt(evmMatch[3], 10)
+    const total = e + v + m
+    if (total < 15) {
+      add(`GCS ${total} (E${evmMatch[1]}V${vStr}M${evmMatch[3]})`, 1)
+    }
+  } else {
+    // Format 3 digit: GCS : 111, GCS 111, GCS 235, GCS 1-1-1, GCS 1/1/1
+    const threeDigitMatch = text.match(/\bGCS\s*[:-]?\s*([1-4])\s*[-/]?\s*([1-5])\s*[-/]?\s*([1-6])\b/i)
+    if (threeDigitMatch) {
+      const e = parseInt(threeDigitMatch[1], 10)
+      const v = parseInt(threeDigitMatch[2], 10)
+      const m = parseInt(threeDigitMatch[3], 10)
+      const total = e + v + m
+      if (total < 15) {
+        add(`GCS ${total} (${e}${v}${m})`, 1)
+      }
+    } else {
+      // Format total score: GCS : 3, GCS 8, GCS 10
+      const totalMatch = text.match(/\bGCS\s*[:-]?\s*(\d{1,2})\b/i)
+      if (totalMatch) {
+        const total = parseInt(totalMatch[1], 10)
+        if (total >= 3 && total < 15) {
+          add(`GCS ${total}`, 1)
+        }
+      }
     }
   }
 
-  // Laju Nafas (RR) abnormal
-  const rrMatch = text.match(/\b(?:RR|Resp)\s*[:-]?\s*(\d{1,2})\b/i)
-  if (rrMatch) {
-    const rr = parseInt(rrMatch[1], 10)
-    if (rr > 20 || rr < 12) {
-      findings.push(`RR ${rr}x/m`)
+  // Penurunan kesadaran / status mental
+  if (/\b(?:KU\s*[:-]?\s*)?(penurunan\s*kesadaran|tidak\s*sadar(?:kan\s*diri)?|hilang\s*kesadaran)\b/i.test(text)) {
+    add('Penurunan kesadaran', 2)
+  }
+  const comaMatch = text.match(/\b(koma|sopor\s*koma|sopor|somnolen|stupor|delirium|apatis)\b/i)
+  if (comaMatch && !isClauseNegated(comaMatch[0])) {
+    const term = comaMatch[1].charAt(0).toUpperCase() + comaMatch[1].slice(1).toLowerCase()
+    add(term, 2)
+  }
+
+  // 2. Status Neurologis: Pupil, Lateralisasi, NIHSS
+  // Pupil Anisokor & Refleks Cahaya
+  if (/\banisokor\b/i.test(text) && !/\bisokor\b(?!\s*anisokor)/i.test(text.replace(/anisokor/gi, ''))) {
+    const diamMatch = text.match(/(?:(?:N\.?\s*(?:II|III)\s*[:-]?\s*|pupil\s*[:-]?\s*)?(\d(?:\.\d)?\s*mm\s*[/x]\s*\d(?:\.\d)?\s*mm|\d\s*[/x]\s*\d\s*mm))/i)
+    if (diamMatch) {
+      add(`Pupil anisokor (${diamMatch[1].replace(/\s+/g, '')})`, 3)
+    } else {
+      add('Pupil anisokor', 3)
+    }
+  } else if (/\b(pin-?point|midriasis\s*maksimal)\b/i.test(text)) {
+    const pMatch = text.match(/\b(pin-?point|midriasis\s*maksimal)\b/i)
+    if (pMatch) add(`Pupil ${pMatch[1]}`, 3)
+  }
+  if (/\bRC\s*(?:-\/-|\(-\/-\)|negatif(?:\s*bilateral)?)\b/i.test(text)) {
+    add('RC (-/-)', 3)
+  }
+
+  // Kesan Lateralisasi (Dextra / Sinistra)
+  const latMatch = text.match(/\b(?:kesan\s+)?lateralisasi\s+(?:ke\s+)?(dextra|sinistra|kanan|kiri)\b/i)
+  if (latMatch && !/\b(?:tidak\s*ada|disangkal|dbn|nihil)\b/i.test(latMatch[0])) {
+    const rawSide = latMatch[1].toLowerCase()
+    const side = rawSide === 'kanan' ? 'Dextra' : rawSide === 'kiri' ? 'Sinistra' : (rawSide.charAt(0).toUpperCase() + rawSide.slice(1))
+    add(`Lateralisasi ${side}`, 4)
+  }
+
+  // NIHSS (Stroke Scale Score)
+  const nihssMatch = text.match(/\bNIHSS\s*[:-]?\s*(\d{1,2})\b/i)
+  if (nihssMatch) {
+    const score = parseInt(nihssMatch[1], 10)
+    if (score > 0) {
+      add(`NIHSS ${score}`, 5)
     }
   }
 
-  // Saturasi Oksigen (SpO2) abnormal
-  const spo2Match = text.match(/\b(?:SpO2|Sat(?:urasi)?)\s*[:-]?\s*(\d{1,3})\s*%?\b/i)
+  // 3. Status Neurologis: Defisit Motorik, Paresis, Plegia
+  const motorikMatch = text.match(/\b(?:motorik|kekuatan|extremitas|ekstremitas)\s*[:-]?\s*([0-5]{1,4}\s*[/x]\s*[0-5]{1,4}|[0-5]\s*[/x]\s*[0-5])/i)
+  if (motorikMatch) {
+    const cleanMot = motorikMatch[1].replace(/\s+/g, '')
+    if (!/^(?:5555[/x]5555|5[/x]5)$/.test(cleanMot)) {
+      add(`Motorik ${cleanMot}`, 10)
+    }
+  }
+
+  const paresisMatch = text.match(/\b(hemiparesis|hemiplegia|tetraparesis|tetraplegia|monoparesis|paraparesis)\s*(dextra|sinistra|bilateral|kiri|kanan)?\b/i)
+  if (paresisMatch && !/\b(?:tidak\s*ada|disangkal|dbn|nihil)\b/i.test(paresisMatch[0])) {
+    const term = paresisMatch[1].charAt(0).toUpperCase() + paresisMatch[1].slice(1).toLowerCase()
+    const side = paresisMatch[2] ? ` ${paresisMatch[2]}` : ''
+    add(`${term}${side}`.trim(), 10)
+  }
+
+  // Nervus Cranialis & Gejala Fokal (Abaikan jika 'sde' / sulit dievaluasi)
+  const nCranialMatch = text.match(/\b(?:parese|paresis|palsy)\s*(?:N\.?\s*(?:VII|XII|III|IV|VI)|nervus\s*\w+|facial|lingual)\s*(?:dextra|sinistra|kiri|kanan)?\s*(?:sentral|perifer)?\b/i)
+  if (nCranialMatch) {
+    const idx = text.indexOf(nCranialMatch[0])
+    const afterMatch = text.slice(idx + nCranialMatch[0].length, idx + nCranialMatch[0].length + 15)
+    if (!/\bsde\b|sulit\s*d/i.test(afterMatch)) {
+      add(nCranialMatch[0].trim(), 13)
+    }
+  } else {
+    const mencong = text.match(/\b(mulut\s*mencong|asimetris\s*wajah|lagof?talmus|disartria|bicara\s*pelo|afasia)\b/i)
+    if (mencong) {
+      const idx = text.indexOf(mencong[0])
+      const afterMatch = text.slice(idx + mencong[0].length, idx + mencong[0].length + 15)
+      if (!/\bsde\b|sulit\s*d/i.test(afterMatch)) {
+        add(mencong[1].charAt(0).toUpperCase() + mencong[1].slice(1), 13)
+      }
+    }
+  }
+
+  // Refleks Patologis Positif
+  if (/\b(?:babinski|chaddock|oppenheim|gordon|hoffman|tromner)\s*[:-]?\s*(?:(?:\+|-\/\+|\+\/-|\+\/\+)|(?:\(\s*\+\s*\)))/i.test(text)) {
+    const refMatch = text.match(/\b(babinski|chaddock|hoffman)\b/i)
+    const name = refMatch ? (refMatch[1].charAt(0).toUpperCase() + refMatch[1].slice(1)) : 'Refleks patologis'
+    add(`${name} (+)`, 14)
+  }
+
+  // Kaku Kuduk / Meningeal Signs Positif (pastikan bukan tanda minus)
+  if (/\b(?:kaku\s*kuduk|meningeal\s*sign|brudzinski|kernig)\s*(?:\(\s*\+\s*\)|\+)\b/i.test(text) && !/\bkaku\s*(?:kuduk|leher)\s*\(\s*-\s*\)/i.test(text)) {
+    add('Kaku kuduk (+)', 15)
+  }
+
+  // Kejang Aktif / Status Epileptikus
+  const seizureMatch = text.match(/\b(status\s*epileptikus|kejang\s*(?:berulang|tonik|klonik|umum)?(?:\s*\(\+\))?)\b/i)
+  if (seizureMatch && !isClauseNegated(seizureMatch[0])) {
+    add('Kejang (+)', 9)
+  }
+
+  // 4. Oksigenasi & Tanda-Tanda Vital Kritis
+  const spo2Match = text.match(/\b(?:SpO2|Sat(?:urasi)?)\s*[:-]?\s*(\d{1,3})\s*%(?:\s*(RA|room\s*air))?/i)
   if (spo2Match) {
     const spo2 = parseInt(spo2Match[1], 10)
     if (spo2 < 95) {
-      findings.push(`SpO2 ${spo2}%`)
+      const isRa = !!spo2Match[2]
+      add(`SpO2 ${spo2}%${isRa ? ' (RA)' : ''}`, spo2 < 90 ? 6 : 10)
     }
   }
 
-  // Suhu Febris
+  // Dyspneu / Tanda Distres Pernapasan
+  if (/\b(?:dyspne[au]|sesak(?:\s*napas|\s*nafas)?|napas\s*cuping\s*hidung|retraksi\s*dada)\s*(?:\(\s*\+\s*\)|\+)\b/i.test(text) ||
+      (/\b(?:dyspne[au]|sesak)\b/i.test(text) && !isClauseNegated(text.match(/\b(?:dyspne[au]|sesak)[^\n,;]*/i)?.[0] || ''))) {
+    const dMatch = text.match(/\b(?:dyspne[au]|sesak)[^\n,;]*/i)?.[0] || ''
+    if (!isClauseNegated(dMatch)) {
+      add('Dyspneu (+)', 11)
+    }
+  }
+
+  // Auskultasi Paru: Rhonki & Wheezing
+  if (/\b(?:Rh|Ronkhi|Rhonki)\s*[:-]?\s*(?:(?:\+|-\/\+|\+\/-|\+\/\+)|(?:\(\s*\+\s*\)))/i.test(text)) {
+    add('Rhonki (+)', 12)
+  }
+  if (/\b(?:Wh|Wheezing)\s*[:-]?\s*(?:(?:\+|-\/\+|\+\/-|\+\/\+)|(?:\(\s*\+\s*\)))/i.test(text)) {
+    add('Wheezing (+)', 12)
+  }
+
+  // Tekanan Darah (TD)
+  const tdMatch = text.match(/\b(?:TD|BP|Tens[ie])\s*[:-]?\s*(\d{2,3})\s*[/x]\s*(\d{2,3})\b/i)
+  if (tdMatch) {
+    const sys = parseInt(tdMatch[1], 10)
+    const dia = parseInt(tdMatch[2], 10)
+    if (sys >= 180 || dia >= 110) {
+      add(`TD ${sys}/${dia} (Krisis HT)`, 7)
+    } else if (sys <= 90 || dia <= 60) {
+      add(`TD ${sys}/${dia} (Hipotensi/Syok)`, 7)
+    } else if (sys >= 140 || dia >= 90) {
+      add(`TD ${sys}/${dia}`, 20)
+    }
+  }
+
+  // Laju Nadi (HR)
+  const hrMatch = text.match(/\b(?:HR|Nadi|Pulse)\s*[:-]?\s*(\d{2,3})\s*(?:x\/m|bpm|x|kali\/mnt)?\b/i)
+  if (hrMatch) {
+    const hr = parseInt(hrMatch[1], 10)
+    if (hr >= 120 || hr <= 50) {
+      add(`HR ${hr}x/m`, 8)
+    } else if (hr > 100 || hr < 60) {
+      add(`HR ${hr}x/m`, 18)
+    }
+  }
+
+  // Laju Nafas (RR)
+  const rrMatch = text.match(/\b(?:RR|Resp)\s*[:-]?\s*(\d{1,2})\s*(?:x\/m|kali\/mnt)?\b/i)
+  if (rrMatch) {
+    const rr = parseInt(rrMatch[1], 10)
+    if (rr >= 24 || rr <= 10) {
+      add(`RR ${rr}x/m`, 11)
+    }
+  }
+
+  // Suhu Febris / Hipotermia
   const suhuMatch = text.match(/\b(?:Suhu|Temp|T|S)\s*[:-]?\s*(\d{2}(?:[.,]\d+)?)\s*(?:°?C|c)?\b/i)
   if (suhuMatch) {
     const s = parseFloat(suhuMatch[1].replace(',', '.'))
     if (s >= 37.8) {
-      findings.push(`Suhu ${s}°C`)
+      add(`Suhu ${s}°C`, 16)
+    } else if (s <= 35.5) {
+      add(`Suhu ${s}°C (Hipotermia)`, 16)
     }
   }
 
-  // 2. Kesadaran / GCS
-  const gcsMatch = text.match(/\b(GCS\s*(?:E\d+V\d+M\d+|\d{1,2}))\b/i)
-  if (gcsMatch) {
-    const gcsStr = gcsMatch[1]
-    const gcsNum = gcsStr.match(/\b(\d{1,2})\b/)?.[1]
-    if (gcsNum && parseInt(gcsNum, 10) < 15) {
-      findings.push(gcsStr.toUpperCase())
-    } else if (/E[1-3]V[1-4]M[1-5]/i.test(gcsStr)) {
-      findings.push(gcsStr.toUpperCase())
-    }
-  }
-
-  // Kesadaran non-compos mentis
-  const kesadaranMatch = text.match(/\b(somnolen|sopor|apatis|delirium|stupor|koma)\b/i)
-  if (kesadaranMatch && !findings.some(f => f.toLowerCase().includes(kesadaranMatch[1].toLowerCase()))) {
-    findings.push(kesadaranMatch[1].charAt(0).toUpperCase() + kesadaranMatch[1].slice(1))
-  }
-
-  // 3. Status Neurologis / Defisit Motorik
-  // Kekuatan Motorik (misal 2222/5555, 2/5, 3333/5555)
-  const motorikMatch = text.match(/\b(?:motorik|kekuatan|extremitas|ekstremitas)\s*[:-]?\s*([0-5]\s*[0-5]?\s*[0-5]?\s*[0-5]?\s*[\/x]\s*[0-5]\s*[0-5]?\s*[0-5]?\s*[0-5]?|[0-5]\/[0-5])/i)
-  if (motorikMatch) {
-    const cleanMot = motorikMatch[1].replace(/\s+/g, '')
-    findings.push(`Motorik ${cleanMot}`)
-  } else {
-    // Cari paresis / plegia
-    const paresisMatch = text.match(/\b(hemiparesis|hemiplegia|tetraparesis|tetraplegia|monoparesis|paraparesis)\s*(dextra|sinistra|bilateral|kiri|kanan)?\b/i)
-    if (paresisMatch) {
-      findings.push(paresisMatch[0].trim())
-    }
-  }
-
-  // Paresis Nervus Cranialis (N.VII, N.XII sentral/perifer)
-  const pareseNervus = text.match(/\b(?:parese|paresis)\s*(N\.?\s*(?:VII|XII|III|IV|VI)|nervus\s*\w+)\s*(?:dextra|sinistra|kiri|kanan)?\s*(?:sentral|perifer)?\b/i)
-  if (pareseNervus) {
-    findings.push(pareseNervus[0].trim())
-  } else {
-    const mencong = text.match(/\b(mulut\s*mencong|asimetris\s*wajah|lagof?talmus)\b/i)
-    if (mencong) findings.push(mencong[1])
-  }
-
-  // Refleks Patologis Positif
-  if (/\b(?:babinski|chaddock|oppenheim|gordon|hoffman|tromner)\s*(?:\(\s*\+\s*\)|\+)\b/i.test(text)) {
-    const refMatch = text.match(/\b(babinski|chaddock|hoffman)\s*(?:\(\s*\+\s*\)|\+)/i)
-    findings.push(`${refMatch ? refMatch[1] : 'Refleks patologis'} (+)`)
-  }
-
-  // Kaku Kuduk / Meningeal Signs
-  if (/\b(?:kaku\s*kuduk|meningeal\s*sign|brudzinski|kernig)\s*(?:\(\s*\+\s*\)|\+)\b/i.test(text)) {
-    findings.push('Kaku kuduk (+)')
-  }
-
-  // Pupil Anisokor
-  if (/\b(?:pupil\s*anisokor|anisokor)\b/i.test(text)) {
-    findings.push('Pupil anisokor')
-  }
-
-  // 4. Laboratorium Abnormal Kunci
-  // GDS / GDA (Gula Darah Sewaktu)
+  // 5. Laboratorium Abnormal Kunci
   const gdsMatch = text.match(/\b(?:GDS|GDA|Gula\s*Darah)\s*[:-]?\s*(\d{2,3})\b/i)
   if (gdsMatch) {
     const val = parseInt(gdsMatch[1], 10)
-    if (val >= 180 || val <= 70) findings.push(`GDS ${val}`)
+    if (val <= 70) {
+      add(`GDS ${val} (Hipoglikemia)`, 5)
+    } else if (val >= 180) {
+      add(`GDS ${val}`, 17)
+    }
   }
 
-  // Leukosit
   const leukoMatch = text.match(/\b(?:Leuko(?:sit)?|WBC)\s*[:-]?\s*(\d{1,2}(?:[.,]\d{3})?|\d{4,5})\b/i)
   if (leukoMatch) {
     const rawVal = leukoMatch[1].replace(/[.,]/g, '')
     const val = parseInt(rawVal, 10)
-    if (val > 11000 || val < 4000) findings.push(`Leuko ${leukoMatch[1]}`)
+    if (val > 11000 || val < 4000) add(`Leuko ${leukoMatch[1]}`, 22)
   }
 
-  // Hemoglobin (Hb)
   const hbMatch = text.match(/\b(?:Hb|Hgb|Hemoglobin)\s*[:-]?\s*(\d{1,2}(?:[.,]\d+)?)\b/i)
   if (hbMatch) {
     const val = parseFloat(hbMatch[1].replace(',', '.'))
-    if (val < 10.0 || val > 17.5) findings.push(`Hb ${val}`)
+    if (val < 10.0 || val > 17.5) add(`Hb ${val}`, 22)
   }
 
-  // Kreatinin
+  const tromboMatch = text.match(/\b(?:Trombo(?:sit)?|PLT)\s*[:-]?\s*(\d{1,3}(?:[.,]\d{3})?|\d{4,6})\b/i)
+  if (tromboMatch) {
+    const rawVal = tromboMatch[1].replace(/[.,]/g, '')
+    const val = parseInt(rawVal, 10)
+    if (val < 100000) add(`Trombo ${tromboMatch[1]}`, 22)
+  }
+
   const crMatch = text.match(/\b(?:Kreatinin|Creatinine|Cr)\s*[:-]?\s*(\d{1,2}(?:[.,]\d+)?)\b/i)
   if (crMatch) {
     const val = parseFloat(crMatch[1].replace(',', '.'))
-    if (val >= 1.4) findings.push(`Cr ${val}`)
+    if (val >= 1.4) add(`Cr ${val}`, 23)
   }
 
-  // Ureum
   const urMatch = text.match(/\b(?:Ureum|Ur)\s*[:-]?\s*(\d{2,3}(?:[.,]\d+)?)\b/i)
   if (urMatch) {
     const val = parseFloat(urMatch[1].replace(',', '.'))
-    if (val >= 50) findings.push(`Ur ${val}`)
+    if (val >= 50) add(`Ur ${val}`, 23)
   }
 
-  // Natrium (Na)
   const naMatch = text.match(/\b(?:Natrium|Na)\s*[:-]?\s*(\d{2,3}(?:[.,]\d+)?)\b/i)
   if (naMatch) {
     const val = parseFloat(naMatch[1].replace(',', '.'))
-    if (val < 135 || val > 145) findings.push(`Na ${val}`)
+    if (val < 135 || val > 145) add(`Na ${val}`, 23)
   }
-
-  // Kalium (K)
   const kMatch = text.match(/\b(?:Kalium|K)\s*[:-]?\s*(\d{1,2}(?:[.,]\d+)?)\b/i)
   if (kMatch) {
     const val = parseFloat(kMatch[1].replace(',', '.'))
-    if (val < 3.5 || val > 5.1) findings.push(`K ${val}`)
+    if (val < 3.5 || val > 5.1) add(`K ${val}`, 23)
   }
 
-  // 5. Radiologi / Penunjang Positif Kunci
-  // CT Scan Kepala
+  // 6. Radiologi Kunci
   const ctMatch = text.match(/\b(?:CT[\s-]?Scan(?:\s*kepala)?|MSCT)\s*[:-]?\s*([^.\n;]+)/i)
   if (ctMatch) {
     let ctRes = ctMatch[1].trim()
     ctRes = ctRes.replace(/^(?:tampak|kesan|didapatkan|hasil)\s*[:-]?\s*/i, '').trim()
-    if (ctRes && !NEGATIVE_FINDINGS.some(n => n.test(ctRes))) {
-      findings.push(ctRes.length > 35 ? `CT: ${ctRes.substring(0, 35)}...` : `CT: ${ctRes}`)
+    if (ctRes && !NEGATIVE_FINDINGS.some((n) => n.test(ctRes))) {
+      add(ctRes.length > 35 ? `CT: ${ctRes.substring(0, 35)}...` : `CT: ${ctRes}`, 5)
     }
   } else {
-    // Deteksi cepat jika ada infark / perdarahan / edema
     const radKey = text.match(/\b(infark\s*(?:luas|cerebri|lacunar|cerebel)|ICH\s*(?:vol\s*\d+cc)?|EDH|SDH|SAH|edema\s*serebri|midline\s*shift)\b/i)
-    if (radKey && !findings.some(f => f.toLowerCase().includes(radKey[1].toLowerCase()))) {
-      findings.push(radKey[0].trim())
+    if (radKey && !NEGATIVE_FINDINGS.some((n) => n.test(radKey[0]))) {
+      add(radKey[0].trim(), 5)
     }
   }
 
-  // Rontgen Thorax
-  if (/\b(?:kardiomegali|cardiomegaly|infiltrat|bronkopneumonia|edema\s*paru|efusi\s*pleura)\b/i.test(text)) {
-    const thMatch = text.match(/\b(kardiomegali|infiltrat\s*(?:paru)?|bronkopneumonia|edema\s*paru|efusi\s*pleura)\b/i)
-    if (thMatch) findings.push(thMatch[1].charAt(0).toUpperCase() + thMatch[1].slice(1))
+  const thMatch = text.match(/\b(kardiomegali|cardiomegaly|infiltrat\s*(?:paru)?|bronkopneumonia|edema\s*paru|efusi\s*pleura)\b/i)
+  if (thMatch && !NEGATIVE_FINDINGS.some((n) => n.test(thMatch[0]))) {
+    add(thMatch[1].charAt(0).toUpperCase() + thMatch[1].slice(1), 24)
   }
 
-  return findings.slice(0, 5) // Maksimal 5 temuan objektif kunci
+  // Sort findings by priority ascending (most urgent first)
+  items.sort((a, b) => a.priority - b.priority)
+
+  // Return up to 7 most critical findings
+  return items.map((it) => it.text).slice(0, 7)
 }
 
 /**
  * Mengambil ringkasan klinis terpadu (S & O) untuk kartu pasien
  */
-export function extractClinicalHighlights(note?: ProgressNote | null): ClinicalHighlights {
-  if (!note) {
+export function extractClinicalHighlights(note?: ProgressNote | null, noteWithS?: ProgressNote | null): ClinicalHighlights {
+  if (!note && !noteWithS) {
     return { sList: [], oList: [], hasAbnormal: false }
   }
 
-  const sList = extractSubjectivePositives(note.S)
-  const oList = extractObjectivePositives(note.O_pemfis, note.O_penunjang)
+  const sText = note?.S?.trim() || noteWithS?.S?.trim() || ''
+  const sList = extractSubjectivePositives(sText)
+  const oList = extractObjectivePositives(note?.O_pemfis, note?.O_penunjang)
 
   return {
     sList,

@@ -212,11 +212,31 @@ export default function Rekap() {
                         <span className="rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-bold text-primary">
                           {p.jaminan}
                         </span>
-                        <span className={`rounded-full px-2.5 py-0.5 text-xs font-bold ${
-                          p.status_rawat === 'aktif' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200/60' : 'bg-surface text-ink-muted'
-                        }`}>
-                          {p.status_rawat === 'aktif' ? `Rawat H-${hariKe(p.tgl_mrs)}` : 'KRS'}
-                        </span>
+                        {p.status_rawat === 'aktif' ? (
+                          <span className="rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200/60 px-2.5 py-0.5 text-xs font-bold">
+                            Rawat H-{hariKe(p.tgl_mrs)}
+                          </span>
+                        ) : p.keterangan_krs === 'Meninggal' ? (
+                          <span className="rounded-full bg-rose-100 text-rose-800 border border-rose-300 px-2.5 py-0.5 text-xs font-extrabold">
+                            Meninggal
+                          </span>
+                        ) : p.keterangan_krs === 'APS' ? (
+                          <span className="rounded-full bg-amber-100 text-amber-800 border border-amber-300 px-2.5 py-0.5 text-xs font-bold">
+                            KRS: APS
+                          </span>
+                        ) : p.keterangan_krs === 'Alih Rawat' ? (
+                          <span className="rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200 px-2.5 py-0.5 text-xs font-bold">
+                            Alih Rawat {p.detail_krs ? `(${p.detail_krs})` : ''}
+                          </span>
+                        ) : p.keterangan_krs === 'Rujuk' ? (
+                          <span className="rounded-full bg-sky-50 text-sky-700 border border-sky-200 px-2.5 py-0.5 text-xs font-bold">
+                            Rujuk {p.detail_krs ? `(${p.detail_krs})` : ''}
+                          </span>
+                        ) : (
+                          <span className="rounded-full bg-surface text-ink-muted border border-slate-200/60 px-2.5 py-0.5 text-xs font-bold">
+                            {p.keterangan_krs ? `KRS: ${p.keterangan_krs}` : 'KRS'}
+                          </span>
+                        )}
                         {p.riwayat_rawat && p.riwayat_rawat.length > 0 && (
                           <span className="rounded-full bg-amber-50 text-amber-800 border border-amber-200/60 px-2.5 py-0.5 text-xs font-bold">
                             Rawat ke-{p.riwayat_rawat.length + 1}
@@ -409,7 +429,7 @@ export default function Rekap() {
       )}
 
       {toast && (
-        <aside aria-label="Notifikasi" className="fixed inset-x-0 bottom-24 z-50 mx-auto w-fit rounded-2xl bg-ink/90 backdrop-blur-md px-5 py-2.5 text-xs font-semibold text-white shadow-2xl animate-in fade-in slide-in-from-bottom-2">
+        <aside aria-label="Notifikasi" className="fixed inset-x-0 bottom-24 z-50 mx-auto w-fit rounded-2xl bg-gradient-to-r from-primary to-primary-deep px-5 py-2.5 text-xs font-bold text-white shadow-xl shadow-primary/35 border border-white/20 animate-in fade-in slide-in-from-bottom-2">
           {toast}
         </aside>
       )}
