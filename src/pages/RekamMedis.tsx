@@ -19,6 +19,7 @@ export default function RekamMedis() {
   const [isRingkas, setIsRingkas] = useState(false) // Default lengkap di rekam medis
   const [filterJaminan, setFilterJaminan] = useState<string>('semua')
   const [filterStatus, setFilterStatus] = useState<string>('semua')
+  const [filterPeran, setFilterPeran] = useState<string>('semua')
 
   const patients = useLiveQuery(() => db.patients.toArray(), [], appCache.allPatients || appCache.aktifPatients)
   const wards = useLiveQuery(() => db.wards.toArray(), [], appCache.wards)
@@ -118,9 +119,16 @@ export default function RekamMedis() {
         if (filterStatus === 'krs_rujuk') return p.status_rawat === 'krs' && p.keterangan_krs === 'Rujuk'
         return true
       })()
-      return matchesSearch && matchesJaminan && matchesStatus
+      const matchesPeran = (() => {
+        if (filterPeran === 'semua') return true
+        if (filterPeran === 'Leader') return !p.peran_rawat || p.peran_rawat === 'Leader'
+        if (filterPeran === 'Raber') return p.peran_rawat === 'Raber'
+        if (filterPeran === 'Konsul') return p.peran_rawat === 'Konsul'
+        return true
+      })()
+      return matchesSearch && matchesJaminan && matchesStatus && matchesPeran
     })
-  }, [q, patients, filterJaminan, filterStatus])
+  }, [q, patients, filterJaminan, filterStatus, filterPeran])
 
   return (
     <main className="space-y-5 p-5">
@@ -140,14 +148,27 @@ export default function RekamMedis() {
             options={[
               { value: 'semua', label: 'Semua Status' },
               { value: 'aktif', label: 'Rawat Aktif' },
-              { value: 'krs', label: 'Semua KRS' },
-              { value: 'krs_izin', label: 'KRS: Izin Dokter' },
-              { value: 'krs_aps', label: 'KRS: APS' },
-              { value: 'krs_meninggal', label: 'KRS: Meninggal' },
-              { value: 'krs_alih', label: 'KRS: Alih Rawat' },
-              { value: 'krs_rujuk', label: 'KRS: Rujuk' },
+              { value: 'krs', label: 'Semua Pasien Keluar' },
+              { value: 'krs_izin', label: 'KRS (Izin Dokter)' },
+              { value: 'krs_aps', label: 'APS' },
+              { value: 'krs_meninggal', label: 'MD (Meninggal)' },
+              { value: 'krs_alih', label: 'Alih Rawat' },
+              { value: 'krs_rujuk', label: 'Rujuk' },
             ]}
             className="w-40"
+          />
+
+          {/* Filter Peran: Leader, Raber, Konsul */}
+          <CustomSelect
+            value={filterPeran}
+            onChange={(val) => setFilterPeran(val)}
+            options={[
+              { value: 'semua', label: 'Semua Peran' },
+              { value: 'Leader', label: 'Leader' },
+              { value: 'Raber', label: 'Raber' },
+              { value: 'Konsul', label: 'Konsul' },
+            ]}
+            className="w-32"
           />
 
           {/* Filter Jaminan */}
@@ -256,6 +277,21 @@ export default function RekamMedis() {
                       <span className="rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-bold text-primary">
                         {p.jaminan}
                       </span>
+                      {p.peran_rawat === 'Raber' || (p.dpjp_utama && p.dpjp_utama !== 'Neuro' && p.peran_rawat !== 'Konsul') ? (
+                        <span className="rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200 px-2.5 py-0.5 text-xs font-bold">
+                          Raber{p.dpjp_utama && p.dpjp_utama !== 'Neuro' ? ` · ${p.dpjp_utama}` : ''}
+                        </span>
+                      ) : p.peran_rawat === 'Konsul' ? (
+                        <span className="rounded-full bg-sky-50 text-sky-700 border border-sky-200 px-2.5 py-0.5 text-xs font-bold">
+                          Konsul{p.dpjp_utama && p.dpjp_utama !== 'Neuro' ? ` · ${p.dpjp_utama}` : ''}
+                        </span>
+                      ) : (
+                        p.tim_raber && p.tim_raber.length > 0 && (
+                          <span className="rounded-full bg-slate-100 text-slate-700 border border-slate-200 px-2.5 py-0.5 text-xs font-semibold">
+                            Raber: {p.tim_raber.join(', ')}
+                          </span>
+                        )
+                      )}
                       {p.tgl_onset && (
                         <span className="rounded-full bg-surface px-2.5 py-0.5 text-xs font-semibold text-ink-muted">
                           Onset OH-{hariKe(p.tgl_onset)}
@@ -267,11 +303,11 @@ export default function RekamMedis() {
                         </span>
                       ) : p.keterangan_krs === 'Meninggal' ? (
                         <span className="rounded-full px-2.5 py-0.5 text-xs font-extrabold bg-rose-100 text-rose-800 border border-rose-300">
-                          Meninggal {p.tgl_krs ? `· ${formatDate(p.tgl_krs)}` : ''}
+                          MD {p.tgl_krs ? `· ${formatDate(p.tgl_krs)}` : ''}
                         </span>
                       ) : p.keterangan_krs === 'APS' ? (
                         <span className="rounded-full px-2.5 py-0.5 text-xs font-bold bg-amber-100 text-amber-800 border border-amber-300">
-                          KRS: APS {p.tgl_krs ? `· ${formatDate(p.tgl_krs)}` : ''}
+                          APS {p.tgl_krs ? `· ${formatDate(p.tgl_krs)}` : ''}
                         </span>
                       ) : p.keterangan_krs === 'Alih Rawat' ? (
                         <span className="rounded-full px-2.5 py-0.5 text-xs font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
@@ -283,7 +319,7 @@ export default function RekamMedis() {
                         </span>
                       ) : (
                         <span className="rounded-full px-2.5 py-0.5 text-xs font-bold bg-slate-100 text-slate-700 border border-slate-200">
-                          {p.keterangan_krs ? `KRS: ${p.keterangan_krs}` : 'Sudah KRS'} {p.tgl_krs ? `· ${formatDate(p.tgl_krs)}` : ''}
+                          KRS {p.tgl_krs ? `· ${formatDate(p.tgl_krs)}` : ''}
                         </span>
                       )}
                       {wardInfo && (

@@ -6,8 +6,10 @@ import { rapikan } from '../ai'
 import { convertToWebP } from '../utils/mediaCompress'
 import { getLocalDateString } from '../utils/dateFormat'
 import { useBodyScrollLock } from '../utils/useBodyScrollLock'
-import { getVisiteSubjectivePrefill } from '../utils/clinicalExtractor'
+import { getVisiteSubjectivePrefill, extractClinicalMetrics } from '../utils/clinicalExtractor'
 import Masked from './Masked'
+import DateInput from './DateInput'
+import PredictiveInput from './PredictiveInput'
 
 interface VisiteModalProps {
   patient: Patient
@@ -186,6 +188,11 @@ export default function VisiteModal({
         }))
 
       const finalS = S.trim() || '-'
+      const metrics = extractClinicalMetrics({
+        S: finalS,
+        O_pemfis: O_pemfis.trim(),
+        O_penunjang: O_penunjang.trim(),
+      })
 
       // Simpan catatan CPPT baru untuk visite hari ini
       await db.progressNotes.add({
@@ -197,6 +204,7 @@ export default function VisiteModal({
         A: aItems.length > 0 ? aItems : (latestNote?.A || []),
         P,
         catatan: catatan.trim() || undefined,
+        metrics,
       })
 
       // Jika diagnosis utama berubah, perbarui juga di profil pasien
@@ -239,12 +247,13 @@ export default function VisiteModal({
                 <span className="text-xs font-normal text-ink-muted">({patient.usia})</span>
               )}
             </h2>
-            <input
-              type="date"
-              value={tanggal}
-              onChange={(e) => setTanggal(e.target.value)}
-              className="h-7 rounded-lg border border-slate-200 bg-slate-50/80 px-2 text-[11px] font-medium text-ink focus:bg-white focus:border-primary outline-none cursor-pointer shrink-0"
-            />
+            <div className="w-32 shrink-0">
+              <DateInput
+                value={tanggal}
+                onChange={(val) => setTanggal(val)}
+                className="h-7 rounded-lg border border-slate-200 bg-slate-50/80 px-2 text-[11px] font-medium text-ink focus:bg-white focus:border-primary outline-none cursor-pointer"
+              />
+            </div>
           </div>
           <button
             type="button"
@@ -403,18 +412,14 @@ export default function VisiteModal({
                 )}
               </div>
               <div className="flex items-center gap-1.5 mb-1.5">
-                <input
-                  type="text"
+                <PredictiveInput
+                  type="procedure"
                   value={quickPdxInput}
-                  onChange={(e) => setQuickPdxInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault()
-                      handleAddPdx()
-                    }
-                  }}
-                  placeholder="Rencana penunjang (Enter utk tambah)..."
-                  className="flex-1 h-8 rounded-xl border border-slate-200 px-3 text-xs text-ink placeholder:text-ink-muted/40 focus:border-primary focus:ring-1 focus:ring-primary/20 outline-none"
+                  onChange={(val) => setQuickPdxInput(val)}
+                  onSelect={(item) => setQuickPdxInput(item.name)}
+                  placeholder="Rencana penunjang / ICD-9..."
+                  className="flex-1"
+                  inputClassName="w-full h-8 rounded-xl border border-slate-200 px-3 text-xs text-ink placeholder:text-ink-muted/40 focus:border-primary focus:ring-1 focus:ring-primary/20 outline-none"
                 />
                 <button
                   type="button"
@@ -478,18 +483,17 @@ export default function VisiteModal({
                 )}
               </div>
               <div className="flex items-center gap-1.5 mb-1.5">
-                <input
-                  type="text"
+                <PredictiveInput
+                  type="drug"
                   value={quickPtxInput}
-                  onChange={(e) => setQuickPtxInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault()
-                      handleAddPtx()
-                    }
+                  onChange={(val) => setQuickPtxInput(val)}
+                  onSelect={(item) => {
+                    const text = item.detail ? `${item.name} ${item.detail}` : item.name
+                    setQuickPtxInput(text)
                   }}
-                  placeholder="Ketik obat & dosis (Enter utk tambah)..."
-                  className="flex-1 h-8 rounded-xl border border-slate-200 px-3 text-xs text-ink placeholder:text-ink-muted/40 focus:border-primary focus:ring-1 focus:ring-primary/20 outline-none"
+                  placeholder="Ketik obat & dosis (Fornas)..."
+                  className="flex-1"
+                  inputClassName="w-full h-8 rounded-xl border border-slate-200 px-3 text-xs text-ink placeholder:text-ink-muted/40 focus:border-primary focus:ring-1 focus:ring-primary/20 outline-none"
                 />
                 <button
                   type="button"

@@ -106,16 +106,49 @@ export default function TemplateTab() {
     [templates]
   )
 
-  const patientOptions = useMemo(
-    () => [
+  const patientOptions = useMemo(() => {
+    if (!patients || patients.length === 0) {
+      return [{ value: '0', label: '— Pilih Pasien —' }]
+    }
+    const aktifList = patients.filter((p) => p.status_rawat === 'aktif')
+    const krsList = patients.filter((p) => p.status_rawat === 'krs')
+
+    const opts: { value: string; label: string; isHeader?: boolean }[] = [
       { value: '0', label: '— Pilih Pasien —' },
-      ...(patients?.map((p) => ({
-        value: String(p.id),
-        label: `${p.title ? p.title + ' ' : ''}${p.nama_depan || (p as any).inisial || 'Pasien'} (RM: ${p.no_rm})`,
-      })) || []),
-    ],
-    [patients]
-  )
+    ]
+
+    if (aktifList.length > 0) {
+      opts.push({ value: 'header_aktif', label: '── PASIEN RAWAT INAP (AKTIF) ──', isHeader: true })
+      aktifList.forEach((p) => {
+        opts.push({
+          value: String(p.id),
+          label: `${p.title ? p.title + ' ' : ''}${p.nama_depan || (p as any).inisial || 'Pasien'} (RM: ${p.no_rm})`,
+        })
+      })
+    }
+
+    if (krsList.length > 0) {
+      opts.push({ value: 'header_krs', label: '── PASIEN SUDAH KELUAR / KRS (ARSIP) ──', isHeader: true })
+      krsList.forEach((p) => {
+        const keluarLabel = p.keterangan_krs === 'Meninggal'
+          ? 'MD'
+          : p.keterangan_krs === 'APS'
+          ? 'APS'
+          : p.keterangan_krs === 'Alih Rawat'
+          ? 'Alih Rawat'
+          : p.keterangan_krs === 'Rujuk'
+          ? 'Rujuk'
+          : 'KRS'
+        const krsTag = p.tgl_krs ? ` [${keluarLabel}: ${formatDate(p.tgl_krs)}]` : ` [${keluarLabel}]`
+        opts.push({
+          value: String(p.id),
+          label: `${p.title ? p.title + ' ' : ''}${p.nama_depan || (p as any).inisial || 'Pasien'} (RM: ${p.no_rm})${krsTag}`,
+        })
+      })
+    }
+
+    return opts
+  }, [patients])
 
   // Seed default clinical templates if empty
   useMemo(async () => {

@@ -267,8 +267,20 @@ function PatientCardContent({
       }
     }
 
+    // Jika pasien berstatus Konsul, tampilkan di PDx
+    if (patient.peran_rawat === 'Konsul') {
+      const konsulLabel = patient.dpjp_utama && patient.dpjp_utama !== 'Neuro' ? `Konsul ${patient.dpjp_utama}` : 'Konsul'
+      if (!seenNames.has(konsulLabel.toLowerCase())) {
+        list.unshift({
+          nama: konsulLabel,
+          status: 'selesai',
+          kategori: 'Lainnya',
+        })
+      }
+    }
+
     return list
-  }, [penunjangList, pdxRawItems])
+  }, [penunjangList, pdxRawItems, patient.peran_rawat, patient.dpjp_utama])
 
   const pdxSummary = useMemo(() => {
     if (diagnosticItems.length === 0) return ''
@@ -305,6 +317,14 @@ function PatientCardContent({
             {patient.title} <Masked value={patient.nama_depan || (patient as any).inisial} type="name" />
           </span>
           {cleanUsia && <span className="caption text-xs font-medium shrink-0">({cleanUsia} th)</span>}
+          {patient.dpjp_utama && patient.dpjp_utama !== 'Neuro' && patient.peran_rawat !== 'Konsul' && (
+            <span
+              title={`Leader: ${patient.dpjp_utama}`}
+              className="inline-flex items-center px-1.5 py-0.2 rounded-md text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200/80 shrink-0"
+            >
+              {patient.dpjp_utama}
+            </span>
+          )}
         </div>
 
         <div className="flex items-center gap-1.5 shrink-0">
@@ -510,7 +530,7 @@ function PatientCardContent({
             <div className="py-1.5 -mx-1 px-1">
               <div className="flex items-start gap-1.5">
                 <span className="font-bold text-primary text-xs shrink-0 mt-0.5">P:</span>
-                <div className="min-w-0 flex-1 space-y-0.5">
+                <div className="min-w-0 flex-1 space-y-2">
                   {/* Sub-baris 1: PDx */}
                   {hasPdx && (
                     <div
@@ -530,7 +550,7 @@ function PatientCardContent({
                               <div key={idx} className="flex items-start gap-1.5 text-ink font-medium">
                                 <span className="text-primary font-bold shrink-0 mt-0.5">•</span>
                                 <span className="break-words">
-                                  <b>{item.nama}</b>{item.hasil ? ` (${item.hasil})` : ''}
+                                   <b>{item.nama}</b>{item.hasil ? ` (${item.hasil})` : ''}
                                 </span>
                               </div>
                             ))}
@@ -550,6 +570,8 @@ function PatientCardContent({
                     <div
                       onClick={(e) => { if (canExpandPtx) toggleSection('PTx', e) }}
                       className={`flex items-start justify-between gap-1.5 rounded-lg -mx-0.5 px-0.5 ${
+                        hasPdx ? 'pt-2 border-t border-slate-100/90' : ''
+                      } ${
                         canExpandPtx ? 'cursor-pointer hover:bg-slate-50/70 active:bg-slate-100/70' : ''
                       }`}
                     >
@@ -835,12 +857,10 @@ function WardColumn({
           <span
             className={`rounded-full px-2.5 py-0.5 text-[11px] font-bold shadow-2xs min-w-[1.4rem] text-center transition-all ${
               isOverDifferentWard
-                ? 'bg-primary text-white font-extrabold'
-                : hasUnvisited
-                ? 'bg-primary/10 border border-primary/30 text-primary animate-flicker-blue-badge'
+                ? 'bg-primary-deep text-white font-extrabold ring-2 ring-primary/40'
                 : patients.length > 0
-                ? 'bg-slate-100 border border-slate-200/80 text-slate-500'
-                : 'bg-white/90 border border-slate-200/60 text-ink-muted'
+                ? 'bg-primary text-white shadow-xs'
+                : 'bg-slate-100 border border-slate-200/60 text-ink-muted'
             }`}
             title={
               hasUnvisited

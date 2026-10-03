@@ -218,11 +218,11 @@ export default function Rekap() {
                           </span>
                         ) : p.keterangan_krs === 'Meninggal' ? (
                           <span className="rounded-full bg-rose-100 text-rose-800 border border-rose-300 px-2.5 py-0.5 text-xs font-extrabold">
-                            Meninggal
+                            MD
                           </span>
                         ) : p.keterangan_krs === 'APS' ? (
                           <span className="rounded-full bg-amber-100 text-amber-800 border border-amber-300 px-2.5 py-0.5 text-xs font-bold">
-                            KRS: APS
+                            APS
                           </span>
                         ) : p.keterangan_krs === 'Alih Rawat' ? (
                           <span className="rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200 px-2.5 py-0.5 text-xs font-bold">
@@ -234,7 +234,7 @@ export default function Rekap() {
                           </span>
                         ) : (
                           <span className="rounded-full bg-surface text-ink-muted border border-slate-200/60 px-2.5 py-0.5 text-xs font-bold">
-                            {p.keterangan_krs ? `KRS: ${p.keterangan_krs}` : 'KRS'}
+                            KRS
                           </span>
                         )}
                         {p.riwayat_rawat && p.riwayat_rawat.length > 0 && (

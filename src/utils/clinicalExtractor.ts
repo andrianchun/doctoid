@@ -1,4 +1,4 @@
-import type { ProgressNote } from '../db'
+import type { ProgressNote, ClinicalMetrics } from '../db'
 
 /**
  * Pembersih dan ekstraktor temuan klinis positif (pertinent positives)
@@ -771,4 +771,187 @@ export function extractClinicalHighlights(note?: ProgressNote | null, noteWithS?
     oList,
     hasAbnormal: sList.length > 0 || oList.length > 0,
   }
+}
+
+/**
+ * Ekstraktor metrik klinis diskrit terstruktur (GCS, TTV, Motorik, Gejala +/-)
+ * dari catatan perkembangan pasien (SOAP) untuk visualisasi tren klinis dan audit.
+ */
+export function extractClinicalMetrics(
+  note?: { S?: string; O_pemfis?: string; O_penunjang?: string } | ProgressNote | null
+): ClinicalMetrics {
+  const result: ClinicalMetrics = {}
+  if (!note) return result
+
+  const rawS = note.S || ''
+  const rawPemfis = note.O_pemfis || ''
+  const rawPenunjang = note.O_penunjang || ''
+  const combinedO = `${rawPemfis}\n${rawPenunjang}`.trim()
+
+  // 1. Ekstraksi GCS
+  // Format EVM: GCS E4V5M6, E1V1M1, E1VettM1, dst.
+  const evmMatch = combinedO.match(/\b(?:GCS\s*[:-]?\s*)?E([1-4])\s*V([1-5X]|ett|afasia)?\s*M([1-6])\b/i)
+  if (evmMatch) {
+    const e = parseInt(evmMatch[1], 10)
+    const vRaw = evmMatch[2] || '1'
+    const vNum = parseInt(vRaw, 10)
+    const v = isNaN(vNum) ? vRaw.toLowerCase() : vNum
+    const m = parseInt(evmMatch[3], 10)
+    const total = e + (typeof v === 'number' ? v : 1) + m
+    result.gcs = {
+      e,
+      v,
+      m,
+      total,
+      raw: `E${evmMatch[1]}V${vRaw}M${evmMatch[3]}`,
+    }
+  } else {
+    // Format 3 Digit: GCS 456, GCS: 111, GCS 315, GCS 1-1-1, GCS 1/1/1
+    const threeDigitMatch = combinedO.match(/\bGCS\s*[:-]?\s*([1-4])\s*[-/]?\s*([1-5])\s*[-/]?\s*([1-6])\b/i)
+      || combinedO.match(/\b(?:kesadaran|sensorium)\s*[:-]?\s*(?:compos mentis|somnolen|apatis|sopor|koma)?\s*\(?([1-4])([1-5])([1-6])\)?/i)
+    if (threeDigitMatch) {
+      const e = parseInt(threeDigitMatch[1], 10)
+      const v = parseInt(threeDigitMatch[2], 10)
+      const m = parseInt(threeDigitMatch[3], 10)
+      result.gcs = {
+        e,
+        v,
+        m,
+        total: e + v + m,
+        raw: `${e}${v}${m}`,
+      }
+    } else {
+      // Format total score: GCS 15, GCS: 8
+      const totalMatch = combinedO.match(/\bGCS\s*[:-]?\s*(\d{1,2})\b/i)
+      if (totalMatch) {
+        const total = parseInt(totalMatch[1], 10)
+        if (total >= 3 && total <= 15) {
+          result.gcs = {
+            total,
+            raw: `GCS ${total}`,
+          }
+        }
+      }
+    }
+  }
+
+  // 2. Ekstraksi TTV (Tanda-Tanda Vital)
+  const ttv: NonNullable<ClinicalMetrics['ttv']> = {}
+
+  // Tekanan Darah (TD)
+  const tdMatch = combinedO.match(/\b(?:TD|BP|Tens[ie])\s*[:-]?\s*(\d{2,3})\s*[/x]\s*(\d{2,3})\b/i)
+    || combinedO.match(/\b(\d{2,3})\s*[/x]\s*(\d{2,3})\s*mmHg\b/i)
+  if (tdMatch) {
+    ttv.td_systolic = parseInt(tdMatch[1], 10)
+    ttv.td_diastolic = parseInt(tdMatch[2], 10)
+    ttv.td_raw = `${ttv.td_systolic}/${ttv.td_diastolic}`
+  }
+
+  // Laju Nadi (HR)
+  const hrMatch = combinedO.match(/\b(?:HR|Nadi|Pulse)\s*[:-]?\s*(\d{2,3})\s*(?:x\/m|bpm|x|kali\/mnt)?\b/i)
+  if (hrMatch) {
+    ttv.hr = parseInt(hrMatch[1], 10)
+  }
+
+  // Laju Nafas (RR)
+  const rrMatch = combinedO.match(/\b(?:RR|Resp)\s*[:-]?\s*(\d{1,2})\s*(?:x\/m|kali\/mnt)?\b/i)
+  if (rrMatch) {
+    ttv.rr = parseInt(rrMatch[1], 10)
+  }
+
+  // Saturasi Oksigen (SpO2)
+  const spo2Match = combinedO.match(/\b(?:SpO2|Sat(?:urasi)?)\s*[:-]?\s*(\d{1,3})\s*%?\b/i)
+  if (spo2Match) {
+    const sVal = parseInt(spo2Match[1], 10)
+    if (sVal >= 50 && sVal <= 100) {
+      ttv.spo2 = sVal
+    }
+  }
+
+  // Suhu (°C)
+  const suhuMatch = combinedO.match(/\b(?:Suhu|Temp|T|S)\s*[:-]?\s*(\d{2}(?:[.,]\d+)?)\s*(?:°?C|c)?\b/i)
+  if (suhuMatch) {
+    const sVal = parseFloat(suhuMatch[1].replace(',', '.'))
+    if (sVal >= 30 && sVal <= 45) {
+      ttv.suhu = sVal
+    }
+  }
+
+  if (Object.keys(ttv).length > 0) {
+    result.ttv = ttv
+  }
+
+  // 3. Ekstraksi Kekuatan Motorik
+  // Cari pola motorik 4 ekstremitas
+  const motorikQuadMatch = combinedO.match(
+    /\b(?:motorik|kekuatan|extremitas|ekstremitas)\s*[:-]?\s*([0-5]{1,4})\s*[/x]\s*([0-5]{1,4})\s*(?:[\n//,;|-]+|\s+)\s*([0-5]{1,4})\s*[/x]\s*([0-5]{1,4})/i
+  )
+
+  if (motorikQuadMatch) {
+    result.motorik = {
+      superior_kanan: motorikQuadMatch[1],
+      superior_kiri: motorikQuadMatch[2],
+      inferior_kanan: motorikQuadMatch[3],
+      inferior_kiri: motorikQuadMatch[4],
+      raw: `${motorikQuadMatch[1]}/${motorikQuadMatch[2]} // ${motorikQuadMatch[3]}/${motorikQuadMatch[4]}`,
+    }
+  } else {
+    const motorikPairMatch = combinedO.match(
+      /\b(?:motorik|kekuatan|extremitas|ekstremitas)\s*[:-]?\s*([0-5]{1,4})\s*[/x]\s*([0-5]{1,4})/i
+    )
+    if (motorikPairMatch) {
+      const v1 = motorikPairMatch[1]
+      const v2 = motorikPairMatch[2]
+      result.motorik = {
+        superior_kanan: v1,
+        superior_kiri: v2,
+        inferior_kanan: v1,
+        inferior_kiri: v2,
+        raw: `${v1}/${v2}`,
+      }
+    }
+  }
+
+  // 4. Ekstraksi Gejala & Keluhan (Subjective Tracking)
+  const symptomKeywords = [
+    { key: 'mual', name: 'Mual' },
+    { key: 'muntah', name: 'Muntah' },
+    { key: 'nyeri\\s*kepala|sakit\\s*kepala|cephalgia|sefalgia', name: 'Nyeri Kepala' },
+    { key: 'pusing|vertigo|kliyengan', name: 'Pusing / Vertigo' },
+    { key: 'lemah|lemas|hemiparesis|lumpuh', name: 'Lemah Separuh Badan' },
+    { key: 'pelo|disartria|bicara\\s*berat|afasia', name: 'Bicara Pelo / Afasia' },
+    { key: 'mencong|merot|asimetris', name: 'Mulut Mencong' },
+    { key: 'kejang', name: 'Kejang' },
+    { key: 'sesak|dyspnea', name: 'Sesak Nafas' },
+    { key: 'demam|meriang|panas', name: 'Demam' },
+    { key: 'tersedak|sulit\\s*menelan|susah\\s*menelan|disfagia', name: 'Sulit Menelan' },
+    { key: 'kebas|kesemutan|baal', name: 'Kebas / Kesemutan' },
+    { key: 'nyeri\\s*dada|angina', name: 'Nyeri Dada' },
+    { key: 'nyeri\\s*perut|nyeri\\s*ulu\\s*hati|epigastrium', name: 'Nyeri Perut' },
+  ]
+
+  const symptomsFound: { nama: string; status: '+' | '-'; keterangan?: string }[] = []
+  const clauses = segmentNarrative(rawS)
+
+  for (const sym of symptomKeywords) {
+    const reg = new RegExp(`\\b(?:${sym.key})\\b`, 'i')
+    const matchedClause = clauses.find((c) => reg.test(c))
+    if (matchedClause) {
+      const isNeg = isClauseNegated(matchedClause) || /\(\s*-\s*\)|-\s*$/.test(matchedClause)
+      const isMembaik = /\b(?:membaik|berkurang|perbaikan|mereda)\b/i.test(matchedClause)
+      const isMemberat = /\b(?:memberat|bertambah)\b/i.test(matchedClause)
+
+      symptomsFound.push({
+        nama: sym.name,
+        status: isNeg ? '-' : '+',
+        keterangan: isMembaik ? 'Membaik' : isMemberat ? 'Memberat' : isNeg ? 'Nihil (-)' : 'Ada (+)',
+      })
+    }
+  }
+
+  if (symptomsFound.length > 0) {
+    result.gejala = symptomsFound
+  }
+
+  return result
 }

@@ -1,10 +1,11 @@
 import { db } from './db'
 import { encryptJson, decryptJson, syncIdFromEntropy } from './crypto'
-import { getFirestore, doc, getDoc, setDoc, onSnapshot } from 'firebase/firestore'
+import { getFirestore, initializeFirestore, doc, getDoc, setDoc, onSnapshot, type Firestore } from 'firebase/firestore'
 import {
   getFirebaseApp, getFirebaseAuth, getSavedUserProfile, saveUserProfile,
   saveDoctorSpecialty, getDoctorSpecialty, type UserProfile
 } from './auth'
+import { cachePatients, cacheAllPatients, cacheNotes } from './utils/dataCache'
 
 /* Zero-knowledge sync & Cloud sync engine dengan proteksi Wipe-Out, Auto-Trigger, & Anti-Pingpong. */
 
@@ -28,9 +29,24 @@ export const getDeviceId = () => {
   return id
 }
 
+let firestoreDb: Firestore | null = null
+export function getFirestoreDb(): Firestore {
+  if (!firestoreDb) {
+    const app = getFirebaseApp()
+    try {
+      firestoreDb = initializeFirestore(app, {
+        ignoreUndefinedProperties: true,
+      })
+    } catch {
+      firestoreDb = getFirestore(app)
+    }
+  }
+  return firestoreDb
+}
+
 async function fb() {
-  const app = getFirebaseApp()
-  return { fs: getFirestore(app), doc, getDoc, setDoc, onSnapshot }
+  const fs = getFirestoreDb()
+  return { fs, doc, getDoc, setDoc, onSnapshot }
 }
 
 export const fbConfigured = () => true
@@ -46,11 +62,8 @@ let syncDebounceTimer: any = null
  */
 export function initRealtimeCloudSync(uid: string): () => void {
   if (!uid || uid === 'local') return () => {}
-  const app = getFirebaseApp()
-  const fs = getFirestore(app)
+  const fs = getFirestoreDb()
   const ref = doc(fs, 'users', uid)
-
-  let isFirst = true
 
   const unsubscribe = onSnapshot(
     ref,
@@ -92,14 +105,20 @@ export function initRealtimeCloudSync(uid: string): () => void {
             ? new Date(remote.updatedAt).getTime()
             : 0
 
-        // Jika remote lebih baru atau saat pertama kali inisialisasi koneksi
-        if (remoteUpdatedAt > lastPush || isFirst) {
-          isFirst = false
+        const isDeviceFresh = lastPush === 0
+        const isRemoteNewer = remoteUpdatedAt > lastPush
+
+        // HANYA tarik data (pull) jika remote terbukti lebih baru ATAU perangkat baru belum pernah sinkron
+        if (isRemoteNewer || (isDeviceFresh && remoteUpdatedAt > 0)) {
           const imported = await safeImportTables(remote.tables)
           if (imported) {
             localStorage.setItem('doctoid_last_push', String(remoteUpdatedAt || Date.now()))
             window.dispatchEvent(new CustomEvent('doctoid_data_synced'))
           }
+        } else if (lastPush > remoteUpdatedAt) {
+          // Data lokal lebih baru daripada cloud (misal perubahan status KRS saat offline/tertunda).
+          // Dorong ke cloud agar cloud tidak tertinggal.
+          triggerCloudSync(100)
         }
 
         // Update profil dokter jika ada pembaruan di cloud
@@ -164,7 +183,9 @@ TABLES.forEach((tableName) => {
 export async function exportTables(): Promise<Record<string, unknown[]>> {
   const out: Record<string, unknown[]> = {}
   for (const t of TABLES) {
-    out[t] = await db.table(t).toArray()
+    const list = await db.table(t).toArray()
+    // JSON parse/stringify cycle removes any undefined fields safely to prevent Firestore setDoc error
+    out[t] = JSON.parse(JSON.stringify(list))
   }
   return out
 }
@@ -219,6 +240,24 @@ export async function safeImportTables(tables: Record<string, unknown[]>): Promi
         }
       }
     })
+
+    // Segarkan in-memory appCache agar Dasbor, Rekam Medis, dsb langsung up-to-date
+    try {
+      const aktifList = await db.patients.where('status_rawat').equals('aktif').toArray()
+      aktifList.sort((a, b) => {
+        const orderA = a.order ?? Number.MAX_SAFE_INTEGER
+        const orderB = b.order ?? Number.MAX_SAFE_INTEGER
+        if (orderA !== orderB) return orderA - orderB
+        return (a.id ?? 0) - (b.id ?? 0)
+      })
+      cachePatients(aktifList)
+      const allPatientsList = await db.patients.toArray()
+      cacheAllPatients(allPatientsList)
+      const notesList = await db.progressNotes.toArray()
+      cacheNotes(notesList)
+    } catch {
+      // ignore
+    }
   } finally {
     isImporting = false
   }

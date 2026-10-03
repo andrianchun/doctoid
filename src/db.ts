@@ -4,6 +4,7 @@ export type Jaminan = 'BPJS' | 'Umum' | 'Asuransi'
 export type StatusRawat = 'aktif' | 'krs'
 export type KeteranganKrs = 'Izin Dokter' | 'APS' | 'Meninggal' | 'Alih Rawat' | 'Rujuk'
 export type KategoriTerapi = 'Farmakologi' | 'Non-Farmakologi' | 'Diagnostik' | 'Monitoring' | 'Edukasi'
+export type PeranRawat = 'Leader' | 'Raber' | 'Konsul'
 
 export interface Hospital {
   id?: number
@@ -51,6 +52,9 @@ export interface Patient {
   jaminan: Jaminan
   riwayat_rawat?: RawatEpisode[] // riwayat episode rawat inap sebelumnya
   order?: number // urutan tampilan / nomor urut bed manual
+  peran_rawat?: PeranRawat // 'Leader' | 'Raber' | 'Konsul' (default: 'Leader')
+  dpjp_utama?: string // default: 'Neuro' jika peran_rawat === 'Leader', atau departemen lain jika Raber/Konsul
+  tim_raber?: string[] // daftar departemen yang ikut raber, mis. ['IPD', 'Kardio']
 }
 
 export interface DiagnosisItem {
@@ -69,6 +73,37 @@ export interface TerapiItem {
   icd9?: string // kode ICD-9-CM prosedur, relevan utk kategori Diagnostik (mirip icd10 pada DiagnosisItem)
 }
 
+export interface ClinicalMetrics {
+  gcs?: {
+    e?: number
+    v?: number | string
+    m?: number
+    total?: number
+    raw?: string
+  }
+  ttv?: {
+    td_systolic?: number
+    td_diastolic?: number
+    td_raw?: string
+    hr?: number
+    rr?: number
+    spo2?: number
+    suhu?: number
+  }
+  motorik?: {
+    superior_kanan?: string
+    superior_kiri?: string
+    inferior_kanan?: string
+    inferior_kiri?: string
+    raw?: string
+  }
+  gejala?: {
+    nama: string
+    status: '+' | '-'
+    keterangan?: string
+  }[]
+}
+
 export interface ProgressNote {
   id?: number
   patient_id: number
@@ -80,6 +115,7 @@ export interface ProgressNote {
   P: TerapiItem[]
   catatan?: string // Catatan bebas di luar SOAP (rencana KRS, konsul, extra, dll)
   attachments?: { name: string; type: string; dataUrl: string; kategori: 'pemfis' | 'penunjang' }[]
+  metrics?: ClinicalMetrics
 }
 
 export interface DoctorPreference {

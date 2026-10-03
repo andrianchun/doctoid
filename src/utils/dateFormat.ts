@@ -1,8 +1,13 @@
-export type DateFormat = 'DD/MM/YYYY' | 'YYYY-MM-DD' | 'DD MMM YYYY'
+export type DateFormat = 'DD/MM/YY' | 'DD/MM/YYYY' | 'YYYY-MM-DD' | 'DD MMM YYYY'
 export type TimeFormat = '24h' | '12h'
 
 export function getStoredDateFormat(): DateFormat {
-  return (localStorage.getItem('doctoid_date_format') as DateFormat) || 'DD/MM/YYYY'
+  const stored = localStorage.getItem('doctoid_date_format') as DateFormat
+  // Format baku aplikasi adalah DD/MM/YY sesuai preferensi klinis dokter
+  if (!stored || stored === 'DD/MM/YYYY') {
+    return 'DD/MM/YY'
+  }
+  return stored
 }
 
 export function saveDateFormat(fmt: DateFormat): void {
@@ -26,18 +31,22 @@ export function formatDate(isoOrDate: string | Date | undefined | null, customFm
   const day = String(d.getDate()).padStart(2, '0')
   const monthNum = String(d.getMonth() + 1).padStart(2, '0')
   const year = d.getFullYear()
+  const shortYear = String(year).slice(-2)
 
   const MONTHS_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agt', 'Sep', 'Okt', 'Nov', 'Des']
   const monthName = MONTHS_SHORT[d.getMonth()]
 
   switch (fmt) {
+    case 'DD/MM/YY':
+      return `${day}/${monthNum}/${shortYear}`
     case 'YYYY-MM-DD':
       return `${year}-${monthNum}-${day}`
     case 'DD MMM YYYY':
-      return `${day} ${monthName} ${year}`
+      return `${day} ${monthName} ${shortYear}`
     case 'DD/MM/YYYY':
-    default:
       return `${day}/${monthNum}/${year}`
+    default:
+      return `${day}/${monthNum}/${shortYear}`
   }
 }
 
@@ -82,3 +91,37 @@ export function getLocalDateString(d: Date = new Date()): string {
   return `${year}-${month}-${day}`
 }
 
+/**
+ * Konversi tanggal ISO (YYYY-MM-DD) ke tampilan DD/MM/YY.
+ */
+export function toDisplayDate(isoDate?: string | null): string {
+  if (!isoDate) return ''
+  const clean = isoDate.slice(0, 10)
+  const parts = clean.split('-')
+  if (parts.length === 3) {
+    const [y, m, d] = parts
+    return `${d.padStart(2, '0')}/${m.padStart(2, '0')}/${y.slice(-2)}`
+  }
+  return isoDate
+}
+
+/**
+ * Konversi input teks DD/MM/YY atau DD/MM/YYYY atau YYYY-MM-DD ke format baku ISO (YYYY-MM-DD).
+ */
+export function parseToIsoDate(text: string): string | null {
+  if (!text) return null
+  const clean = text.trim()
+  if (/^\d{4}-\d{2}-\d{2}$/.test(clean)) return clean
+
+  const match = clean.match(/^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{2,4})$/)
+  if (!match) return null
+  let [, d, m, y] = match
+  let fullYear = parseInt(y, 10)
+  if (y.length === 2) {
+    fullYear = fullYear < 70 ? 2000 + fullYear : 1900 + fullYear
+  }
+  const dayNum = parseInt(d, 10)
+  const monthNum = parseInt(m, 10)
+  if (monthNum < 1 || monthNum > 12 || dayNum < 1 || dayNum > 31) return null
+  return `${fullYear}-${String(monthNum).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`
+}

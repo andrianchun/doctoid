@@ -23,7 +23,8 @@ import {
   Trash2, Loader2, X, FileText, ChevronDown, Send,
   Search
 } from 'lucide-react'
-import { db, type Jaminan, type TerapiItem, type DiagnosisItem, type RegexField, type Patient, type RawatEpisode } from '../db'
+import { db, type Jaminan, type TerapiItem, type DiagnosisItem, type RegexField, type Patient, type RawatEpisode, type PeranRawat } from '../db'
+import { DEPT_ALIH_RAWAT } from './PatientProfile'
 import Masked from '../components/Masked'
 import ResizableTextarea from '../components/ResizableTextarea'
 import AttachmentMenu from '../components/AttachmentMenu'
@@ -32,7 +33,9 @@ import { lineToTerapi, localParse, classifyFragment, synthesizeRegexRule, isGend
 import { rapikan, analisisKasus } from '../ai'
 import { buatKonteks, catatTerapi, saranTerapi, type Suggestion } from '../styleLearning'
 import { formatDate, hariKe, getLocalDateString } from '../utils/dateFormat'
+import DateInput from '../components/DateInput'
 import { useBodyScrollLock } from '../utils/useBodyScrollLock'
+import { extractClinicalMetrics } from '../utils/clinicalExtractor'
 
 const today = () => getLocalDateString()
 
@@ -50,6 +53,9 @@ interface FormState {
   jaminan: Jaminan
   tgl_mrs: string
   tgl_onset: string
+  peran_rawat: PeranRawat
+  dpjp_utama: string
+  tim_raber: string[]
   S: string
   O_pemfis: string
   O_penunjang: string
@@ -59,6 +65,7 @@ interface FormState {
 
 const emptyForm = (): FormState => ({
   title: '', nama_depan: '', usia: '', no_rm: '', jaminan: 'BPJS', tgl_mrs: today(), tgl_onset: '',
+  peran_rawat: 'Leader', dpjp_utama: 'Neuro', tim_raber: [],
   S: '', O_pemfis: '', O_penunjang: '',
   A: [{ kategori: 'Utama', nama_diagnosis: '', icd10: '' }],
   P: [],
@@ -425,6 +432,12 @@ export default function Brainstorm() {
         const newAtts = attachments.map((a) => ({ name: a.name, type: a.type, dataUrl: a.dataUrl, kategori: a.kategori }))
         const mergedAtts = [...existingAtts, ...newAtts]
 
+        const metrics = extractClinicalMetrics({
+          S: mergedS,
+          O_pemfis: mergedPemfis,
+          O_penunjang: mergedPenunjang,
+        })
+
         await db.progressNotes.update(existingTodayNote.id, {
           S: mergedS,
           O_pemfis: mergedPemfis,
@@ -432,9 +445,16 @@ export default function Brainstorm() {
           A: mergedA,
           P: mergedP,
           attachments: mergedAtts,
+          metrics,
         })
       } else {
         // Catatan pertama untuk hari ini
+        const metrics = extractClinicalMetrics({
+          S: form.S.trim(),
+          O_pemfis: form.O_pemfis.trim(),
+          O_penunjang: form.O_penunjang.trim(),
+        })
+
         await db.progressNotes.add({
           patient_id: p.id,
           tanggal: todayStr,
@@ -444,6 +464,7 @@ export default function Brainstorm() {
           A: form.A.filter((d) => d.nama_diagnosis.trim()),
           P: form.P,
           attachments: attachments.map((a) => ({ name: a.name, type: a.type, dataUrl: a.dataUrl, kategori: a.kategori })),
+          metrics,
         })
       }
 
@@ -879,23 +900,43 @@ export default function Brainstorm() {
     const dxUtama = form.A.find(d => d.kategori === 'Utama')?.nama_diagnosis || form.A[0]?.nama_diagnosis || ''
     
     let targetPatientId: number
+    let patientToUse = selectedPatient
 
-    if (selectedPatient && selectedPatient.id) {
-      targetPatientId = selectedPatient.id
+    if (!patientToUse && detectedPatient && detectedPatient.status_rawat === 'krs') {
+      const keluarLabel = detectedPatient.keterangan_krs === 'Meninggal'
+        ? 'MD'
+        : detectedPatient.keterangan_krs === 'APS'
+        ? 'APS'
+        : detectedPatient.keterangan_krs === 'Alih Rawat'
+        ? 'Alih Rawat'
+        : detectedPatient.keterangan_krs === 'Rujuk'
+        ? 'Rujuk'
+        : 'KRS'
+      const confirmReadmission = window.confirm(
+        `Pasien ${detectedPatient.title || ''} ${detectedPatient.nama_depan} (No. RM: ${detectedPatient.no_rm}) sudah ada di Rekam Medis (Status: ${keluarLabel}).\n\nApakah ini episode RAWAT INAP BARU (Readmisi)?\n\n• Klik OK untuk menghubungkan rekam medis dan arsipkan riwayat rawat sebelumnya.\n• Klik Batal untuk membuat data pasien baru terpisah.`
+      )
+      if (confirmReadmission) {
+        patientToUse = detectedPatient
+        setSelectedPatient(detectedPatient)
+      }
+    }
+
+    if (patientToUse && patientToUse.id) {
+      targetPatientId = patientToUse.id
       // Arsipkan episode rawat sebelumnya jika ada data tgl_mrs lama
       const previousEpisode: RawatEpisode = {
         id: crypto.randomUUID(),
-        tgl_mrs: selectedPatient.tgl_mrs,
-        tgl_krs: selectedPatient.tgl_krs || (selectedPatient.status_rawat === 'krs' ? today() : undefined),
-        hospital_id: selectedPatient.hospital_id,
-        ward_id: selectedPatient.lokasi_sekarang,
-        diagnosis_utama: selectedPatient.diagnosis_utama,
-        keterangan_krs: selectedPatient.keterangan_krs,
-        detail_krs: selectedPatient.detail_krs,
+        tgl_mrs: patientToUse.tgl_mrs,
+        tgl_krs: patientToUse.tgl_krs || (patientToUse.status_rawat === 'krs' ? today() : undefined),
+        hospital_id: patientToUse.hospital_id,
+        ward_id: patientToUse.lokasi_sekarang,
+        diagnosis_utama: patientToUse.diagnosis_utama,
+        keterangan_krs: patientToUse.keterangan_krs,
+        detail_krs: patientToUse.detail_krs,
       }
-      const existingHistory = selectedPatient.riwayat_rawat || []
+      const existingHistory = patientToUse.riwayat_rawat || []
       const isAlreadyArchived = existingHistory.some(
-        e => e.tgl_mrs === selectedPatient.tgl_mrs && e.diagnosis_utama === selectedPatient.diagnosis_utama
+        e => e.tgl_mrs === patientToUse.tgl_mrs && e.diagnosis_utama === patientToUse.diagnosis_utama
       )
       const updatedHistory = isAlreadyArchived ? existingHistory : [...existingHistory, previousEpisode]
 
@@ -905,7 +946,7 @@ export default function Brainstorm() {
         .filter((p) => p.status_rawat === 'aktif')
         .count()
 
-      await db.patients.update(selectedPatient.id, {
+      await db.patients.update(patientToUse.id, {
         hospital_id: hospitalId,
         title: form.title,
         nama_depan: form.nama_depan.trim(),
@@ -920,6 +961,9 @@ export default function Brainstorm() {
         lokasi_sekarang: wardId,
         status_rawat: 'aktif',
         jaminan: form.jaminan,
+        peran_rawat: form.peran_rawat || 'Leader',
+        dpjp_utama: form.dpjp_utama || 'Neuro',
+        tim_raber: form.tim_raber || [],
         riwayat_rawat: updatedHistory,
         order: wardCount + 1,
       })
@@ -942,15 +986,25 @@ export default function Brainstorm() {
         lokasi_sekarang: wardId,
         status_rawat: 'aktif',
         jaminan: form.jaminan,
+        peran_rawat: form.peran_rawat || 'Leader',
+        dpjp_utama: form.dpjp_utama || 'Neuro',
+        tim_raber: form.tim_raber || [],
         order: wardCount + 1,
       }) as number
     }
+
+    const metrics = extractClinicalMetrics({
+      S: form.S,
+      O_pemfis: form.O_pemfis,
+      O_penunjang: form.O_penunjang,
+    })
 
     await db.progressNotes.add({
       patient_id: targetPatientId,
       tanggal: today(),
       S: form.S, O_pemfis: form.O_pemfis, O_penunjang: form.O_penunjang, A: form.A, P: form.P,
       attachments: attachments.map(a => ({ name: a.name, type: a.type, dataUrl: a.dataUrl, kategori: a.kategori })),
+      metrics,
     })
 
     // Simpan lampiran penunjang (EKG, Lab, Radiologi) ke tabel penunjang agar tertata rapi di tab Rekam Medis
@@ -1083,9 +1137,11 @@ export default function Brainstorm() {
         }`}>
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
-              <span className={`inline-block size-2 rounded-full ${detectedPatient.status_rawat === 'aktif' ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'}`} />
+              <span className={`inline-block size-2 rounded-full ${detectedPatient.status_rawat === 'aktif' ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`} />
               <p className="text-xs font-bold text-ink">
-                {detectedPatient.status_rawat === 'aktif' ? 'Pasien Sedang Dirawat Aktif di Bangsal' : 'Pasien Lama Terdeteksi di Rekam Medis'}
+                {detectedPatient.status_rawat === 'aktif'
+                  ? 'Pasien Sedang Dirawat Aktif di Bangsal'
+                  : `Pasien Lama Terdeteksi (${detectedPatient.keterangan_krs === 'Meninggal' ? 'MD' : detectedPatient.keterangan_krs === 'APS' ? 'APS' : detectedPatient.keterangan_krs === 'Alih Rawat' ? 'Alih Rawat' : detectedPatient.keterangan_krs === 'Rujuk' ? 'Rujuk' : 'KRS'})`}
               </p>
             </div>
             <p className="caption text-ink-muted mt-1">
@@ -1094,7 +1150,7 @@ export default function Brainstorm() {
             <p className="caption text-ink-muted">
               {detectedPatient.status_rawat === 'aktif'
                 ? `Dirawat sejak: ${formatDate(detectedPatient.tgl_mrs)} · Dx: ${detectedPatient.diagnosis_utama || '-'}`
-                : `Terakhir dirawat: ${formatDate(detectedPatient.tgl_mrs)} ${detectedPatient.diagnosis_utama ? `· Dx: ${detectedPatient.diagnosis_utama}` : ''}`
+                : `Status: ${detectedPatient.keterangan_krs === 'Meninggal' ? 'MD' : detectedPatient.keterangan_krs === 'APS' ? 'APS' : detectedPatient.keterangan_krs === 'Alih Rawat' ? 'Alih Rawat' : detectedPatient.keterangan_krs === 'Rujuk' ? 'Rujuk' : 'KRS'}${detectedPatient.tgl_krs ? ` pada ${formatDate(detectedPatient.tgl_krs)}` : ''}${detectedPatient.detail_krs ? ` (${detectedPatient.detail_krs})` : ''} · MRS Sebelumnya: ${formatDate(detectedPatient.tgl_mrs)} · Dx Lalu: ${detectedPatient.diagnosis_utama || '-'}`
               }
             </p>
             <div className="mt-2.5 flex flex-wrap items-center gap-2">
@@ -1237,6 +1293,61 @@ export default function Brainstorm() {
           />
         </div>
 
+        {/* Baris Peran Rawat: Leader, Raber, Konsul */}
+        <div className="space-y-1.5 pt-0.5">
+          <div className="flex items-center justify-between">
+            <label className="block text-xs font-bold text-slate-700">Peran Rawat</label>
+            {form.peran_rawat !== 'Leader' && (
+              <span className="text-[11px] font-semibold text-indigo-700">
+                Leader: {form.dpjp_utama}
+              </span>
+            )}
+          </div>
+          <div className="grid grid-cols-3 gap-1.5">
+            {(['Leader', 'Raber', 'Konsul'] as PeranRawat[]).map((role) => (
+              <button
+                key={role}
+                type="button"
+                onClick={() => {
+                  set({
+                    peran_rawat: role,
+                    dpjp_utama: role === 'Leader' ? 'Neuro' : form.dpjp_utama === 'Neuro' ? 'IPD' : form.dpjp_utama,
+                  })
+                }}
+                className={`py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
+                  form.peran_rawat === role
+                    ? role === 'Leader'
+                      ? 'bg-primary text-white border-primary shadow-xs'
+                      : role === 'Raber'
+                      ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
+                      : 'bg-sky-600 text-white border-sky-600 shadow-xs'
+                    : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                }`}
+              >
+                {role}
+              </button>
+            ))}
+          </div>
+
+          {/* Jika Raber atau Konsul, pilih DPJP Utama */}
+          {form.peran_rawat !== 'Leader' && (
+            <div className="mt-2 animate-in fade-in">
+              <label className="block text-[11px] font-semibold text-ink-muted mb-1">
+                {form.peran_rawat === 'Raber' ? 'DPJP Utama (Leader)' : 'Konsul dari (Leader)'}
+              </label>
+              <select
+                value={form.dpjp_utama}
+                onChange={(e) => set({ dpjp_utama: e.target.value })}
+                className="w-full h-9 rounded-xl border border-slate-200 px-3 text-xs bg-white text-ink font-semibold outline-none focus:border-primary shadow-2xs"
+              >
+                {DEPT_ALIH_RAWAT.map((dept) => (
+                  <option key={dept} value={dept}>{dept}</option>
+                ))}
+              </select>
+            </div>
+          )}
+        </div>
+
         {/* Baris 3: Tgl Onset & Tgl MRS */}
         <div className="grid grid-cols-2 gap-2">
           <div>
@@ -1248,10 +1359,9 @@ export default function Brainstorm() {
                 </span>
               )}
             </div>
-            <input
-              type="date"
+            <DateInput
               value={form.tgl_onset}
-              onChange={(e) => set({ tgl_onset: e.target.value })}
+              onChange={(val) => set({ tgl_onset: val })}
               className={inputCls}
             />
           </div>
@@ -1264,10 +1374,9 @@ export default function Brainstorm() {
                 </span>
               )}
             </div>
-            <input
-              type="date"
+            <DateInput
               value={form.tgl_mrs}
-              onChange={(e) => set({ tgl_mrs: e.target.value })}
+              onChange={(val) => set({ tgl_mrs: val })}
               className={inputCls}
             />
           </div>
@@ -2081,7 +2190,17 @@ export default function Brainstorm() {
                           <span className="rounded-full bg-primary/10 px-2 py-0.5 text-primary-deep">{p.jaminan}</span>
                           {h && <span className="rounded-full bg-surface px-2 py-0.5 text-ink-muted">{h.nama}</span>}
                           <span className={`rounded-full px-2 py-0.5 ${p.status_rawat === 'aktif' ? 'bg-emerald-100 text-emerald-700' : 'bg-surface text-ink-muted'}`}>
-                            {p.status_rawat === 'aktif' ? 'Sedang Dirawat' : (p.keterangan_krs ? (p.detail_krs ? `${p.keterangan_krs}: ${p.detail_krs}` : `KRS: ${p.keterangan_krs}`) : 'KRS')}
+                            {p.status_rawat === 'aktif'
+                              ? 'Sedang Dirawat'
+                              : p.keterangan_krs === 'Meninggal'
+                              ? 'MD'
+                              : p.keterangan_krs === 'APS'
+                              ? 'APS'
+                              : p.keterangan_krs === 'Alih Rawat'
+                              ? `Alih Rawat${p.detail_krs ? `: ${p.detail_krs}` : ''}`
+                              : p.keterangan_krs === 'Rujuk'
+                              ? `Rujuk${p.detail_krs ? `: ${p.detail_krs}` : ''}`
+                              : 'KRS'}
                           </span>
                           <span className="rounded-full bg-surface px-2 py-0.5 text-ink-muted">
                             MRS: {formatDate(p.tgl_mrs)}

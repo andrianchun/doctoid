@@ -1119,9 +1119,9 @@ export default function Settings() {
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
               {[
+                { id: 'DD/MM/YY' as DateFormat, label: 'DD/MM/YY (Standar)', contoh: '27/08/26' },
                 { id: 'DD/MM/YYYY' as DateFormat, label: 'DD/MM/YYYY', contoh: '27/08/2026' },
                 { id: 'DD MMM YYYY' as DateFormat, label: 'DD MMM YYYY', contoh: '27 Agt 2026' },
-                { id: 'YYYY-MM-DD' as DateFormat, label: 'YYYY-MM-DD (ISO)', contoh: '2026-08-27' },
               ].map((item) => (
                 <button
                   key={item.id}

@@ -50,23 +50,28 @@ export function cachePatient(p: Patient) {
   if (!p.id) return
   appCache.patientsMap.set(p.id, p)
   if (appCache.aktifPatients) {
-    const idx = appCache.aktifPatients.findIndex((item) => item.id === p.id)
-    if (idx >= 0) {
-      if (p.status_rawat === 'aktif') {
-        appCache.aktifPatients[idx] = p
+    if (p.status_rawat === 'aktif') {
+      const idx = appCache.aktifPatients.findIndex((item) => item.id === p.id)
+      if (idx >= 0) {
+        const next = [...appCache.aktifPatients]
+        next[idx] = p
+        appCache.aktifPatients = next
       } else {
-        appCache.aktifPatients.splice(idx, 1)
+        appCache.aktifPatients = [...appCache.aktifPatients, p]
       }
-    } else if (p.status_rawat === 'aktif') {
-      appCache.aktifPatients.push(p)
+    } else {
+      // Hapus pasien dari cache rawat aktif jika sudah KRS/Meninggal/Alih Rawat/Rujuk
+      appCache.aktifPatients = appCache.aktifPatients.filter((item) => item.id !== p.id)
     }
   }
   if (appCache.allPatients) {
     const idx = appCache.allPatients.findIndex((item) => item.id === p.id)
     if (idx >= 0) {
-      appCache.allPatients[idx] = p
+      const next = [...appCache.allPatients]
+      next[idx] = p
+      appCache.allPatients = next
     } else {
-      appCache.allPatients.push(p)
+      appCache.allPatients = [...appCache.allPatients, p]
     }
   }
 }

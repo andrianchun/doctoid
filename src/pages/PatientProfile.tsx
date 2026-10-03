@@ -5,7 +5,7 @@ import {
   ArrowLeft, Pill, HeartPulse, ClipboardCopy, X, Send,
   Loader2, LogOut, RotateCcw, Check, History, Sparkles, Activity, ShieldCheck, Stethoscope,
   Mic, Eye, EyeOff, Pencil, Trash2, Plus, CheckSquare, Square,
-  FlaskConical, Image as ImageIcon, Upload, AlertTriangle
+  FlaskConical, Image as ImageIcon, Upload, AlertTriangle, ArrowLeftRight
 } from 'lucide-react'
 import {
   db,
@@ -16,12 +16,14 @@ import {
   type Jaminan,
   type StatusRawat,
   type KeteranganKrs,
+  type PeranRawat,
   type ProgressNote,
   type Patient,
   type Ward,
   type Hospital,
 } from '../db'
 import { appCache, cachePatient } from '../utils/dataCache'
+import { triggerCloudSync } from '../sync'
 import Masked from '../components/Masked'
 import { useUi } from '../store'
 import { verifyBiometric } from '../webauthn'
@@ -29,7 +31,11 @@ import { chatPasien, type ChatMsg } from '../ai'
 import { applyMicroUpdate } from '../microUpdate'
 import { formatDate, getLocalDateString } from '../utils/dateFormat'
 import VisiteModal from '../components/VisiteModal'
+import DateInput from '../components/DateInput'
 import { useBodyScrollLock } from '../utils/useBodyScrollLock'
+import ClinicalTrendingView from '../components/ClinicalTrendingView'
+import PredictiveInput from '../components/PredictiveInput'
+import { extractClinicalMetrics } from '../utils/clinicalExtractor'
 
 const hariKe = (iso: string) =>
   Math.max(1, Math.floor((Date.now() - new Date(iso).getTime()) / 86400000) + 1)
@@ -67,6 +73,30 @@ const RADIOLOGI_SUGGESTIONS = [
 const LAINNYA_SUGGESTIONS = [
   'EKG 12 Lead', 'EEG (Elektroensefalografi)', 'EMG / NCV', 'Lumbal Pungsi',
   'Endoskopi', 'Funduskopi'
+]
+
+export const DEPT_ALIH_RAWAT = [
+  'Bedah Saraf',
+  'IPD',
+  'Paru',
+  'Kardio',
+  'Anestesi',
+  'Ortopedi',
+  'Anak',
+  'Obgyn',
+  'Bedah Umum',
+  'Bedah Plastik',
+  'Urologi',
+]
+
+export const RS_RUJUKAN = [
+  'RSUD Dr. Soetomo',
+  'RSUP Dr. Sardjito',
+  'RSUP Dr. Kariadi',
+  'RS Jantung Harapan Kita',
+  'RS PON (Pusat Otak Nasional)',
+  'RS Tipe A Terdekat',
+  'RS Tipe B Terdekat',
 ]
 
 function TerapiRow({
@@ -287,6 +317,9 @@ export default function PatientProfile() {
     jaminan: 'BPJS' as Jaminan,
     tgl_mrs: '',
     tgl_onset: '',
+    peran_rawat: 'Leader' as PeranRawat,
+    dpjp_utama: 'Neuro',
+    tim_raber: [] as string[],
   })
 
   const openEditPatientModal = () => {
@@ -306,6 +339,9 @@ export default function PatientProfile() {
       jaminan: patient.jaminan || 'BPJS',
       tgl_mrs: patient.tgl_mrs ? patient.tgl_mrs.slice(0, 10) : '',
       tgl_onset: patient.tgl_onset ? patient.tgl_onset.slice(0, 10) : '',
+      peran_rawat: (patient.peran_rawat || 'Leader') as PeranRawat,
+      dpjp_utama: patient.dpjp_utama || 'Neuro',
+      tim_raber: patient.tim_raber || [],
     })
     setShowEditPatientModal(true)
   }
@@ -324,6 +360,29 @@ export default function PatientProfile() {
       newOrder = wardCount + 1
     }
 
+    const updatedPatient: Patient = {
+      ...patient,
+      title: editPatientForm.title,
+      nama_depan: editPatientForm.nama_depan.trim(),
+      usia: editPatientForm.usia.trim() ? `${editPatientForm.usia.trim()} th` : '',
+      no_rm: editPatientForm.no_rm.trim(),
+      diagnosis_utama: editPatientForm.diagnosis_utama.trim(),
+      hospital_id: Number(editPatientForm.hospital_id),
+      lokasi_sekarang: newWardId,
+      status_rawat: editPatientForm.status_rawat,
+      keterangan_krs: editPatientForm.status_rawat === 'krs' ? editPatientForm.keterangan_krs : undefined,
+      detail_krs: editPatientForm.status_rawat === 'krs' ? editPatientForm.detail_krs.trim() || undefined : undefined,
+      tgl_krs: editPatientForm.status_rawat === 'krs' ? editPatientForm.tgl_krs : undefined,
+      jaminan: editPatientForm.jaminan,
+      tgl_mrs: editPatientForm.tgl_mrs,
+      tgl_onset: editPatientForm.tgl_onset,
+      peran_rawat: editPatientForm.peran_rawat,
+      dpjp_utama: editPatientForm.dpjp_utama || 'Neuro',
+      tim_raber: editPatientForm.tim_raber,
+      order: newOrder,
+    }
+    cachePatient(updatedPatient)
+
     await db.patients.update(pid, {
       title: editPatientForm.title,
       nama_depan: editPatientForm.nama_depan.trim(),
@@ -339,8 +398,12 @@ export default function PatientProfile() {
       jaminan: editPatientForm.jaminan,
       tgl_mrs: editPatientForm.tgl_mrs,
       tgl_onset: editPatientForm.tgl_onset,
+      peran_rawat: editPatientForm.peran_rawat,
+      dpjp_utama: editPatientForm.dpjp_utama || 'Neuro',
+      tim_raber: editPatientForm.tim_raber,
       order: newOrder,
     })
+    triggerCloudSync(50)
     notify('Data pasien berhasil diperbarui ✓')
     setShowEditPatientModal(false)
   }
@@ -363,6 +426,7 @@ export default function PatientProfile() {
   )
   const penunjangList = useMemo(() => rawPenunjang || [], [rawPenunjang])
 
+  const [activeProfileTab, setActiveProfileTab] = useState<'semua' | 'terapi' | 'tren' | 'penunjang' | 'cppt'>('semua')
   const [penunjangFilter, setPenunjangFilter] = useState<'semua' | 'Laboratorium' | 'Radiologi' | 'Lainnya' | 'menunggu'>('semua')
   const [showAddPenunjangModal, setShowAddPenunjangModal] = useState(false)
   const [penunjangForm, setPenunjangForm] = useState<{
@@ -704,6 +768,12 @@ export default function PatientProfile() {
         icd10: '',
       }))
 
+    const metrics = extractClinicalMetrics({
+      S: editingNote.S.trim(),
+      O_pemfis: editingNote.O_pemfis.trim(),
+      O_penunjang: editingNote.O_penunjang.trim(),
+    })
+
     await db.progressNotes.update(editingNote.id, {
       tanggal: editingNote.tanggal,
       S: editingNote.S.trim(),
@@ -711,6 +781,7 @@ export default function PatientProfile() {
       O_penunjang: editingNote.O_penunjang.trim(),
       A: aItems.length > 0 ? aItems : targetNote.A,
       catatan: editingNote.catatan.trim() || undefined,
+      metrics,
     })
     notify('Catatan CPPT berhasil diperbarui')
     setEditingNote(null)
@@ -726,6 +797,10 @@ export default function PatientProfile() {
   /* Chat & Instruksi Mikro */
   const [chatOpen, setChatOpen] = useState(false)
   const [showKrsModal, setShowKrsModal] = useState(false)
+  const [showAlihLeaderModal, setShowAlihLeaderModal] = useState(false)
+  const [newLeader, setNewLeader] = useState('Neuro')
+  const [isCustomDept, setIsCustomDept] = useState(false)
+  const [isCustomRs, setIsCustomRs] = useState(false)
   const [krsForm, setKrsForm] = useState<{
     keterangan_krs: KeteranganKrs
     detail_krs: string
@@ -735,7 +810,32 @@ export default function PatientProfile() {
     detail_krs: '',
     tgl_krs: getLocalDateString(),
   })
-  useBodyScrollLock(Boolean(chatOpen || showEditPatientModal || editingTerapi || addingTerapiNoteId || editingNote || showKrsModal))
+  useBodyScrollLock(Boolean(chatOpen || showEditPatientModal || editingTerapi || addingTerapiNoteId || editingNote || showKrsModal || showAlihLeaderModal))
+
+  const openAlihLeaderModal = () => {
+    setNewLeader(patient?.dpjp_utama || 'Neuro')
+    setShowAlihLeaderModal(true)
+  }
+
+  const handleSaveAlihLeader = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!patient || !pid) return
+    const isNeuro = newLeader === 'Neuro'
+    const newPeran: PeranRawat = isNeuro ? 'Leader' : 'Raber'
+    const updated: Patient = {
+      ...patient,
+      dpjp_utama: newLeader,
+      peran_rawat: newPeran,
+    }
+    cachePatient(updated)
+    await db.patients.update(pid, {
+      dpjp_utama: newLeader,
+      peran_rawat: newPeran,
+    })
+    triggerCloudSync(50)
+    setShowAlihLeaderModal(false)
+    notify(`DPJP Utama berhasil dialihkan ke ${newLeader} ✓`)
+  }
   const [msgs, setMsgs] = useState<ChatMsg[]>([])
   const [draft, setDraft] = useState('')
   const [busy, setBusy] = useState(false)
@@ -800,46 +900,75 @@ export default function PatientProfile() {
   }
 
   const openKrsModal = () => {
+    const defaultDetail = patient?.detail_krs || ''
     setKrsForm({
       keterangan_krs: patient?.keterangan_krs || 'Izin Dokter',
-      detail_krs: patient?.detail_krs || '',
-      tgl_krs: patient?.tgl_krs ? patient.tgl_krs.slice(0, 10) : getLocalDateString(),
+      detail_krs: defaultDetail,
+      tgl_krs: patient?.status_rawat === 'krs' && patient?.tgl_krs ? patient.tgl_krs.slice(0, 10) : getLocalDateString(),
     })
+    setIsCustomDept(Boolean(defaultDetail && !DEPT_ALIH_RAWAT.includes(defaultDetail)))
+    setIsCustomRs(Boolean(defaultDetail && !RS_RUJUKAN.includes(defaultDetail)))
     setShowKrsModal(true)
   }
 
   const handleConfirmKrs = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!patient) return
+    const updatedPatient: Patient = {
+      ...patient,
+      status_rawat: 'krs',
+      keterangan_krs: krsForm.keterangan_krs,
+      detail_krs: krsForm.detail_krs.trim() || undefined,
+      tgl_krs: krsForm.tgl_krs || getLocalDateString(),
+    }
+    // Langsung hapus dari cache pasien aktif in-memory agar Dasbor bersih seketika
+    cachePatient(updatedPatient)
+
     await db.patients.update(pid, {
       status_rawat: 'krs',
       keterangan_krs: krsForm.keterangan_krs,
       detail_krs: krsForm.detail_krs.trim() || undefined,
       tgl_krs: krsForm.tgl_krs || getLocalDateString(),
     })
+    triggerCloudSync(50)
     setShowKrsModal(false)
     const detailLabel = krsForm.detail_krs.trim() ? ` (${krsForm.detail_krs.trim()})` : ''
-    notify(`Pasien ditandai KRS: ${krsForm.keterangan_krs}${detailLabel} ✓`)
+    const statusLabel = krsForm.keterangan_krs === 'Meninggal'
+      ? 'MD'
+      : krsForm.keterangan_krs === 'APS'
+      ? 'APS'
+      : krsForm.keterangan_krs === 'Alih Rawat'
+      ? 'Alih Rawat'
+      : krsForm.keterangan_krs === 'Rujuk'
+      ? 'Rujuk'
+      : 'KRS'
+    notify(`Pasien ditandai ${statusLabel}${detailLabel} ✓`)
   }
 
   const handleKembaliRawat = async () => {
     if (!patient) return
     if (!window.confirm('Kembalikan status pasien ini menjadi Rawat Inap (aktif)?')) return
-    await db.patients.update(pid, {
+    const updatedPatient: Patient = {
+      ...patient,
       status_rawat: 'aktif',
-      keterangan_krs: undefined,
-      detail_krs: undefined,
-      tgl_krs: undefined,
-    })
+    }
+    delete updatedPatient.keterangan_krs
+    delete updatedPatient.detail_krs
+    delete updatedPatient.tgl_krs
+    cachePatient(updatedPatient)
+
+    await db.patients.put(updatedPatient)
+    triggerCloudSync(50)
     notify('Pasien kembali rawat aktif ✓')
   }
 
   const buildKonteks = () => {
     const riwayatRawatKonteks = patient.riwayat_rawat && patient.riwayat_rawat.length > 0
       ? `\n\n[RIWAYAT RAWAT INAP TERDAHULU (REKAM MEDIS)]\n` +
-        patient.riwayat_rawat.map((r, i) =>
-          `- Rawat Ke-${i + 1}: MRS ${formatDate(r.tgl_mrs)}${r.tgl_krs ? ` s/d KRS ${formatDate(r.tgl_krs)}` : ''}${r.keterangan_krs ? ` (${r.keterangan_krs}${r.detail_krs ? `: ${r.detail_krs}` : ''})` : ''} | Dx: ${r.diagnosis_utama}${r.catatan_krs ? ` | Terapi KRS: ${r.catatan_krs}` : ''}`
-        ).join('\n')
+        patient.riwayat_rawat.map((r, i) => {
+          const outcomeLabel = r.keterangan_krs === 'Meninggal' ? 'MD' : r.keterangan_krs === 'APS' ? 'APS' : r.keterangan_krs === 'Alih Rawat' ? 'Alih Rawat' : r.keterangan_krs === 'Rujuk' ? 'Rujuk' : 'KRS'
+          return `- Rawat Ke-${i + 1}: MRS ${formatDate(r.tgl_mrs)}${r.tgl_krs ? ` s/d ${outcomeLabel} ${formatDate(r.tgl_krs)}` : ''}${r.keterangan_krs && r.keterangan_krs !== 'Izin Dokter' ? ` (${r.keterangan_krs}${r.detail_krs ? `: ${r.detail_krs}` : ''})` : ''} | Dx: ${r.diagnosis_utama}${r.catatan_krs ? ` | Terapi: ${r.catatan_krs}` : ''}`
+        }).join('\n')
       : ''
 
     return `[DATA PASIEN]\nJaminan: [${patient.jaminan}]\nDiagnosis utama: ${patient.diagnosis_utama}\nMRS: ${formatDate(patient.tgl_mrs)} (rawat hari ke-${hariKe(patient.tgl_mrs)})${patient.tgl_onset ? `\nOnset: ${formatDate(patient.tgl_onset)} (hari ke-${hariKe(patient.tgl_onset)})` : ''}${riwayatRawatKonteks}\n\n[RIWAYAT CPPT]\n` +
@@ -953,13 +1082,66 @@ export default function PatientProfile() {
           </button>
         </div>
 
-        <div className="mt-3 flex flex-wrap gap-1.5">
+        <div className="mt-3 flex flex-wrap gap-1.5 items-center">
           <span className="rounded-full bg-white/20 px-3 py-1 text-xs font-bold text-white">
             {patient.jaminan}
           </span>
           <span className="rounded-full bg-white/20 px-3 py-1 text-xs font-bold text-white">
             {hospital?.nama} · {ward?.nama}
           </span>
+
+          {/* Peran & Leader */}
+          {patient.status_rawat === 'aktif' && (
+            patient.peran_rawat === 'Raber' || (patient.dpjp_utama && patient.dpjp_utama !== 'Neuro' && patient.peran_rawat !== 'Konsul') ? (
+              <div className="flex items-center gap-1">
+                <span className="rounded-full bg-indigo-500/80 text-white border border-indigo-400/50 px-3 py-1 text-xs font-bold">
+                  Raber · {patient.dpjp_utama}
+                </span>
+                <button
+                  type="button"
+                  onClick={openAlihLeaderModal}
+                  className="flex items-center gap-1 text-[11px] font-bold text-white/90 bg-white/20 hover:bg-white/30 px-2 py-0.5 rounded-full transition-all cursor-pointer"
+                  title="Alih DPJP Utama"
+                >
+                  <ArrowLeftRight size={12} /> Alih Leader
+                </button>
+              </div>
+            ) : patient.peran_rawat === 'Konsul' ? (
+              <div className="flex items-center gap-1">
+                <span className="rounded-full bg-sky-500/80 text-white border border-sky-400/50 px-3 py-1 text-xs font-bold">
+                  Konsul · {patient.dpjp_utama || 'Dept Lain'}
+                </span>
+                <button
+                  type="button"
+                  onClick={openAlihLeaderModal}
+                  className="flex items-center gap-1 text-[11px] font-bold text-white/90 bg-white/20 hover:bg-white/30 px-2 py-0.5 rounded-full transition-all cursor-pointer"
+                  title="Alih DPJP Utama"
+                >
+                  <ArrowLeftRight size={12} /> Alih Leader
+                </button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-1">
+                <span className="rounded-full bg-white/20 px-3 py-1 text-xs font-bold text-white">
+                  Leader (Neuro)
+                </span>
+                {patient.tim_raber && patient.tim_raber.length > 0 && (
+                  <span className="rounded-full bg-white/15 px-2.5 py-0.5 text-xs font-semibold text-white/90">
+                    Raber: {patient.tim_raber.join(', ')}
+                  </span>
+                )}
+                <button
+                  type="button"
+                  onClick={openAlihLeaderModal}
+                  className="flex items-center gap-1 text-[11px] font-bold text-white/90 bg-white/20 hover:bg-white/30 px-2 py-0.5 rounded-full transition-all cursor-pointer"
+                  title="Alih DPJP Utama"
+                >
+                  <ArrowLeftRight size={12} /> Alih Leader
+                </button>
+              </div>
+            )
+          )}
+
           {patient.tgl_onset && (
             <span className="rounded-full bg-white/20 px-3 py-1 text-xs font-bold text-white">
               Onset OH-{hariKe(patient.tgl_onset)} ({formatDate(patient.tgl_onset)})
@@ -971,7 +1153,7 @@ export default function PatientProfile() {
             </span>
           ) : (
             <span className="rounded-full bg-slate-700/60 text-slate-200 border border-slate-600/60 px-3 py-1 text-xs font-bold">
-              {patient.tgl_krs ? `KRS ${formatDate(patient.tgl_krs)}` : 'Sudah KRS'}
+              {patient.tgl_krs ? `${patient.keterangan_krs === 'Meninggal' ? 'MD' : patient.keterangan_krs === 'APS' ? 'APS' : patient.keterangan_krs === 'Alih Rawat' ? 'Alih Rawat' : patient.keterangan_krs === 'Rujuk' ? 'Rujuk' : 'KRS'} ${formatDate(patient.tgl_krs)}` : 'Sudah Keluar'}
               {patient.tgl_krs && patient.tgl_mrs ? ` · ${Math.max(1, Math.floor((new Date(patient.tgl_krs).getTime() - new Date(patient.tgl_mrs).getTime()) / 86400000) + 1)} hari rawat` : ''}
             </span>
           )}
@@ -981,11 +1163,11 @@ export default function PatientProfile() {
             </span>
           ) : patient.keterangan_krs === 'Meninggal' ? (
             <span className="rounded-full px-3 py-1 text-xs font-bold bg-rose-500/80 text-white border border-rose-400/50 shadow-xs">
-              Meninggal
+              MD
             </span>
           ) : patient.keterangan_krs === 'APS' ? (
             <span className="rounded-full px-3 py-1 text-xs font-bold bg-amber-500/80 text-white border border-amber-400/50 shadow-xs">
-              KRS: APS
+              APS
             </span>
           ) : patient.keterangan_krs === 'Alih Rawat' ? (
             <span className="rounded-full px-3 py-1 text-xs font-bold bg-indigo-500/80 text-white border border-indigo-400/50 shadow-xs">
@@ -997,13 +1179,73 @@ export default function PatientProfile() {
             </span>
           ) : (
             <span className="rounded-full px-3 py-1 text-xs font-bold bg-white/30 text-white">
-              KRS: {patient.keterangan_krs || 'Izin Dokter'}
+              KRS
             </span>
           )}
         </div>
       </div>
 
+      {/* Tab Switcher Profil Pasien */}
+      <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none text-xs">
+        <button
+          type="button"
+          onClick={() => setActiveProfileTab('semua')}
+          className={`px-3 py-1.5 rounded-2xl font-bold whitespace-nowrap cursor-pointer transition-all ${
+            activeProfileTab === 'semua'
+              ? 'bg-primary text-white shadow-xs'
+              : 'bg-white/80 text-ink-muted hover:bg-white hover:text-ink border border-slate-200/70'
+          }`}
+        >
+          Semua
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveProfileTab('terapi')}
+          className={`px-3 py-1.5 rounded-2xl font-bold whitespace-nowrap cursor-pointer transition-all flex items-center gap-1.5 ${
+            activeProfileTab === 'terapi'
+              ? 'bg-primary text-white shadow-xs'
+              : 'bg-white/80 text-ink-muted hover:bg-white hover:text-ink border border-slate-200/70'
+          }`}
+        >
+          <Pill size={13} /> Terapi & Plan
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveProfileTab('tren')}
+          className={`px-3 py-1.5 rounded-2xl font-bold whitespace-nowrap cursor-pointer transition-all flex items-center gap-1.5 ${
+            activeProfileTab === 'tren'
+              ? 'bg-primary text-white shadow-xs'
+              : 'bg-white/80 text-ink-muted hover:bg-white hover:text-ink border border-slate-200/70'
+          }`}
+        >
+          <Activity size={13} /> Tren Klinis
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveProfileTab('penunjang')}
+          className={`px-3 py-1.5 rounded-2xl font-bold whitespace-nowrap cursor-pointer transition-all flex items-center gap-1.5 ${
+            activeProfileTab === 'penunjang'
+              ? 'bg-primary text-white shadow-xs'
+              : 'bg-white/80 text-ink-muted hover:bg-white hover:text-ink border border-slate-200/70'
+          }`}
+        >
+          <FlaskConical size={13} /> Penunjang ({penunjangList.length})
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveProfileTab('cppt')}
+          className={`px-3 py-1.5 rounded-2xl font-bold whitespace-nowrap cursor-pointer transition-all flex items-center gap-1.5 ${
+            activeProfileTab === 'cppt'
+              ? 'bg-primary text-white shadow-xs'
+              : 'bg-white/80 text-ink-muted hover:bg-white hover:text-ink border border-slate-200/70'
+          }`}
+        >
+          <Stethoscope size={13} /> CPPT ({notes.length})
+        </button>
+      </div>
+
       {/* Terapi & Planning Berjalan */}
+      {(activeProfileTab === 'semua' || activeProfileTab === 'terapi') && (
       <div className="glass-card rounded-3xl p-5 shadow-sm space-y-3.5">
         <div className="flex items-center justify-between">
           <p className="h2 text-sm font-bold text-ink">Planning & Terapi Berjalan</p>
@@ -1186,19 +1428,29 @@ export default function PatientProfile() {
             <ClipboardCopy size={15} /> Salin Resep KRS WhatsApp
           </button>
           {patient.status_rawat === 'aktif' ? (
-            <button
-              onClick={openKrsModal}
-              className="flex h-10 cursor-pointer items-center gap-2 rounded-2xl bg-surface px-4 text-xs font-bold text-ink hover:bg-surface/80 active:scale-95 transition-all"
-            >
-              <LogOut size={15} /> Tandai KRS
-            </button>
+            <>
+              <button
+                type="button"
+                onClick={openAlihLeaderModal}
+                className="flex h-10 cursor-pointer items-center gap-2 rounded-2xl bg-surface px-4 text-xs font-bold text-ink hover:bg-surface/80 active:scale-95 transition-all"
+              >
+                <ArrowLeftRight size={15} /> Alih Leader
+              </button>
+              <button
+                type="button"
+                onClick={openKrsModal}
+                className="flex h-10 cursor-pointer items-center gap-2 rounded-2xl bg-surface px-4 text-xs font-bold text-ink hover:bg-surface/80 active:scale-95 transition-all"
+              >
+                <LogOut size={15} /> Tandai KRS / Keluar
+              </button>
+            </>
           ) : (
             <>
               <button
                 onClick={openKrsModal}
                 className="flex h-10 cursor-pointer items-center gap-2 rounded-2xl bg-surface px-4 text-xs font-bold text-ink hover:bg-surface/80 active:scale-95 transition-all"
               >
-                <Pencil size={14} /> Ubah KRS ({patient.keterangan_krs || 'Izin Dokter'})
+                <Pencil size={14} /> Ubah Status ({patient.keterangan_krs === 'Meninggal' ? 'MD' : patient.keterangan_krs === 'APS' ? 'APS' : patient.keterangan_krs === 'Alih Rawat' ? 'Alih Rawat' : patient.keterangan_krs === 'Rujuk' ? 'Rujuk' : 'KRS'})
               </button>
               <button
                 onClick={handleKembaliRawat}
@@ -1219,8 +1471,15 @@ export default function PatientProfile() {
           />
         )}
       </div>
+      )}
+
+      {/* Tren Klinis Pasien (GCS, TTV, Motorik, Gejala) */}
+      {(activeProfileTab === 'semua' || activeProfileTab === 'tren') && (
+        <ClinicalTrendingView notes={notes} />
+      )}
 
       {/* Pemeriksaan Penunjang (Lab, Radiologi, Penunjang Lain) */}
+      {(activeProfileTab === 'semua' || activeProfileTab === 'penunjang') && (
       <div id="section-penunjang" className="glass-card rounded-3xl p-5 shadow-sm space-y-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -1432,9 +1691,10 @@ export default function PatientProfile() {
           </div>
         )}
       </div>
+      )}
 
       {/* Riwayat Rawat Inap Terdahulu */}
-      {patient.riwayat_rawat && patient.riwayat_rawat.length > 0 && (
+      {activeProfileTab === 'semua' && patient.riwayat_rawat && patient.riwayat_rawat.length > 0 && (
         <div className="glass-card rounded-3xl p-5 shadow-sm space-y-3">
           <p className="h2 flex items-center gap-2 text-sm font-bold text-ink">
             <History size={18} className="text-primary" />
@@ -1445,11 +1705,12 @@ export default function PatientProfile() {
               const h = allHospitals?.find((x) => x.id === ep.hospital_id)
               const w = allWards?.find((x) => x.id === ep.ward_id)
               const episodeIndex = patient.riwayat_rawat!.length - i
+              const epOutcome = ep.keterangan_krs === 'Meninggal' ? 'MD' : ep.keterangan_krs === 'APS' ? 'APS' : ep.keterangan_krs === 'Alih Rawat' ? 'Alih Rawat' : ep.keterangan_krs === 'Rujuk' ? 'Rujuk' : 'KRS'
               return (
                 <div key={ep.id || i} className="rounded-2xl border border-surface bg-surface/60 p-3.5 space-y-1.5">
                   <div className="flex items-center justify-between text-ink-muted">
                     <span className="h3 text-xs font-bold text-primary">Episode #{episodeIndex}</span>
-                    <span className="caption font-medium">MRS: {formatDate(ep.tgl_mrs)} {ep.tgl_krs ? `→ KRS: ${formatDate(ep.tgl_krs)}` : ''}{ep.keterangan_krs ? ` (${ep.keterangan_krs}${ep.detail_krs ? `: ${ep.detail_krs}` : ''})` : ''}</span>
+                    <span className="caption font-medium">MRS: {formatDate(ep.tgl_mrs)} {ep.tgl_krs ? `→ ${epOutcome}: ${formatDate(ep.tgl_krs)}` : ''}{ep.keterangan_krs && ep.keterangan_krs !== 'Izin Dokter' ? ` (${ep.keterangan_krs}${ep.detail_krs ? `: ${ep.detail_krs}` : ''})` : ''}</span>
                   </div>
                   <p className="h2 text-sm font-bold text-ink">{ep.diagnosis_utama}</p>
                   {(h || w) && (
@@ -1459,7 +1720,7 @@ export default function PatientProfile() {
                   )}
                   {ep.catatan_krs && (
                     <p className="caption text-xs text-ink-muted border-t border-surface pt-1.5 mt-1">
-                      <b className="text-ink">Terapi KRS:</b> {ep.catatan_krs}
+                      <b className="text-ink">Terapi Pulang:</b> {ep.catatan_krs}
                     </p>
                   )}
                 </div>
@@ -1470,6 +1731,7 @@ export default function PatientProfile() {
       )}
 
       {/* Timeline CPPT */}
+      {(activeProfileTab === 'semua' || activeProfileTab === 'cppt') && (
       <div className="space-y-3">
         <div className="flex items-center justify-between px-1">
           <p className="h2 text-sm font-bold text-ink">Riwayat CPPT</p>
@@ -1551,6 +1813,7 @@ export default function PatientProfile() {
           </div>
         )}
       </div>
+      )}
 
       {/* Floating Action Button Diskusi AI */}
       <button
@@ -1703,13 +1966,16 @@ export default function PatientProfile() {
               </div>
 
               <div>
-                <label className="block text-[11px] font-semibold text-ink-muted mb-1">Diagnosis Utama</label>
-                <input
+                <label className="block text-[11px] font-semibold text-ink-muted mb-1">Diagnosis Utama (ICD-10)</label>
+                <PredictiveInput
+                  type="diagnosis"
                   required
                   value={editPatientForm.diagnosis_utama}
-                  onChange={(e) => setEditPatientForm({ ...editPatientForm, diagnosis_utama: e.target.value })}
-                  placeholder="mis. Stroke Iskemik Akut"
-                  className="w-full h-9 rounded-xl border border-slate-200 px-3 text-xs text-ink outline-none focus:border-primary"
+                  onChange={(val) => setEditPatientForm({ ...editPatientForm, diagnosis_utama: val })}
+                  onSelect={(item) => setEditPatientForm({ ...editPatientForm, diagnosis_utama: item.name })}
+                  placeholder="mis. Stroke Iskemik Akut, ICH, Hipertensi..."
+                  className="w-full"
+                  inputClassName="w-full h-9 rounded-xl border border-slate-200 px-3 text-xs text-ink outline-none focus:border-primary"
                 />
               </div>
 
@@ -1749,6 +2015,86 @@ export default function PatientProfile() {
                     )}
                   </select>
                 </div>
+              </div>
+
+              {/* Peran & DPJP Tim Rawat */}
+              <div className="bg-slate-50 p-3 rounded-2xl border border-slate-200 space-y-2.5">
+                <label className="block text-xs font-bold text-slate-700">Peran Rawat</label>
+                <div className="grid grid-cols-3 gap-1.5">
+                  {(['Leader', 'Raber', 'Konsul'] as PeranRawat[]).map((role) => (
+                    <button
+                      key={role}
+                      type="button"
+                      onClick={() => {
+                        setEditPatientForm((f) => ({
+                          ...f,
+                          peran_rawat: role,
+                          dpjp_utama: role === 'Leader' ? 'Neuro' : f.dpjp_utama === 'Neuro' ? 'IPD' : f.dpjp_utama,
+                        }))
+                      }}
+                      className={`py-1.5 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
+                        editPatientForm.peran_rawat === role
+                          ? role === 'Leader'
+                            ? 'bg-primary text-white border-primary shadow-xs'
+                            : role === 'Raber'
+                            ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
+                            : 'bg-sky-600 text-white border-sky-600 shadow-xs'
+                          : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                      }`}
+                    >
+                      {role}
+                    </button>
+                  ))}
+                </div>
+
+                {editPatientForm.peran_rawat !== 'Leader' ? (
+                  <div>
+                    <label className="block text-[11px] font-semibold text-ink-muted mb-1">
+                      {editPatientForm.peran_rawat === 'Raber' ? 'DPJP Utama (Leader)' : 'Konsul dari (Leader)'}
+                    </label>
+                    <select
+                      value={editPatientForm.dpjp_utama}
+                      onChange={(e) => setEditPatientForm({ ...editPatientForm, dpjp_utama: e.target.value })}
+                      className="w-full h-9 rounded-xl border border-slate-200 px-2 text-xs bg-white text-ink outline-none focus:border-primary font-semibold"
+                    >
+                      {DEPT_ALIH_RAWAT.map((dept) => (
+                        <option key={dept} value={dept}>{dept}</option>
+                      ))}
+                    </select>
+                  </div>
+                ) : (
+                  <div>
+                    <label className="block text-[11px] font-semibold text-ink-muted mb-1">
+                      Spesialis Lain yang Ikut Raber (Opsional)
+                    </label>
+                    <div className="flex flex-wrap gap-1">
+                      {DEPT_ALIH_RAWAT.map((dept) => {
+                        const isChecked = editPatientForm.tim_raber.includes(dept)
+                        return (
+                          <button
+                            key={dept}
+                            type="button"
+                            onClick={() => {
+                              setEditPatientForm((f) => ({
+                                ...f,
+                                tim_raber: isChecked
+                                  ? f.tim_raber.filter((d) => d !== dept)
+                                  : [...f.tim_raber, dept],
+                              }))
+                            }}
+                            className={`px-2 py-0.5 rounded-lg text-[10px] font-bold border transition-all cursor-pointer ${
+                              isChecked
+                                ? 'bg-indigo-50 text-indigo-700 border-indigo-300'
+                                : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                            }`}
+                          >
+                            {isChecked ? `✓ ${dept}` : `+ ${dept}`}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div className="grid grid-cols-2 gap-2">
@@ -1803,11 +2149,11 @@ export default function PatientProfile() {
                     className="w-full h-9 rounded-xl border border-slate-200 px-2 text-xs bg-white text-ink outline-none focus:border-primary font-medium"
                   >
                     <option value="aktif">Rawat Inap (Aktif)</option>
-                    <option value="krs_izin">KRS: Izin Dokter</option>
-                    <option value="krs_aps">KRS: APS (Pulang Paksa)</option>
-                    <option value="krs_meninggal">KRS: Meninggal Dunia</option>
-                    <option value="krs_alih">KRS: Alih Rawat (Departemen Lain)</option>
-                    <option value="krs_rujuk">KRS: Rujuk (Faskes/RS Lain)</option>
+                    <option value="krs_izin">KRS (Izin Dokter)</option>
+                    <option value="krs_aps">APS (Pulang Paksa)</option>
+                    <option value="krs_meninggal">MD (Meninggal Dunia)</option>
+                    <option value="krs_alih">Alih Rawat (Departemen Lain)</option>
+                    <option value="krs_rujuk">Rujuk (Faskes/RS Lain)</option>
                   </select>
                 </div>
               </div>
@@ -1823,7 +2169,7 @@ export default function PatientProfile() {
                         type="text"
                         value={editPatientForm.detail_krs}
                         onChange={(e) => setEditPatientForm({ ...editPatientForm, detail_krs: e.target.value })}
-                        placeholder="Contoh: Bedah Saraf, ICU, IPD..."
+                        placeholder="Contoh: Bedah Saraf, IPD, Kardio, Anestesi..."
                         className="w-full h-9 rounded-xl border border-slate-200 px-2 text-xs text-ink outline-none focus:border-primary bg-white"
                       />
                     </div>
@@ -1843,11 +2189,10 @@ export default function PatientProfile() {
                     </div>
                   )}
                   <div>
-                    <label className="block text-[11px] font-semibold text-ink-muted mb-1">Tanggal Keluar (KRS)</label>
-                    <input
-                      type="date"
+                    <label className="block text-[11px] font-semibold text-ink-muted mb-1">Tanggal Keluar (DD/MM/YY)</label>
+                    <DateInput
                       value={editPatientForm.tgl_krs}
-                      onChange={(e) => setEditPatientForm({ ...editPatientForm, tgl_krs: e.target.value })}
+                      onChange={(val) => setEditPatientForm({ ...editPatientForm, tgl_krs: val })}
                       className="w-full h-9 rounded-xl border border-slate-200 px-2 text-xs text-ink outline-none focus:border-primary bg-white"
                     />
                   </div>
@@ -1856,21 +2201,19 @@ export default function PatientProfile() {
 
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <label className="block text-[11px] font-semibold text-ink-muted mb-1">Tgl MRS</label>
-                  <input
-                    type="date"
+                  <label className="block text-[11px] font-semibold text-ink-muted mb-1">Tgl MRS (DD/MM/YY)</label>
+                  <DateInput
                     value={editPatientForm.tgl_mrs}
-                    onChange={(e) => setEditPatientForm({ ...editPatientForm, tgl_mrs: e.target.value })}
-                    className="w-full h-9 rounded-xl border border-slate-200 px-2 text-xs text-ink outline-none focus:border-primary"
+                    onChange={(val) => setEditPatientForm({ ...editPatientForm, tgl_mrs: val })}
+                    className="w-full h-9 rounded-xl border border-slate-200 px-2 text-xs text-ink outline-none focus:border-primary bg-white"
                   />
                 </div>
                 <div>
-                  <label className="block text-[11px] font-semibold text-ink-muted mb-1">Tgl Onset</label>
-                  <input
-                    type="date"
+                  <label className="block text-[11px] font-semibold text-ink-muted mb-1">Tgl Onset (DD/MM/YY)</label>
+                  <DateInput
                     value={editPatientForm.tgl_onset}
-                    onChange={(e) => setEditPatientForm({ ...editPatientForm, tgl_onset: e.target.value })}
-                    className="w-full h-9 rounded-xl border border-slate-200 px-2 text-xs text-ink outline-none focus:border-primary"
+                    onChange={(val) => setEditPatientForm({ ...editPatientForm, tgl_onset: val })}
+                    className="w-full h-9 rounded-xl border border-slate-200 px-2 text-xs text-ink outline-none focus:border-primary bg-white"
                   />
                 </div>
               </div>
@@ -1944,18 +2287,30 @@ export default function PatientProfile() {
               </div>
 
               <div>
-                <label className="block text-[11px] font-semibold text-ink-muted mb-1">Nama Item / Obat</label>
-                <input
+                <label className="block text-[11px] font-semibold text-ink-muted mb-1">Nama Item / Obat (Fornas/ICD-9)</label>
+                <PredictiveInput
+                  type={editingTerapi.item.kategori === 'Diagnostik' ? 'procedure' : 'drug'}
                   required
                   value={editingTerapi.item.nama_item}
-                  onChange={(e) =>
+                  onChange={(val) =>
                     setEditingTerapi({
                       ...editingTerapi,
-                      item: { ...editingTerapi.item, nama_item: e.target.value },
+                      item: { ...editingTerapi.item, nama_item: val },
                     })
                   }
-                  placeholder="mis. Ceftriaxone"
-                  className="w-full h-9 rounded-xl border border-slate-200 px-3 text-xs text-ink outline-none focus:border-primary"
+                  onSelect={(sel) => {
+                    setEditingTerapi({
+                      ...editingTerapi,
+                      item: {
+                        ...editingTerapi.item,
+                        nama_item: sel.name,
+                        dosis_keterangan: sel.detail || editingTerapi.item.dosis_keterangan,
+                      },
+                    })
+                  }}
+                  placeholder="mis. Amlodipine, Ceftriaxone, CT Scan..."
+                  className="w-full"
+                  inputClassName="w-full h-9 rounded-xl border border-slate-200 px-3 text-xs text-ink outline-none focus:border-primary"
                 />
               </div>
 
@@ -1997,17 +2352,16 @@ export default function PatientProfile() {
                 </div>
                 {editingTerapi.item.status === 'stop' && (
                   <div>
-                    <label className="block text-[11px] font-semibold text-ink-muted mb-1">Tgl Stop</label>
-                    <input
-                      type="date"
+                    <label className="block text-[11px] font-semibold text-ink-muted mb-1">Tgl Stop (DD/MM/YY)</label>
+                    <DateInput
                       value={editingTerapi.item.tgl_stop || ''}
-                      onChange={(e) =>
+                      onChange={(val) =>
                         setEditingTerapi({
                           ...editingTerapi,
-                          item: { ...editingTerapi.item, tgl_stop: e.target.value },
+                          item: { ...editingTerapi.item, tgl_stop: val },
                         })
                       }
-                      className="w-full h-9 rounded-xl border border-slate-200 px-2 text-xs text-ink outline-none focus:border-primary"
+                      className="w-full h-9 rounded-xl border border-slate-200 px-2 text-xs text-ink outline-none focus:border-primary bg-white"
                     />
                   </div>
                 )}
@@ -2068,14 +2422,24 @@ export default function PatientProfile() {
               </div>
 
               <div>
-                <label className="block text-[11px] font-semibold text-ink-muted mb-1">Nama Item / Obat</label>
-                <input
+                <label className="block text-[11px] font-semibold text-ink-muted mb-1">Nama Item / Obat (Fornas/ICD-9)</label>
+                <PredictiveInput
+                  type={newTerapiForm.kategori === 'Diagnostik' ? 'procedure' : 'drug'}
                   required
                   autoFocus
                   value={newTerapiForm.nama_item}
-                  onChange={(e) => setNewTerapiForm({ ...newTerapiForm, nama_item: e.target.value })}
-                  placeholder="mis. Ondansetron, Fisioterapi dada, CT Scan..."
-                  className="w-full h-9 rounded-xl border border-slate-200 px-3 text-xs text-ink outline-none focus:border-primary"
+                  onChange={(val) => setNewTerapiForm({ ...newTerapiForm, nama_item: val })}
+                  onSelect={(item) => {
+                    setNewTerapiForm((prev) => ({
+                      ...prev,
+                      nama_item: item.name,
+                      dosis_keterangan: item.detail || prev.dosis_keterangan,
+                      kategori: (item.category as KategoriTerapi) || prev.kategori,
+                    }))
+                  }}
+                  placeholder="mis. Amlodipine, Ondansetron, CT Scan..."
+                  className="w-full"
+                  inputClassName="w-full h-9 rounded-xl border border-slate-200 px-3 text-xs text-ink outline-none focus:border-primary"
                 />
               </div>
 
@@ -2132,12 +2496,11 @@ export default function PatientProfile() {
 
             <form onSubmit={handleSaveEditNote} className="space-y-3">
               <div>
-                <label className="block text-[11px] font-semibold text-ink-muted mb-1">Tanggal CPPT</label>
-                <input
-                  type="date"
+                <label className="block text-[11px] font-semibold text-ink-muted mb-1">Tanggal CPPT (DD/MM/YY)</label>
+                <DateInput
                   value={editingNote.tanggal}
-                  onChange={(e) => setEditingNote({ ...editingNote, tanggal: e.target.value })}
-                  className="w-full h-9 rounded-xl border border-slate-200 px-3 text-xs text-ink outline-none focus:border-primary"
+                  onChange={(val) => setEditingNote({ ...editingNote, tanggal: val })}
+                  className="w-full h-9 rounded-xl border border-slate-200 px-3 text-xs text-ink outline-none focus:border-primary bg-white"
                 />
               </div>
 
@@ -2270,11 +2633,14 @@ export default function PatientProfile() {
 
               {/* Nama Pemeriksaan & Suggestions */}
               <div>
-                <label className="block text-[11px] font-semibold text-ink-muted mb-1">Nama Pemeriksaan</label>
-                <input
+                <label className="block text-[11px] font-semibold text-ink-muted mb-1">Nama Pemeriksaan (ICD-9-CM)</label>
+                <PredictiveInput
+                  type="procedure"
+                  procedureCategory={penunjangForm.kategori}
                   required
                   value={penunjangForm.nama_pemeriksaan}
-                  onChange={(e) => setPenunjangForm({ ...penunjangForm, nama_pemeriksaan: e.target.value })}
+                  onChange={(val) => setPenunjangForm({ ...penunjangForm, nama_pemeriksaan: val })}
+                  onSelect={(item) => setPenunjangForm({ ...penunjangForm, nama_pemeriksaan: item.name })}
                   placeholder={
                     penunjangForm.kategori === 'Laboratorium'
                       ? 'mis. Darah Lengkap, GDS, Elektrolit...'
@@ -2282,7 +2648,8 @@ export default function PatientProfile() {
                       ? 'mis. CT-Scan Kepala Non-Kontras, Foto Thorax AP...'
                       : 'mis. EKG 12 Lead, EEG, Lumbal Pungsi...'
                   }
-                  className="w-full h-9 rounded-xl border border-slate-200 px-3 text-xs text-ink outline-none focus:border-primary"
+                  className="w-full"
+                  inputClassName="w-full h-9 rounded-xl border border-slate-200 px-3 text-xs text-ink outline-none focus:border-primary"
                 />
                 {/* Suggestions chips */}
                 <div className="flex items-center gap-1.5 overflow-x-auto pt-1.5 pb-0.5 scrollbar-none">
@@ -2307,13 +2674,12 @@ export default function PatientProfile() {
               {/* Tanggal & Status */}
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <label className="block text-[11px] font-semibold text-ink-muted mb-1">Tanggal</label>
-                  <input
-                    type="date"
+                  <label className="block text-[11px] font-semibold text-ink-muted mb-1">Tanggal (DD/MM/YY)</label>
+                  <DateInput
                     required
                     value={penunjangForm.tanggal}
-                    onChange={(e) => setPenunjangForm({ ...penunjangForm, tanggal: e.target.value })}
-                    className="w-full h-9 rounded-xl border border-slate-200 px-3 text-xs text-ink outline-none focus:border-primary"
+                    onChange={(val) => setPenunjangForm({ ...penunjangForm, tanggal: val })}
+                    className="w-full h-9 rounded-xl border border-slate-200 px-3 text-xs text-ink outline-none focus:border-primary bg-white"
                   />
                 </div>
                 <div>
@@ -2527,14 +2893,11 @@ export default function PatientProfile() {
           onClick={() => setShowKrsModal(false)}
         >
           <div
-            className="w-full max-w-md bg-white rounded-3xl p-5 shadow-2xl space-y-4 max-h-[90dvh] overflow-y-auto"
+            className="w-full max-w-sm bg-white rounded-3xl p-5 shadow-2xl space-y-4 max-h-[90dvh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <div>
-                <h3 className="text-sm font-bold text-ink">Keterangan Pulang (KRS)</h3>
-                <p className="caption text-xs text-ink-muted">Pilih alasan pemulangan dan tanggal keluar rumah sakit</p>
-              </div>
+              <h3 className="text-sm font-bold text-ink">Status Pasien Keluar</h3>
               <button
                 type="button"
                 onClick={() => setShowKrsModal(false)}
@@ -2544,178 +2907,172 @@ export default function PatientProfile() {
               </button>
             </div>
 
-            <form onSubmit={handleConfirmKrs} className="space-y-4">
-              {/* Pilihan Alasan KRS */}
-              <div className="space-y-2">
-                <label className="block text-[11px] font-bold text-ink-muted">Keterangan / Alasan KRS</label>
-                <div className="grid grid-cols-1 gap-2">
-                  {[
-                    {
-                      key: 'Izin Dokter' as KeteranganKrs,
-                      title: 'Izin Dokter (PBJ)',
-                      desc: 'Pulang berobat jalan, perbaikan klinis / sembuh / target terapi tercapai.',
-                      badge: 'bg-emerald-100 text-emerald-800 border-emerald-300',
-                      borderSelected: 'border-emerald-500 bg-emerald-50/40 ring-2 ring-emerald-500/20',
-                    },
-                    {
-                      key: 'APS' as KeteranganKrs,
-                      title: 'APS (Pulang Paksa)',
-                      desc: 'Atas Permintaan Sendiri / pasien & keluarga menolak rawat inap lebih lanjut.',
-                      badge: 'bg-amber-100 text-amber-800 border-amber-300',
-                      borderSelected: 'border-amber-500 bg-amber-50/40 ring-2 ring-amber-500/20',
-                    },
-                    {
-                      key: 'Meninggal' as KeteranganKrs,
-                      title: 'Meninggal Dunia',
-                      desc: 'Pasien dinyatakan meninggal dunia / exitus letalis.',
-                      badge: 'bg-rose-100 text-rose-800 border-rose-300',
-                      borderSelected: 'border-rose-500 bg-rose-50/40 ring-2 ring-rose-500/20',
-                    },
-                    {
-                      key: 'Alih Rawat' as KeteranganKrs,
-                      title: 'Alih Rawat (Departemen Lain)',
-                      desc: 'Alih rawat ke departemen / divisi / DPJP spesialis lain di internal RS.',
-                      badge: 'bg-indigo-100 text-indigo-800 border-indigo-300',
-                      borderSelected: 'border-indigo-500 bg-indigo-50/40 ring-2 ring-indigo-500/20',
-                    },
-                    {
-                      key: 'Rujuk' as KeteranganKrs,
-                      title: 'Rujuk (Faskes Luar)',
-                      desc: 'Dirujuk ke RS luar / faskes rujukan tingkat lanjut.',
-                      badge: 'bg-sky-100 text-sky-800 border-sky-300',
-                      borderSelected: 'border-sky-500 bg-sky-50/40 ring-2 ring-sky-500/20',
-                    },
-                  ].map((opt) => {
-                    const isSelected = krsForm.keterangan_krs === opt.key
-                    return (
+            <form onSubmit={handleConfirmKrs} className="space-y-3.5">
+              {/* Pilihan Alasan Keluar */}
+              <div className="space-y-1.5">
+                {[
+                  {
+                    key: 'Izin Dokter' as KeteranganKrs,
+                    label: 'KRS',
+                    sub: 'Atas Izin Dokter (PBJ)',
+                    borderSelected: 'border-emerald-500 bg-emerald-50/60 ring-1 ring-emerald-500/25 text-emerald-950',
+                    dotSelected: 'border-emerald-600 bg-emerald-600',
+                  },
+                  {
+                    key: 'APS' as KeteranganKrs,
+                    label: 'APS',
+                    sub: 'Pulang Paksa',
+                    borderSelected: 'border-amber-500 bg-amber-50/60 ring-1 ring-amber-500/25 text-amber-950',
+                    dotSelected: 'border-amber-600 bg-amber-600',
+                  },
+                  {
+                    key: 'Meninggal' as KeteranganKrs,
+                    label: 'MD',
+                    sub: 'Meninggal Dunia',
+                    borderSelected: 'border-rose-500 bg-rose-50/60 ring-1 ring-rose-500/25 text-rose-950',
+                    dotSelected: 'border-rose-600 bg-rose-600',
+                  },
+                  {
+                    key: 'Alih Rawat' as KeteranganKrs,
+                    label: 'Alih Rawat',
+                    sub: 'Departemen Lain',
+                    borderSelected: 'border-indigo-500 bg-indigo-50/60 ring-1 ring-indigo-500/25 text-indigo-950',
+                    dotSelected: 'border-indigo-600 bg-indigo-600',
+                  },
+                  {
+                    key: 'Rujuk' as KeteranganKrs,
+                    label: 'Rujuk',
+                    sub: 'Faskes / RS Luar',
+                    borderSelected: 'border-sky-500 bg-sky-50/60 ring-1 ring-sky-500/25 text-sky-950',
+                    dotSelected: 'border-sky-600 bg-sky-600',
+                  },
+                ].map((opt) => {
+                  const isSelected = krsForm.keterangan_krs === opt.key
+                  const isAlihRawat = opt.key === 'Alih Rawat'
+                  const isRujuk = opt.key === 'Rujuk'
+
+                  return (
+                    <div key={opt.key} className="space-y-1.5">
                       <button
                         type="button"
-                        key={opt.key}
-                        onClick={() =>
+                        onClick={() => {
                           setKrsForm((f) => ({
                             ...f,
                             keterangan_krs: opt.key,
                             detail_krs: f.keterangan_krs === opt.key ? f.detail_krs : '',
                           }))
-                        }
-                        className={`text-left p-3 rounded-2xl border transition-all cursor-pointer flex items-start gap-3 ${
+                          if (opt.key !== 'Alih Rawat') setIsCustomDept(false)
+                          if (opt.key !== 'Rujuk') setIsCustomRs(false)
+                        }}
+                        className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl border text-left transition-all cursor-pointer ${
                           isSelected
                             ? opt.borderSelected
-                            : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50/60'
+                            : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50/70 bg-white text-ink'
                         }`}
                       >
-                        <div
-                          className={`mt-0.5 size-4 rounded-full border-2 flex items-center justify-center shrink-0 ${
-                            isSelected ? 'border-primary bg-primary' : 'border-slate-300'
-                          }`}
-                        >
-                          {isSelected && <span className="size-1.5 rounded-full bg-white" />}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className="text-xs font-bold text-ink">{opt.title}</span>
-                            <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold border ${opt.badge}`}>
-                              {opt.key}
-                            </span>
+                        <div className="flex items-center gap-2.5">
+                          <div
+                            className={`size-4 rounded-full border-2 flex items-center justify-center shrink-0 ${
+                              isSelected ? opt.dotSelected : 'border-slate-300'
+                            }`}
+                          >
+                            {isSelected && <span className="size-1.5 rounded-full bg-white" />}
                           </div>
-                          <p className="text-[11px] text-ink-muted mt-0.5 leading-snug">{opt.desc}</p>
+                          <span className="text-xs font-bold">{opt.label}</span>
                         </div>
+                        <span className="text-[11px] text-ink-muted font-medium">{opt.sub}</span>
                       </button>
-                    )
-                  })}
-                </div>
+
+                      {/* Dropdown Spesifik Alih Rawat — Tepat di bawah Alih Rawat */}
+                      {isAlihRawat && isSelected && (
+                        <div className="pl-3.5 pr-0.5 py-1 space-y-1.5 animate-in fade-in">
+                          <select
+                            value={isCustomDept ? 'lainnya' : krsForm.detail_krs}
+                            onChange={(e) => {
+                              const val = e.target.value
+                              if (val === 'lainnya') {
+                                setIsCustomDept(true)
+                                setKrsForm((f) => ({ ...f, detail_krs: '' }))
+                              } else {
+                                setIsCustomDept(false)
+                                setKrsForm((f) => ({ ...f, detail_krs: val }))
+                              }
+                            }}
+                            className="w-full h-10 rounded-xl border border-indigo-200 px-3 text-xs bg-white text-ink font-semibold outline-none focus:border-indigo-500 shadow-2xs"
+                          >
+                            <option value="">— Pilih Departemen / Spesialis Tujuan —</option>
+                            {DEPT_ALIH_RAWAT.map((dept) => (
+                              <option key={dept} value={dept}>
+                                {dept}
+                              </option>
+                            ))}
+                            <option value="lainnya">Lainnya (Ketik Manual)...</option>
+                          </select>
+
+                          {isCustomDept && (
+                            <input
+                              type="text"
+                              autoFocus
+                              value={krsForm.detail_krs}
+                              onChange={(e) => setKrsForm((f) => ({ ...f, detail_krs: e.target.value }))}
+                              placeholder="Ketik nama spesialis / departemen tujuan..."
+                              className="w-full h-9 rounded-xl border border-indigo-200 px-3 text-xs text-ink outline-none focus:border-indigo-500 bg-white"
+                            />
+                          )}
+                        </div>
+                      )}
+
+                      {/* Dropdown Spesifik Rujuk — Tepat di bawah Rujuk */}
+                      {isRujuk && isSelected && (
+                        <div className="pl-3.5 pr-0.5 py-1 space-y-1.5 animate-in fade-in">
+                          <select
+                            value={isCustomRs ? 'lainnya' : krsForm.detail_krs}
+                            onChange={(e) => {
+                              const val = e.target.value
+                              if (val === 'lainnya') {
+                                setIsCustomRs(true)
+                                setKrsForm((f) => ({ ...f, detail_krs: '' }))
+                              } else {
+                                setIsCustomRs(false)
+                                setKrsForm((f) => ({ ...f, detail_krs: val }))
+                              }
+                            }}
+                            className="w-full h-10 rounded-xl border border-sky-200 px-3 text-xs bg-white text-ink font-semibold outline-none focus:border-sky-500 shadow-2xs"
+                          >
+                            <option value="">— Pilih Rumah Sakit Rujukan —</option>
+                            {RS_RUJUKAN.map((rs) => (
+                              <option key={rs} value={rs}>
+                                {rs}
+                              </option>
+                            ))}
+                            <option value="lainnya">Lainnya (Ketik Nama RS)...</option>
+                          </select>
+
+                          {isCustomRs && (
+                            <input
+                              type="text"
+                              autoFocus
+                              value={krsForm.detail_krs}
+                              onChange={(e) => setKrsForm((f) => ({ ...f, detail_krs: e.target.value }))}
+                              placeholder="Ketik nama rumah sakit / faskes rujukan..."
+                              className="w-full h-9 rounded-xl border border-sky-200 px-3 text-xs text-ink outline-none focus:border-sky-500 bg-white"
+                            />
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
               </div>
 
-              {/* Input Spesifik Alih Rawat */}
-              {krsForm.keterangan_krs === 'Alih Rawat' && (
-                <div className="bg-indigo-50/60 p-3 rounded-2xl border border-indigo-200/80 space-y-2 animate-in fade-in">
-                  <label className="block text-[11px] font-bold text-indigo-950">
-                    Ke Departemen / Divisi / Spesialis
-                  </label>
-                  <div className="flex flex-wrap gap-1.5">
-                    {[
-                      'Bedah Saraf',
-                      'Bedah Umum',
-                      'Penyakit Dalam (IPD)',
-                      'Jantung (ICCU)',
-                      'Paru',
-                      'ICU / Intensif',
-                      'Anak',
-                      'Obgyn',
-                      'Rehab Medik',
-                    ].map((dept) => (
-                      <button
-                        type="button"
-                        key={dept}
-                        onClick={() => setKrsForm((f) => ({ ...f, detail_krs: dept }))}
-                        className={`px-2 py-0.5 rounded-lg text-[11px] font-semibold transition-all cursor-pointer ${
-                          krsForm.detail_krs === dept
-                            ? 'bg-indigo-600 text-white shadow-2xs'
-                            : 'bg-white text-indigo-900 border border-indigo-200/70 hover:bg-indigo-100/50'
-                        }`}
-                      >
-                        {dept}
-                      </button>
-                    ))}
-                  </div>
-                  <input
-                    type="text"
-                    value={krsForm.detail_krs}
-                    onChange={(e) => setKrsForm((f) => ({ ...f, detail_krs: e.target.value }))}
-                    placeholder="Atau ketik departemen / nama dokter spesialis..."
-                    className="w-full h-9 rounded-xl border border-indigo-200 px-3 text-xs text-ink outline-none focus:border-indigo-500 bg-white"
-                  />
-                </div>
-              )}
-
-              {/* Input Spesifik Rujuk */}
-              {krsForm.keterangan_krs === 'Rujuk' && (
-                <div className="bg-sky-50/60 p-3 rounded-2xl border border-sky-200/80 space-y-2 animate-in fade-in">
-                  <label className="block text-[11px] font-bold text-sky-950">
-                    Tujuan Rujukan (Rumah Sakit / Faskes)
-                  </label>
-                  <div className="flex flex-wrap gap-1.5">
-                    {[
-                      'RS Tipe A',
-                      'RSUD Dr. Soetomo',
-                      'RSUP Dr. Sardjito',
-                      'RSUP Dr. Kariadi',
-                      'RS Jantung Harapan Kita',
-                      'RS PON',
-                    ].map((rs) => (
-                      <button
-                        type="button"
-                        key={rs}
-                        onClick={() => setKrsForm((f) => ({ ...f, detail_krs: rs }))}
-                        className={`px-2 py-0.5 rounded-lg text-[11px] font-semibold transition-all cursor-pointer ${
-                          krsForm.detail_krs === rs
-                            ? 'bg-sky-600 text-white shadow-2xs'
-                            : 'bg-white text-sky-900 border border-sky-200/70 hover:bg-sky-100/50'
-                        }`}
-                      >
-                        {rs}
-                      </button>
-                    ))}
-                  </div>
-                  <input
-                    type="text"
-                    value={krsForm.detail_krs}
-                    onChange={(e) => setKrsForm((f) => ({ ...f, detail_krs: e.target.value }))}
-                    placeholder="Ketik nama rumah sakit / faskes rujukan..."
-                    className="w-full h-9 rounded-xl border border-sky-200 px-3 text-xs text-ink outline-none focus:border-sky-500 bg-white"
-                  />
-                </div>
-              )}
-
-              {/* Tanggal KRS */}
+              {/* Tanggal Keluar */}
               <div>
-                <label className="block text-[11px] font-bold text-ink-muted mb-1">Tanggal Keluar (KRS)</label>
-                <input
-                  type="date"
+                <label className="block text-[11px] font-bold text-ink-muted mb-1">Tanggal Keluar (DD/MM/YY)</label>
+                <DateInput
                   value={krsForm.tgl_krs}
-                  onChange={(e) => setKrsForm((f) => ({ ...f, tgl_krs: e.target.value }))}
+                  onChange={(val) => setKrsForm((f) => ({ ...f, tgl_krs: val }))}
                   required
-                  className="w-full h-10 rounded-2xl border border-slate-200 px-3 text-xs text-ink outline-none focus:border-primary bg-white"
+                  className="w-full h-9.5 rounded-xl border border-slate-200 px-3 text-xs text-ink outline-none focus:border-primary bg-white"
                 />
               </div>
 
@@ -2741,7 +3098,89 @@ export default function PatientProfile() {
                       : 'bg-primary hover:bg-primary-deep shadow-primary/25'
                   }`}
                 >
-                  Konfirmasi KRS
+                  Konfirmasi {krsForm.keterangan_krs === 'Meninggal' ? 'MD' : krsForm.keterangan_krs === 'APS' ? 'APS' : krsForm.keterangan_krs === 'Alih Rawat' ? 'Alih Rawat' : krsForm.keterangan_krs === 'Rujuk' ? 'Rujuk' : 'KRS'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Alih Leader */}
+      {showAlihLeaderModal && patient && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4 animate-in fade-in duration-150 overscroll-contain touch-none select-none"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setShowAlihLeaderModal(false)
+          }}
+        >
+          <div
+            className="w-full max-w-sm rounded-3xl bg-white p-5 shadow-2xl space-y-4 animate-in zoom-in-95 duration-150 border border-slate-100"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <div className="size-8 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center">
+                  <ArrowLeftRight size={16} />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-ink">Alih DPJP Utama (Leader)</h3>
+                  <p className="text-[11px] text-ink-muted">Pasien: {patient.title} {patient.nama_depan || (patient as any).inisial}</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowAlihLeaderModal(false)}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 cursor-pointer"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveAlihLeader} className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                  DPJP Utama Saat Ini
+                </label>
+                <div className="px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs font-bold text-ink">
+                  {patient.dpjp_utama || 'Neuro'} ({patient.peran_rawat || 'Leader'})
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                  Pilih DPJP Utama (Leader) Baru
+                </label>
+                <select
+                  value={newLeader}
+                  onChange={(e) => setNewLeader(e.target.value)}
+                  className="w-full h-10 rounded-xl border border-slate-300 px-3 text-xs bg-white text-ink font-semibold outline-none focus:border-primary shadow-2xs"
+                >
+                  <option value="Neuro">Neuro (DPJP Utama Saraf)</option>
+                  {DEPT_ALIH_RAWAT.map((dept) => (
+                    <option key={dept} value={dept}>{dept}</option>
+                  ))}
+                </select>
+                <p className="text-[11px] text-ink-muted mt-1.5 leading-relaxed">
+                  {newLeader === 'Neuro'
+                    ? 'Neuro akan menjadi Leader / DPJP Utama pasien ini.'
+                    : `${newLeader} akan menjadi Leader / DPJP Utama. Neuro akan tetap ikut merawat sebagai Raber.`}
+                </p>
+              </div>
+
+              <div className="flex gap-2 pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setShowAlihLeaderModal(false)}
+                  className="flex-1 h-10 rounded-xl border border-slate-200 text-xs font-bold text-ink hover:bg-slate-50 cursor-pointer"
+                >
+                  Batal
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 h-10 rounded-xl bg-primary text-white text-xs font-bold hover:bg-primary-deep shadow-md shadow-primary/20 cursor-pointer"
+                >
+                  Simpan Alih Leader
                 </button>
               </div>
             </form>
