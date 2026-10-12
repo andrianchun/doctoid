@@ -5,11 +5,8 @@ import { Search, ChevronRight, Pill, Clock } from 'lucide-react'
 import { db } from '../db'
 import Masked from '../components/Masked'
 import CustomSelect from '../components/CustomSelect'
-import { formatDate } from '../utils/dateFormat'
+import { formatDate, hariKe } from '../utils/dateFormat'
 import { appCache, cacheHospitals, cacheWards, cacheAllPatients, cacheNotes } from '../utils/dataCache'
-
-const hariKe = (iso: string) =>
-  Math.max(1, Math.floor((Date.now() - new Date(iso).getTime()) / 86400000) + 1)
 
 const inputCls =
   'w-full rounded-2xl border border-slate-300 bg-white px-4 py-2.5 text-xs font-semibold text-slate-900 placeholder:text-slate-400 outline-none focus:border-primary focus:ring-4 focus:ring-primary/20 shadow-2xs transition-all'

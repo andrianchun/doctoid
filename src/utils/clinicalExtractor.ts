@@ -27,6 +27,104 @@ export interface ClinicalHighlights {
 }
 
 /**
+ * Menormalisasi negasi klinis berantai/berpasangan dan frasa majemuk agar tidak terpecah
+ * atau disalahartikan oleh parser klausa.
+ * Contoh kasus umum:
+ * - "mual muntah (-)" -> "mual (-) , muntah (-)"
+ * - "mual dan muntah disangkal" -> "mual disangkal , muntah disangkal"
+ * - "demam, batuk, pilek (-)" -> "demam (-) , batuk (-) , pilek (-)"
+ * - "tidak ada mual, muntah" -> "tidak ada mual , tidak ada muntah"
+ * - "nyeri kepala (-)" -> tetap utuh sebagai satu klausa dinegasikan
+ */
+function normalizeClinicalNegations(raw: string): string {
+  let s = raw
+
+  // Daftar frasa keluhan majemuk 2-3 kata
+  const COMPOUND_TERMS = [
+    'nyeri\\s*kepala',
+    'sakit\\s*kepala',
+    'nyeri\\s*dada',
+    'nyeri\\s*perut',
+    'nyeri\\s*ulu\\s*hati',
+    'sesak\\s*na[fp]as',
+    'pusing\\s*berputar',
+    'muntah\\s*darah',
+    'batuk\\s*darah',
+    'bab\\s*hitam',
+    'bab\\s*darah',
+    'bak\\s*darah',
+    'penurunan\\s*kesadaran',
+    'hilang\\s*kesadaran',
+    'bicara\\s*pelo',
+    'sulit\\s*menelan',
+    'susah\\s*menelan',
+    'mulut\\s*mencong',
+  ]
+
+  // Daftar kata keluhan tunggal umum
+  const SINGLE_TERMS = [
+    'mual',
+    'muntah',
+    'batuk',
+    'pilek',
+    'demam',
+    'kejang',
+    'sesak',
+    'pusing',
+    'vertigo',
+    'kliyengan',
+    'diare',
+    'mencret',
+    'lemas',
+    'lemah',
+    'kebas',
+    'baal',
+    'kesemutan',
+    'ngompol',
+    'bab',
+    'bak',
+  ]
+
+  const ALL_SYMPTOMS_PATTERN = `(?:${COMPOUND_TERMS.join('|')}|${SINGLE_TERMS.join('|')})`
+
+  // Postfix negation marker: (-), (-/-), disangkal, tidak ada, tdk ada, nihil, negatif
+  const POST_NEG = '(?:\\(\\s*-\\s*(?:/\\s*-\\s*)?\\)|\\bdisangkal\\b|\\b(?:tidak|tdk)\\s*ada\\b|\\bnihil\\b|\\bnegatif\\b)'
+
+  // 1. Postfix: Trio gejala sebelum negasi ("demam, batuk, pilek (-)")
+  const trioPostRegex = new RegExp(
+    `\\b(${ALL_SYMPTOMS_PATTERN})\\s*(?:,|/|\\bdan\\b|\\bmaupun\\b)\\s*(${ALL_SYMPTOMS_PATTERN})\\s*(?:,|/|\\bdan\\b|\\bmaupun\\b)\\s*(${ALL_SYMPTOMS_PATTERN})\\s*(${POST_NEG})`,
+    'gi'
+  )
+  s = s.replace(trioPostRegex, (_, s1, s2, s3, neg) => `${s1} ${neg} , ${s2} ${neg} , ${s3} ${neg}`)
+
+  // 2. Postfix: Pasangan gejala sebelum negasi ("mual muntah (-)", "mual, muntah disangkal", "mual muntah tidak ada")
+  const pairPostRegex = new RegExp(
+    `\\b(${ALL_SYMPTOMS_PATTERN})\\s*(?:,|/|\\bdan\\b|\\bmaupun\\b|\\s)\\s*(${ALL_SYMPTOMS_PATTERN})\\s*(${POST_NEG})`,
+    'gi'
+  )
+  s = s.replace(pairPostRegex, (_, s1, s2, neg) => `${s1} ${neg} , ${s2} ${neg}`)
+
+  // 3. Prefix negation: disangkal / tidak ada / tanpa di depan rentetan gejala
+  const PRE_NEG = '(?:\\b(?:tidak|tdk)\\s*(?:ada|didapatkan|dirasakan|ditemukan|mengeluh)?\\b|\\bdisangkal\\b|\\btanpa\\b)'
+
+  // Prefix trio: "tidak ada mual, muntah, sesak" / "disangkal batuk, pilek, demam"
+  const trioPreRegex = new RegExp(
+    `(${PRE_NEG})\\s+(${ALL_SYMPTOMS_PATTERN})\\s*(?:,|/|\\bdan\\b|\\bmaupun\\b)\\s*(${ALL_SYMPTOMS_PATTERN})\\s*(?:,|/|\\bdan\\b|\\bmaupun\\b)\\s*(${ALL_SYMPTOMS_PATTERN})`,
+    'gi'
+  )
+  s = s.replace(trioPreRegex, (_, neg, s1, s2, s3) => `${neg} ${s1} , ${neg} ${s2} , ${neg} ${s3}`)
+
+  // Prefix pair: "tidak ada mual, muntah" / "disangkal batuk dan pilek" / "tidak ada mual muntah"
+  const pairPreRegex = new RegExp(
+    `(${PRE_NEG})\\s+(${ALL_SYMPTOMS_PATTERN})\\s*(?:,|/|\\bdan\\b|\\bmaupun\\b|\\s)\\s*(${ALL_SYMPTOMS_PATTERN})`,
+    'gi'
+  )
+  s = s.replace(pairPreRegex, (_, neg, s1, s2) => `${neg} ${s1} , ${neg} ${s2}`)
+
+  return s
+}
+
+/**
  * Memecah narasi klinis menjadi klausa-klausa terpisah berdasarkan tanda baca dan batas negasi.
  */
 function segmentNarrative(raw: string): string[] {
@@ -37,13 +135,14 @@ function segmentNarrative(raw: string): string[] {
     .replace(/^\s*[/\\-]\s*/gm, '')
     .trim()
 
-  // Standardize boundaries before/after negation symbols & sentence periods
-  const withBoundaries = clean
+  // Normalisasi pola negasi klinis berpasangan / majemuk terlebih dahulu
+  const normalized = normalizeClinicalNegations(clean)
+
+  // Standardize boundaries before/after negation symbols, positive symbols & sentence periods
+  const withBoundaries = normalized
     .replace(/\.\s+/g, ' , ') // Split sentences on period
-    .replace(/(\(\s*-\s*\))/g, ' $1 , ')
-    .replace(/\b(disangkal|dbn|nihil)\b/gi, ' $1 , ')
-    .replace(/\b(tidak\s*(?:ada|didapatkan|dirasakan|ditemukan|mengeluh)?|tanpa|bebas)\b/gi, ' , $1 ')
-    .replace(/([A-Za-z0-9]+)\s+(disangkal|\(\s*-\s*\))/gi, ' , $1 $2 , ')
+    .replace(/(\(\s*[-+]\s*(?:\/\s*[-+]\s*)?\))/g, ' $1 , ') // Split after (+), (-), (-/-), (+/+)
+    .replace(/([,;])\s*/g, ' , ')
 
   return withBoundaries
     .split(/[,;\n•·]+/)
@@ -52,7 +151,11 @@ function segmentNarrative(raw: string): string[] {
 }
 
 function isClauseNegated(c: string): boolean {
-  return /\(\s*-\s*\)|\b(?:disangkal|tidak\s*(?:ada|didapatkan|dirasakan|ditemukan|mengeluh)?|dbn|dalam\s*batas\s*normal|nihil|negatif|tanpa|bebas)\b/i.test(c)
+  return (
+    /\(\s*-\s*(?:\/\s*-\s*)?\)\s*$|\(\s*-\s*(?:\/\s*-\s*)?\)|-\s*$|\b(?:disangkal|tidak\s*(?:ada|didapatkan|dirasakan|ditemukan|mengeluh)?|tdk\s*ada|dbn|dalam\s*batas\s*normal|nihil|negatif|tanpa|bebas)\b/i.test(
+      c
+    )
+  )
 }
 
 /**
@@ -99,30 +202,8 @@ export function formatVisiteSummaryForDashboard(rawS?: string): string[] | null 
 export function extractAdmissionComplaints(raw?: string): string[] {
   if (!raw || !raw.trim()) return []
 
-  // Strip RPD, RPO, Alergi and headers
-  const clean = raw
-    .replace(/\b(?:RPD|RPO|Alergi|Riwayat\s*(?:Penyakit|Pengobatan))\s*[:-][\s\S]*$/i, '')
-    .replace(/^(?:s|subjektif|keluhan)\s*:\s*/i, '')
-    .trim()
-
-  // Split into sentences / clauses
-  const withBoundaries = clean
-    .replace(/\.\s+/g, ' , ')
-    .replace(/(\(\s*-\s*\))/g, ' $1 , ')
-    .replace(/\b(disangkal|dbn|nihil)\b/gi, ' $1 , ')
-    .replace(/\b(tidak\s*(?:ada|didapatkan|dirasakan|ditemukan|mengeluh)?|tanpa|bebas)\b/gi, ' , $1 ')
-    .replace(/([A-Za-z0-9]+)\s+(disangkal|\(\s*-\s*\))/gi, ' , $1 $2 , ')
-
-  const clauses = withBoundaries
-    .split(/[,;\n•·]+/)
-    .map((c) => c.trim())
-    .filter((c) => c.length > 0 && c !== '.')
-
-  const isNegated = (c: string) =>
-    /\(\s*-\s*\)|\b(?:disangkal|tidak\s*(?:ada|didapatkan|dirasakan|ditemukan|mengeluh)?|dbn|dalam\s*batas\s*normal|nihil|negatif|tanpa|bebas)\b/i.test(
-      c
-    )
-  const positiveClauses = clauses.filter((c) => !isNegated(c))
+  const clauses = segmentNarrative(raw)
+  const positiveClauses = clauses.filter((c) => !isClauseNegated(c))
   const positiveText = positiveClauses.join(' , ').toLowerCase()
 
   const items: string[] = []

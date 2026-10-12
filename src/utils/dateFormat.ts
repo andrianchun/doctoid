@@ -4,7 +4,7 @@ export type TimeFormat = '24h' | '12h'
 export function getStoredDateFormat(): DateFormat {
   const stored = localStorage.getItem('doctoid_date_format') as DateFormat
   // Format baku aplikasi adalah DD/MM/YY sesuai preferensi klinis dokter
-  if (!stored || stored === 'DD/MM/YYYY') {
+  if (!stored || stored === 'DD/MM/YYYY' || stored === 'YYYY-MM-DD') {
     return 'DD/MM/YY'
   }
   return stored
@@ -22,10 +22,65 @@ export function saveTimeFormat(fmt: TimeFormat): void {
   localStorage.setItem('doctoid_time_format', fmt)
 }
 
+/**
+ * Mengurai string atau Date menjadi objek Date lokal (jam 00:00:00 lokal) secara konsisten.
+ * Menghindari bug bawaan JavaScript Date:
+ * 1. "11/10/26" di-parse JS sebagai MM/DD/YY (10 November), bukan DD/MM/YY (11 Oktober).
+ * 2. "2026-10-12" (ISO date-only) di-parse JS sebagai UTC, yang menyebabkan tanggal mundur pada zona waktu tertentu.
+ */
+export function parseDateToLocal(val: string | Date | undefined | null): Date | null {
+  if (!val) return null
+  if (val instanceof Date) return isNaN(val.getTime()) ? null : val
+
+  const clean = String(val).trim()
+  if (!clean) return null
+
+  // 1. Format ISO: YYYY-MM-DD (dengan atau tanpa jam / time)
+  const isoMatch = clean.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/)
+  if (isoMatch) {
+    const [, y, m, d] = isoMatch
+    return new Date(parseInt(y, 10), parseInt(m, 10) - 1, parseInt(d, 10))
+  }
+
+  // 2. Format Klinis: DD/MM/YYYY atau DD/MM/YY (separator '/', '-', '.')
+  const dmyMatch = clean.match(/^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{2,4})/)
+  if (dmyMatch) {
+    let [, d, m, y] = dmyMatch
+    let fullYear = parseInt(y, 10)
+    if (y.length === 2) {
+      fullYear = fullYear < 70 ? 2000 + fullYear : 1900 + fullYear
+    }
+    const dayNum = parseInt(d, 10)
+    const monthNum = parseInt(m, 10)
+    if (monthNum >= 1 && monthNum <= 12 && dayNum >= 1 && dayNum <= 31) {
+      return new Date(fullYear, monthNum - 1, dayNum)
+    }
+  }
+
+  // 3. Format teks angka tanpa separator (6 digit: DDMMYY atau 8 digit: DDMMYYYY)
+  const digitMatch = clean.match(/^(\d{2})(\d{2})(\d{2}|\d{4})$/)
+  if (digitMatch) {
+    let [, d, m, y] = digitMatch
+    let fullYear = parseInt(y, 10)
+    if (y.length === 2) {
+      fullYear = fullYear < 70 ? 2000 + fullYear : 1900 + fullYear
+    }
+    const dayNum = parseInt(d, 10)
+    const monthNum = parseInt(m, 10)
+    if (monthNum >= 1 && monthNum <= 12 && dayNum >= 1 && dayNum <= 31) {
+      return new Date(fullYear, monthNum - 1, dayNum)
+    }
+  }
+
+  // 4. Fallback bawaan JS
+  const fallback = new Date(clean)
+  return isNaN(fallback.getTime()) ? null : fallback
+}
+
 export function formatDate(isoOrDate: string | Date | undefined | null, customFmt?: DateFormat): string {
   if (!isoOrDate) return '—'
-  const d = typeof isoOrDate === 'string' ? new Date(isoOrDate) : isoOrDate
-  if (isNaN(d.getTime())) return String(isoOrDate)
+  const d = parseDateToLocal(isoOrDate)
+  if (!d || isNaN(d.getTime())) return String(isoOrDate)
 
   const fmt = customFmt || getStoredDateFormat()
   const day = String(d.getDate()).padStart(2, '0')
@@ -75,9 +130,15 @@ export function formatDateTime(isoOrDate: string | Date | undefined | null): str
 
 export function hariKe(isoOrDate?: string | Date | null): number {
   if (!isoOrDate) return 1
-  const d = typeof isoOrDate === 'string' ? new Date(isoOrDate.slice(0, 10)) : isoOrDate
-  if (isNaN(d.getTime())) return 1
-  return Math.max(1, Math.floor((Date.now() - d.getTime()) / 86400000) + 1)
+  const target = parseDateToLocal(isoOrDate)
+  if (!target || isNaN(target.getTime())) return 1
+
+  const now = new Date()
+  const todayMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
+  const targetMidnight = new Date(target.getFullYear(), target.getMonth(), target.getDate()).getTime()
+
+  const diffDays = Math.floor((todayMidnight - targetMidnight) / 86400000)
+  return Math.max(1, diffDays + 1)
 }
 
 /**
@@ -92,36 +153,27 @@ export function getLocalDateString(d: Date = new Date()): string {
 }
 
 /**
- * Konversi tanggal ISO (YYYY-MM-DD) ke tampilan DD/MM/YY.
+ * Konversi tanggal ISO (YYYY-MM-DD), Date, atau input teks lain ke tampilan seragam DD/MM/YY.
  */
-export function toDisplayDate(isoDate?: string | null): string {
-  if (!isoDate) return ''
-  const clean = isoDate.slice(0, 10)
-  const parts = clean.split('-')
-  if (parts.length === 3) {
-    const [y, m, d] = parts
-    return `${d.padStart(2, '0')}/${m.padStart(2, '0')}/${y.slice(-2)}`
-  }
-  return isoDate
+export function toDisplayDate(isoOrDate?: string | Date | null): string {
+  if (!isoOrDate) return ''
+  const d = parseDateToLocal(isoOrDate)
+  if (!d || isNaN(d.getTime())) return String(isoOrDate)
+  const day = String(d.getDate()).padStart(2, '0')
+  const month = String(d.getMonth() + 1).padStart(2, '0')
+  const shortYear = String(d.getFullYear()).slice(-2)
+  return `${day}/${month}/${shortYear}`
 }
 
 /**
- * Konversi input teks DD/MM/YY atau DD/MM/YYYY atau YYYY-MM-DD ke format baku ISO (YYYY-MM-DD).
+ * Konversi input teks DD/MM/YY, DD/MM/YYYY, atau YYYY-MM-DD ke format baku ISO (YYYY-MM-DD).
  */
 export function parseToIsoDate(text: string): string | null {
   if (!text) return null
-  const clean = text.trim()
-  if (/^\d{4}-\d{2}-\d{2}$/.test(clean)) return clean
-
-  const match = clean.match(/^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{2,4})$/)
-  if (!match) return null
-  let [, d, m, y] = match
-  let fullYear = parseInt(y, 10)
-  if (y.length === 2) {
-    fullYear = fullYear < 70 ? 2000 + fullYear : 1900 + fullYear
-  }
-  const dayNum = parseInt(d, 10)
-  const monthNum = parseInt(m, 10)
-  if (monthNum < 1 || monthNum > 12 || dayNum < 1 || dayNum > 31) return null
-  return `${fullYear}-${String(monthNum).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`
+  const d = parseDateToLocal(text)
+  if (!d || isNaN(d.getTime())) return null
+  const year = d.getFullYear()
+  const month = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
 }

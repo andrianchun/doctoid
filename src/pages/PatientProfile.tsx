@@ -29,16 +29,13 @@ import { useUi } from '../store'
 import { verifyBiometric } from '../webauthn'
 import { chatPasien, type ChatMsg } from '../ai'
 import { applyMicroUpdate } from '../microUpdate'
-import { formatDate, getLocalDateString } from '../utils/dateFormat'
+import { formatDate, hariKe, getLocalDateString } from '../utils/dateFormat'
 import VisiteModal from '../components/VisiteModal'
 import DateInput from '../components/DateInput'
 import { useBodyScrollLock } from '../utils/useBodyScrollLock'
 import ClinicalTrendingView from '../components/ClinicalTrendingView'
 import PredictiveInput from '../components/PredictiveInput'
 import { extractClinicalMetrics } from '../utils/clinicalExtractor'
-
-const hariKe = (iso: string) =>
-  Math.max(1, Math.floor((Date.now() - new Date(iso).getTime()) / 86400000) + 1)
 
 const PARENTERAL = /\binj\b|injeksi|drip|\biv\b|infus|\bamp\b|bolus|syringe|titrasi|pump|nebul/i
 
@@ -2189,7 +2186,16 @@ export default function PatientProfile() {
                     </div>
                   )}
                   <div>
-                    <label className="block text-[11px] font-semibold text-ink-muted mb-1">Tanggal Keluar (DD/MM/YY)</label>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-[11px] font-semibold text-ink-muted">Tanggal Keluar</label>
+                      <button
+                        type="button"
+                        onClick={() => setEditPatientForm({ ...editPatientForm, tgl_krs: getLocalDateString() })}
+                        className="text-[10px] font-bold text-primary hover:text-primary-deep cursor-pointer"
+                      >
+                        Hari ini
+                      </button>
+                    </div>
                     <DateInput
                       value={editPatientForm.tgl_krs}
                       onChange={(val) => setEditPatientForm({ ...editPatientForm, tgl_krs: val })}
@@ -2201,7 +2207,16 @@ export default function PatientProfile() {
 
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <label className="block text-[11px] font-semibold text-ink-muted mb-1">Tgl MRS (DD/MM/YY)</label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-[11px] font-semibold text-ink-muted">Tgl MRS</label>
+                    <button
+                      type="button"
+                      onClick={() => setEditPatientForm({ ...editPatientForm, tgl_mrs: getLocalDateString() })}
+                      className="text-[10px] font-bold text-primary hover:text-primary-deep cursor-pointer"
+                    >
+                      Hari ini
+                    </button>
+                  </div>
                   <DateInput
                     value={editPatientForm.tgl_mrs}
                     onChange={(val) => setEditPatientForm({ ...editPatientForm, tgl_mrs: val })}
@@ -2209,7 +2224,16 @@ export default function PatientProfile() {
                   />
                 </div>
                 <div>
-                  <label className="block text-[11px] font-semibold text-ink-muted mb-1">Tgl Onset (DD/MM/YY)</label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-[11px] font-semibold text-ink-muted">Tgl Onset</label>
+                    <button
+                      type="button"
+                      onClick={() => setEditPatientForm({ ...editPatientForm, tgl_onset: getLocalDateString() })}
+                      className="text-[10px] font-bold text-primary hover:text-primary-deep cursor-pointer"
+                    >
+                      Hari ini
+                    </button>
+                  </div>
                   <DateInput
                     value={editPatientForm.tgl_onset}
                     onChange={(val) => setEditPatientForm({ ...editPatientForm, tgl_onset: val })}
@@ -3067,7 +3091,16 @@ export default function PatientProfile() {
 
               {/* Tanggal Keluar */}
               <div>
-                <label className="block text-[11px] font-bold text-ink-muted mb-1">Tanggal Keluar (DD/MM/YY)</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-[11px] font-bold text-ink-muted">Tanggal Keluar</label>
+                  <button
+                    type="button"
+                    onClick={() => setKrsForm((f) => ({ ...f, tgl_krs: getLocalDateString() }))}
+                    className="text-[10px] font-bold text-primary hover:text-primary-deep cursor-pointer"
+                  >
+                    Hari ini
+                  </button>
+                </div>
                 <DateInput
                   value={krsForm.tgl_krs}
                   onChange={(val) => setKrsForm((f) => ({ ...f, tgl_krs: val }))}

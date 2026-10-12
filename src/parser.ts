@@ -142,18 +142,34 @@ function parseIndoDate(str: string): string | null {
     return `${fullYear}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`
   }
 
+  // Format DD/MM tanpa tahun (misal: "11/10", "12/10") -> default tahun berjalan
+  const dmMatch = str.match(/\b(\d{1,2})[-/](\d{1,2})\b/)
+  if (dmMatch) {
+    const [, d, m] = dmMatch
+    const currentYear = new Date().getFullYear()
+    const dayNum = parseInt(d, 10)
+    const monthNum = parseInt(m, 10)
+    if (monthNum >= 1 && monthNum <= 12 && dayNum >= 1 && dayNum <= 31) {
+      return `${currentYear}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`
+    }
+  }
+
   const BULAN: Record<string, string> = {
     jan: '01', januari: '01', feb: '02', februari: '02', mar: '03', maret: '03',
     apr: '04', april: '04', mei: '05', jun: '06', juni: '06', jul: '07', juli: '07',
     agu: '08', agt: '08', agustus: '08', sep: '09', september: '09', okt: '10', oktober: '10',
     nov: '11', november: '11', des: '12', desember: '12'
   }
-  const textDateMatch = str.match(/\b(\d{1,2})\s+([A-Za-z]{3,10})\s+(\d{2,4})\b/)
+  const textDateMatch = str.match(/\b(\d{1,2})\s+([A-Za-z]{3,10})(?:\s+(\d{2,4}))?\b/)
   if (textDateMatch) {
     const d = textDateMatch[1].padStart(2, '0')
     const b = BULAN[textDateMatch[2].toLowerCase()]
     let y = textDateMatch[3]
-    if (y.length === 2) y = parseInt(y, 10) < 50 ? `20${y}` : `19${y}`
+    if (!y) {
+      y = String(new Date().getFullYear())
+    } else if (y.length === 2) {
+      y = parseInt(y, 10) < 50 ? `20${y}` : `19${y}`
+    }
     if (b) return `${y}-${b}-${d}`
   }
 
@@ -178,9 +194,24 @@ function addDaysToIso(isoStr: string, days: number): string {
   return formatDateToIso(d)
 }
 
+function normalizeYearIfStale(isoDate: string, currentYear: number): string {
+  if (!isoDate) return isoDate
+  const parts = isoDate.split('-')
+  if (parts.length === 3) {
+    const parsedYear = parseInt(parts[0], 10)
+    // Jika tahun dari teks terpaut >= 2 tahun ke masa lalu (misal template bekas 2023 di tahun 2026),
+    // sesuaikan ke tahun sekarang agar tidak tercatat ribuan hari rawat.
+    if (currentYear - parsedYear >= 2) {
+      return `${currentYear}-${parts[1]}-${parts[2]}`
+    }
+  }
+  return isoDate
+}
+
 function extractDates(raw: string): { tgl_mrs: string; tgl_onset: string } {
   const now = new Date()
   const todayIso = formatDateToIso(now)
+  const currentYear = now.getFullYear()
   let tgl_mrs = todayIso
   let tgl_onset = ''
 
@@ -190,7 +221,7 @@ function extractDates(raw: string): { tgl_mrs: string; tgl_onset: string } {
   if (mrsMatch) {
     const parsed = parseIndoDate(mrsMatch[1])
     if (parsed) {
-      tgl_mrs = parsed
+      tgl_mrs = normalizeYearIfStale(parsed, currentYear)
     } else if (/kemarin/i.test(mrsMatch[1])) {
       tgl_mrs = addDaysToIso(todayIso, -1)
     }
@@ -202,7 +233,7 @@ function extractDates(raw: string): { tgl_mrs: string; tgl_onset: string } {
     const content = onsetExplicit[1].trim()
     const parsed = parseIndoDate(content)
     if (parsed) {
-      tgl_onset = parsed
+      tgl_onset = normalizeYearIfStale(parsed, currentYear)
     } else if (/kemarin/i.test(content)) {
       tgl_onset = addDaysToIso(tgl_mrs, -1)
     } else {

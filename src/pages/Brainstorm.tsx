@@ -806,7 +806,7 @@ export default function Brainstorm() {
             O_pemfis: data.O_pemfis,
             O_penunjang: data.O_penunjang,
             A: data.A,
-            P: data.P.map((it) => ({ ...it, tgl_mulai: today(), tgl_stop: null, status: 'aktif' as const })),
+            P: data.P.map((it) => ({ ...it, tgl_mulai: data.tgl_mrs || today(), tgl_stop: null, status: 'aktif' as const })),
           })
           notify('Data dimasukkan ke form\nSilakan dicek sebelum disimpan')
         }
@@ -841,7 +841,7 @@ export default function Brainstorm() {
         jaminan: r.jaminan || 'BPJS',
         tgl_mrs: tglMrs,
         tgl_onset: tglOnset,
-        P: r.P.map((it) => ({ ...it, tgl_mulai: today(), tgl_stop: null, status: 'aktif' as const })),
+        P: r.P.map((it) => ({ ...it, tgl_mulai: tglMrs, tgl_stop: null, status: 'aktif' as const })),
       })
       await simpanRegexBaru(r.regex_baru)
       setRaw('')
@@ -999,9 +999,11 @@ export default function Brainstorm() {
       O_penunjang: form.O_penunjang,
     })
 
+    const noteDate = form.tgl_mrs || today()
+
     await db.progressNotes.add({
       patient_id: targetPatientId,
-      tanggal: today(),
+      tanggal: noteDate,
       S: form.S, O_pemfis: form.O_pemfis, O_penunjang: form.O_penunjang, A: form.A, P: form.P,
       attachments: attachments.map(a => ({ name: a.name, type: a.type, dataUrl: a.dataUrl, kategori: a.kategori })),
       metrics,
@@ -1019,7 +1021,7 @@ export default function Brainstorm() {
       }
       await db.penunjang.add({
         patient_id: targetPatientId,
-        tanggal: today(),
+        tanggal: noteDate,
         kategori: kat,
         nama_pemeriksaan: att.name || (kat === 'Radiologi' ? 'Pemeriksaan Radiologi' : 'Pemeriksaan Penunjang'),
         hasil: form.O_penunjang || 'Terlampir dokumen pemeriksaan',
@@ -1136,62 +1138,100 @@ export default function Brainstorm() {
             : 'border-primary-soft/40'
         }`}>
           <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
-              <span className={`inline-block size-2 rounded-full ${detectedPatient.status_rawat === 'aktif' ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`} />
-              <p className="text-xs font-bold text-ink">
-                {detectedPatient.status_rawat === 'aktif'
-                  ? 'Pasien Sedang Dirawat Aktif di Bangsal'
-                  : `Pasien Lama Terdeteksi (${detectedPatient.keterangan_krs === 'Meninggal' ? 'MD' : detectedPatient.keterangan_krs === 'APS' ? 'APS' : detectedPatient.keterangan_krs === 'Alih Rawat' ? 'Alih Rawat' : detectedPatient.keterangan_krs === 'Rujuk' ? 'Rujuk' : 'KRS'})`}
-              </p>
-            </div>
-            <p className="caption text-ink-muted mt-1">
-              Ditemukan data <b>{detectedPatient.title} <Masked value={detectedPatient.nama_depan} type="name" /></b> (RM: <Masked value={detectedPatient.no_rm} type="rm" />)
-            </p>
-            <p className="caption text-ink-muted">
-              {detectedPatient.status_rawat === 'aktif'
-                ? `Dirawat sejak: ${formatDate(detectedPatient.tgl_mrs)} · Dx: ${detectedPatient.diagnosis_utama || '-'}`
-                : `Status: ${detectedPatient.keterangan_krs === 'Meninggal' ? 'MD' : detectedPatient.keterangan_krs === 'APS' ? 'APS' : detectedPatient.keterangan_krs === 'Alih Rawat' ? 'Alih Rawat' : detectedPatient.keterangan_krs === 'Rujuk' ? 'Rujuk' : 'KRS'}${detectedPatient.tgl_krs ? ` pada ${formatDate(detectedPatient.tgl_krs)}` : ''}${detectedPatient.detail_krs ? ` (${detectedPatient.detail_krs})` : ''} · MRS Sebelumnya: ${formatDate(detectedPatient.tgl_mrs)} · Dx Lalu: ${detectedPatient.diagnosis_utama || '-'}`
-              }
-            </p>
-            <div className="mt-2.5 flex flex-wrap items-center gap-2">
-              {detectedPatient.status_rawat === 'aktif' ? (
-                <>
+            {detectedPatient.status_rawat === 'aktif' ? (
+              <>
+                <div className="flex items-center gap-2">
+                  <span className="inline-block size-2 rounded-full bg-emerald-500 animate-pulse" />
+                  <p className="text-xs font-bold text-ink">Pasien sedang dirawat</p>
+                </div>
+                <p className="text-sm font-bold text-ink mt-1">
+                  {detectedPatient.title ? `${detectedPatient.title} ` : ''}
+                  <Masked value={detectedPatient.nama_depan} type="name" />
+                  {detectedPatient.no_rm?.trim() ? (
+                    <span className="text-xs font-normal text-ink-muted ml-1.5">
+                      (RM: <Masked value={detectedPatient.no_rm} type="rm" />)
+                    </span>
+                  ) : null}
+                </p>
+                <div className="caption text-ink-muted mt-0.5 space-y-0.5">
+                  <p>MRS: {formatDate(detectedPatient.tgl_mrs)}</p>
+                  {detectedPatient.diagnosis_utama ? (
+                    <p>{detectedPatient.diagnosis_utama}</p>
+                  ) : null}
+                </div>
+                <div className="mt-2.5 flex flex-wrap items-center gap-2">
                   <button
                     type="button"
                     onClick={() => handleUpdateActivePatientSoap(detectedPatient)}
-                    className="rounded-xl bg-gradient-to-br from-emerald-600 to-teal-700 px-3.5 py-1.5 text-xs font-bold text-white shadow-md shadow-emerald-700/20 hover:brightness-110 active:scale-95 transition-all cursor-pointer flex items-center gap-1.5"
+                    className="rounded-xl bg-gradient-to-br from-emerald-600 to-teal-700 px-3.5 py-1.5 text-xs font-bold text-white shadow-md shadow-emerald-700/20 hover:brightness-110 active:scale-95 transition-all cursor-pointer"
                   >
-                    <span>⚡</span>
-                    Update CPPT Hari Ini ({detectedPatient.nama_depan})
+                    Update CPPT
                   </button>
                   <button
                     type="button"
                     onClick={() => handleSelectExistingPatient(detectedPatient, true)}
                     className="rounded-xl bg-surface px-3 py-1.5 text-xs font-semibold text-ink-muted hover:bg-surface/80 active:scale-95 transition-all cursor-pointer"
                   >
-                    Jadikan Readmisi Baru
+                    Readmisi
                   </button>
-                </>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => handleSelectExistingPatient(detectedPatient)}
-                  className="rounded-xl bg-gradient-to-br from-primary to-primary-deep px-3.5 py-1.5 text-xs font-bold text-white shadow-md shadow-primary/20 hover:brightness-110 active:scale-95 transition-all cursor-pointer"
-                >
-                  Jadikan Readmisi (Rawat Lagi)
-                </button>
-              )}
-              <button
-                type="button"
-                onClick={() => {
-                  setDismissedPatientId(detectedPatient.id!)
-                  setDetectedPatient(null)
-                }}
-                className="rounded-xl bg-surface px-3.5 py-1.5 text-xs font-semibold text-ink-muted hover:bg-surface/80 active:scale-95 transition-all cursor-pointer"
-              >
-                Abaikan (Pasien Baru)
-              </button>
-            </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDismissedPatientId(detectedPatient.id!)
+                      setDetectedPatient(null)
+                    }}
+                    className="rounded-xl bg-surface px-3.5 py-1.5 text-xs font-semibold text-ink-muted hover:bg-surface/80 active:scale-95 transition-all cursor-pointer"
+                  >
+                    Pasien Berbeda
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="flex items-center gap-2">
+                  <span className="inline-block size-2 rounded-full bg-amber-500" />
+                  <p className="text-xs font-bold text-ink">
+                    Pasien Lama Terdeteksi ({detectedPatient.keterangan_krs === 'Meninggal' ? 'MD' : detectedPatient.keterangan_krs === 'APS' ? 'APS' : detectedPatient.keterangan_krs === 'Alih Rawat' ? 'Alih Rawat' : detectedPatient.keterangan_krs === 'Rujuk' ? 'Rujuk' : 'KRS'})
+                  </p>
+                </div>
+                <p className="text-sm font-bold text-ink mt-1">
+                  {detectedPatient.title ? `${detectedPatient.title} ` : ''}
+                  <Masked value={detectedPatient.nama_depan} type="name" />
+                  {detectedPatient.no_rm?.trim() ? (
+                    <span className="text-xs font-normal text-ink-muted ml-1.5">
+                      (RM: <Masked value={detectedPatient.no_rm} type="rm" />)
+                    </span>
+                  ) : null}
+                </p>
+                <div className="caption text-ink-muted mt-0.5 space-y-0.5">
+                  <p>
+                    Status: {detectedPatient.keterangan_krs === 'Meninggal' ? 'MD' : detectedPatient.keterangan_krs === 'APS' ? 'APS' : detectedPatient.keterangan_krs === 'Alih Rawat' ? 'Alih Rawat' : detectedPatient.keterangan_krs === 'Rujuk' ? 'Rujuk' : 'KRS'}{detectedPatient.tgl_krs ? ` pada ${formatDate(detectedPatient.tgl_krs)}` : ''}{detectedPatient.detail_krs ? ` (${detectedPatient.detail_krs})` : ''} · MRS Sebelumnya: {formatDate(detectedPatient.tgl_mrs)}
+                  </p>
+                  {detectedPatient.diagnosis_utama ? (
+                    <p>Dx Lalu: {detectedPatient.diagnosis_utama}</p>
+                  ) : null}
+                </div>
+                <div className="mt-2.5 flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleSelectExistingPatient(detectedPatient)}
+                    className="rounded-xl bg-gradient-to-br from-primary to-primary-deep px-3.5 py-1.5 text-xs font-bold text-white shadow-md shadow-primary/20 hover:brightness-110 active:scale-95 transition-all cursor-pointer"
+                  >
+                    Readmisi
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDismissedPatientId(detectedPatient.id!)
+                      setDetectedPatient(null)
+                    }}
+                    className="rounded-xl bg-surface px-3.5 py-1.5 text-xs font-semibold text-ink-muted hover:bg-surface/80 active:scale-95 transition-all cursor-pointer"
+                  >
+                    Pasien Berbeda
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
@@ -1353,11 +1393,21 @@ export default function Brainstorm() {
           <div>
             <div className="flex items-center justify-between mb-1">
               <label className="block text-xs font-bold text-slate-700">Tgl Onset</label>
-              {form.tgl_onset && (
-                <span className="caption text-xs font-extrabold text-amber-900 bg-amber-100 border border-amber-300/80 px-2 py-0.5 rounded-md shadow-2xs">
-                  OH-{hariKe(form.tgl_onset)}
-                </span>
-              )}
+              <div className="flex items-center gap-1.5">
+                {form.tgl_onset && (
+                  <span className="caption text-xs font-extrabold text-amber-900 bg-amber-100 border border-amber-300/80 px-1.5 py-0.5 rounded-md shadow-2xs">
+                    OH-{hariKe(form.tgl_onset)}
+                  </span>
+                )}
+                <button
+                  type="button"
+                  onClick={() => set({ tgl_onset: today() })}
+                  className="text-[10px] font-bold text-primary hover:text-primary-deep cursor-pointer"
+                  title="Set onset ke hari ini"
+                >
+                  Hari ini
+                </button>
+              </div>
             </div>
             <DateInput
               value={form.tgl_onset}
@@ -1368,11 +1418,21 @@ export default function Brainstorm() {
           <div>
             <div className="flex items-center justify-between mb-1">
               <label className="block text-xs font-bold text-slate-700">Tgl MRS</label>
-              {form.tgl_mrs && (
-                <span className="caption text-xs font-extrabold text-emerald-900 bg-emerald-100 border border-emerald-300/80 px-2 py-0.5 rounded-md shadow-2xs">
-                  P-{hariKe(form.tgl_mrs)}
-                </span>
-              )}
+              <div className="flex items-center gap-1.5">
+                {form.tgl_mrs && (
+                  <span className="caption text-xs font-extrabold text-emerald-900 bg-emerald-100 border border-emerald-300/80 px-1.5 py-0.5 rounded-md shadow-2xs">
+                    P-{hariKe(form.tgl_mrs)}
+                  </span>
+                )}
+                <button
+                  type="button"
+                  onClick={() => set({ tgl_mrs: today() })}
+                  className="text-[10px] font-bold text-primary hover:text-primary-deep cursor-pointer"
+                  title="Set MRS ke hari ini"
+                >
+                  Hari ini
+                </button>
+              </div>
             </div>
             <DateInput
               value={form.tgl_mrs}

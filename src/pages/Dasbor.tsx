@@ -20,14 +20,11 @@ import { db, type Patient, type Ward, type Hospital, type ProgressNote, type Ter
 import { useUi } from '../store'
 import { verifyBiometric } from '../webauthn'
 import Masked from '../components/Masked'
-import { formatDate, getLocalDateString } from '../utils/dateFormat'
+import { formatDate, hariKe, getLocalDateString } from '../utils/dateFormat'
 import { extractClinicalHighlights, extractObjectivePositives } from '../utils/clinicalExtractor'
 import VisiteModal from '../components/VisiteModal'
 import { useBodyScrollLock } from '../utils/useBodyScrollLock'
 import { appCache, cacheHospitals, cacheWards, cachePatients, cacheNotes } from '../utils/dataCache'
-
-const hariKe = (iso: string) =>
-  Math.max(1, Math.floor((Date.now() - new Date(iso).getTime()) / 86400000) + 1)
 
 function cleanSubjective(raw?: string): string {
   if (!raw) return ''
@@ -317,14 +314,6 @@ function PatientCardContent({
             {patient.title} <Masked value={patient.nama_depan || (patient as any).inisial} type="name" />
           </span>
           {cleanUsia && <span className="caption text-xs font-medium shrink-0">({cleanUsia} th)</span>}
-          {patient.dpjp_utama && patient.dpjp_utama !== 'Neuro' && patient.peran_rawat !== 'Konsul' && (
-            <span
-              title={`Leader: ${patient.dpjp_utama}`}
-              className="inline-flex items-center px-1.5 py-0.2 rounded-md text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200/80 shrink-0"
-            >
-              {patient.dpjp_utama}
-            </span>
-          )}
         </div>
 
         <div className="flex items-center gap-1.5 shrink-0">
@@ -360,11 +349,23 @@ function PatientCardContent({
         </div>
       </div>
 
-      {/* No. RM: Jika kosong tidak dicantumkan, jika ada langsung angkanya tanpa 'RM: ' */}
-      {patient.no_rm?.trim() && (
-        <p className="caption text-xs text-ink-muted mt-0.5">
-          <Masked value={patient.no_rm} type="rm" />
-        </p>
+      {/* Baris di bawah nama sebelum SOAP: No. RM & Badge Leader (DPJP Utama) */}
+      {(patient.no_rm?.trim() || (patient.dpjp_utama && patient.dpjp_utama !== 'Neuro')) && (
+        <div className="mt-1 flex flex-wrap items-center gap-1.5 min-w-0">
+          {patient.no_rm?.trim() && (
+            <p className="caption text-xs text-ink-muted">
+              <Masked value={patient.no_rm} type="rm" />
+            </p>
+          )}
+          {patient.dpjp_utama && patient.dpjp_utama !== 'Neuro' && (
+            <span
+              title={`Leader: ${patient.dpjp_utama}`}
+              className="rounded-full bg-indigo-50 border border-indigo-200/80 px-2.5 py-0.5 text-xs font-bold text-indigo-700 inline-flex items-center"
+            >
+              {patient.dpjp_utama}
+            </span>
+          )}
+        </div>
       )}
 
       {/* Daftar Diagnosis bila belum ada catatan SOAP */}
@@ -1147,6 +1148,27 @@ export default function Dasbor() {
       isRestoringScroll.current = false
     }, 100)
   }, [aktif, wards, hospitals, expandHospital, expandWard])
+
+  // Koreksi catatan awal pasien: jika tgl_mrs di masa lalu, catatan awal harus bertanggal tgl_mrs (bukan hari ini)
+  useEffect(() => {
+    const fixLegacyInitialNoteDates = async () => {
+      try {
+        const todayStr = getLocalDateString()
+        const patients = await db.patients.toArray()
+        for (const p of patients) {
+          if (!p.id || !p.tgl_mrs || p.tgl_mrs >= todayStr) continue
+          const notes = await db.progressNotes.where('patient_id').equals(p.id).toArray()
+          // Jika pasien hanya memiliki 1 catatan awal dan tanggalnya tersimpan hari ini (padahal MRS-nya di masa lalu)
+          if (notes.length === 1 && notes[0].tanggal === todayStr) {
+            await db.progressNotes.update(notes[0].id!, { tanggal: p.tgl_mrs })
+          }
+        }
+      } catch {
+        // ignore
+      }
+    }
+    fixLegacyInitialNoteDates()
+  }, [])
 
   const { latestNoteMap, latestNoteWithSMap } = useMemo(() => {
     const latestMap = new Map<number, ProgressNote>()

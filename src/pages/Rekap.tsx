@@ -5,9 +5,7 @@ import { Search, FileText, Plus, Trash2, ClipboardCopy, ChevronRight, Calculator
 import { db, type Patient, type ProgressNote } from '../db'
 import Masked from '../components/Masked'
 import CustomSelect from '../components/CustomSelect'
-
-const hariKe = (iso: string) =>
-  Math.max(1, Math.floor((Date.now() - new Date(iso).getTime()) / 86400000) + 1)
+import { formatDate, hariKe } from '../utils/dateFormat'
 
 const inputCls =
   'w-full rounded-2xl border border-slate-300 bg-white px-4 py-2.5 text-xs font-semibold text-slate-900 placeholder:text-slate-400 outline-none focus:border-primary focus:ring-4 focus:ring-primary/20 shadow-2xs transition-all'
@@ -18,8 +16,8 @@ function renderTemplate(fmt: string, p: Patient, latest?: ProgressNote): string 
     no_rm: p.no_rm,
     diagnosis_utama: p.diagnosis_utama,
     jaminan: p.jaminan,
-    tgl_mrs: p.tgl_mrs,
-    tgl_onset: p.tgl_onset,
+    tgl_mrs: formatDate(p.tgl_mrs),
+    tgl_onset: p.tgl_onset ? formatDate(p.tgl_onset) : '',
     hari_rawat: String(hariKe(p.tgl_mrs)),
     S: latest?.S ?? '',
     O_pemfis: latest?.O_pemfis ?? '',
