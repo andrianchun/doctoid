@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react'
-import { Calendar, Zap, Clock } from 'lucide-react'
+import { Calendar } from 'lucide-react'
 import { toDisplayDate, parseToIsoDate, getLocalDateString } from '../utils/dateFormat'
 
 export interface DateInputProps {
@@ -27,8 +27,18 @@ export default function DateInput({
 }: DateInputProps) {
   const [text, setText] = useState(() => toDisplayDate(value))
   const [showMenu, setShowMenu] = useState(false)
+  const [openUpward, setOpenUpward] = useState(false)
   const hiddenDateRef = useRef<HTMLInputElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
+
+  const toggleMenu = () => {
+    if (!showMenu && containerRef.current) {
+      const rect = containerRef.current.getBoundingClientRect()
+      const spaceBelow = window.innerHeight - rect.bottom
+      setOpenUpward(spaceBelow < 170)
+    }
+    setShowMenu((prev) => !prev)
+  }
 
   useEffect(() => {
     setText(toDisplayDate(value))
@@ -133,10 +143,10 @@ export default function DateInput({
 
       <button
         type="button"
-        onClick={() => setShowMenu((prev) => !prev)}
+        onClick={toggleMenu}
         disabled={disabled}
         className="absolute right-1 top-1/2 -translate-y-1/2 size-7 rounded-lg flex items-center justify-center text-ink-muted hover:text-primary hover:bg-slate-100 transition-colors cursor-pointer"
-        title="Opsi tanggal (Hari ini / Kemarin / Kalender HP)"
+        title="Pilih tanggal"
       >
         <Calendar size={15} className="text-slate-400 hover:text-primary" />
       </button>
@@ -154,16 +164,17 @@ export default function DateInput({
 
       {/* Popover Pilihan Cepat */}
       {showMenu && (
-        <div className="absolute right-0 top-full mt-1.5 z-50 w-44 rounded-2xl border border-slate-200/90 bg-white/95 backdrop-blur-md p-1 shadow-xl animate-in fade-in zoom-in-95 duration-150">
+        <div
+          className={`absolute right-0 z-50 w-44 rounded-2xl border border-slate-200 bg-white p-1 shadow-xl animate-in fade-in zoom-in-95 duration-150 ${
+            openUpward ? 'bottom-full mb-1.5' : 'top-full mt-1.5'
+          }`}
+        >
           <button
             type="button"
             onClick={setToday}
-            className="w-full flex items-center justify-between px-2.5 py-1.5 text-xs font-bold text-emerald-700 hover:bg-emerald-50 rounded-xl transition-colors cursor-pointer text-left"
+            className="w-full flex items-center justify-between px-3 py-2 text-xs font-bold text-emerald-700 hover:bg-emerald-50 rounded-xl transition-colors cursor-pointer text-left"
           >
-            <span className="flex items-center gap-1.5">
-              <Zap size={13} className="text-emerald-600 fill-emerald-600" />
-              Hari Ini
-            </span>
+            <span>Hari Ini</span>
             <span className="text-[10px] font-semibold text-emerald-600/80">
               {toDisplayDate(getLocalDateString())}
             </span>
@@ -172,12 +183,9 @@ export default function DateInput({
           <button
             type="button"
             onClick={setYesterday}
-            className="w-full flex items-center justify-between px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer text-left"
+            className="w-full flex items-center justify-between px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer text-left"
           >
-            <span className="flex items-center gap-1.5">
-              <Clock size={13} className="text-slate-400" />
-              Kemarin
-            </span>
+            <span>Kemarin</span>
             <span className="text-[10px] text-slate-400">
               {(() => {
                 const d = new Date()
@@ -192,10 +200,9 @@ export default function DateInput({
           <button
             type="button"
             onClick={openNativePicker}
-            className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs font-semibold text-primary hover:bg-primary/10 rounded-xl transition-colors cursor-pointer text-left"
+            className="w-full px-3 py-2 text-xs font-semibold text-primary hover:bg-primary/10 rounded-xl transition-colors cursor-pointer text-left whitespace-nowrap"
           >
-            <Calendar size={13} />
-            <span>Pilih Kalender HP...</span>
+            Pilih Kalender
           </button>
         </div>
       )}

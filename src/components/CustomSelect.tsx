@@ -5,6 +5,7 @@ export interface SelectOption {
   value: string
   label: string
   isHeader?: boolean
+  dotColor?: string
 }
 
 export interface CustomSelectProps {
@@ -13,6 +14,7 @@ export interface CustomSelectProps {
   options: (string | SelectOption)[]
   placeholder?: string
   className?: string
+  buttonClassName?: string
   dropdownClassName?: string
   ariaLabel?: string
   disabled?: boolean
@@ -24,11 +26,13 @@ export default function CustomSelect({
   options,
   placeholder,
   className = '',
+  buttonClassName,
   dropdownClassName = '',
   ariaLabel,
   disabled = false,
 }: CustomSelectProps) {
   const [isOpen, setIsOpen] = useState(false)
+  const [openUpward, setOpenUpward] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
 
   // Normalisasi opsi string atau SelectOption
@@ -39,6 +43,15 @@ export default function CustomSelect({
   const selectedOption = normalizedOptions.find((opt) => !opt.isHeader && opt.value === value)
   const firstSelectable = normalizedOptions.find((opt) => !opt.isHeader)
   const displayLabel = selectedOption ? selectedOption.label : (placeholder || (firstSelectable?.label ?? ''))
+
+  // Auto upward positioning jika mepet bawah
+  useEffect(() => {
+    if (isOpen && containerRef.current) {
+      const rect = containerRef.current.getBoundingClientRect()
+      const spaceBelow = window.innerHeight - rect.bottom
+      setOpenUpward(spaceBelow < 240 && rect.top > 240)
+    }
+  }, [isOpen])
 
   // Tutup dropdown saat klik di luar
   useEffect(() => {
@@ -71,14 +84,28 @@ export default function CustomSelect({
         aria-haspopup="listbox"
         aria-expanded={isOpen}
         aria-label={ariaLabel || displayLabel}
-        className={`flex w-full items-center justify-between gap-1.5 rounded-2xl border border-slate-300 bg-slate-100/90 px-3 py-3 text-xs font-bold text-slate-900 outline-none transition-all cursor-pointer ${
-          isOpen
-            ? 'bg-white border-primary ring-2 ring-primary/20 shadow-xs'
-            : 'hover:bg-slate-200/60 focus:bg-white focus:border-primary'
-        } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+        className={
+          buttonClassName
+            ? `flex w-full items-center justify-between gap-1.5 transition-all cursor-pointer ${buttonClassName} ${
+                isOpen ? 'border-primary ring-2 ring-primary/20 bg-white' : ''
+              } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`
+            : `flex w-full items-center justify-between gap-1.5 rounded-2xl border border-slate-300 bg-slate-100/90 px-3 py-3 text-xs font-bold text-slate-900 outline-none transition-all cursor-pointer ${
+                isOpen
+                  ? 'bg-white border-primary ring-2 ring-primary/20 shadow-xs'
+                  : 'hover:bg-slate-200/60 focus:bg-white focus:border-primary'
+              } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`
+        }
       >
-        <span className={`truncate text-left ${!selectedOption && placeholder ? 'text-slate-400 font-normal' : ''}`}>
-          {displayLabel}
+        <span className="flex items-center gap-2 min-w-0 truncate text-left">
+          {selectedOption?.dotColor && (
+            <span
+              className="size-2.5 rounded-full shrink-0 shadow-xs"
+              style={{ backgroundColor: selectedOption.dotColor }}
+            />
+          )}
+          <span className={`truncate ${!selectedOption && placeholder ? 'text-slate-400 font-normal' : ''}`}>
+            {displayLabel}
+          </span>
         </span>
         <ChevronDown
           size={16}
@@ -91,7 +118,7 @@ export default function CustomSelect({
       {isOpen && (
         <div
           role="listbox"
-          className={`absolute left-0 top-full z-50 mt-1.5 w-full min-w-[120px] rounded-2xl border border-slate-200/90 bg-white p-1.5 shadow-xl backdrop-blur-xl animate-in fade-in zoom-in-95 duration-100 max-h-60 overflow-y-auto overscroll-contain hide-scrollbar ${dropdownClassName}`}
+          className={`absolute left-0 ${openUpward ? 'bottom-full mb-1.5' : 'top-full mt-1.5'} z-50 w-full min-w-[120px] rounded-2xl border border-slate-200/90 bg-white p-1.5 shadow-xl backdrop-blur-xl animate-in fade-in zoom-in-95 duration-100 max-h-60 overflow-y-auto overscroll-contain hide-scrollbar ${dropdownClassName}`}
         >
           {placeholder && !normalizedOptions.some((o) => o.value === '') && (
             <button
@@ -131,13 +158,19 @@ export default function CustomSelect({
                   onChange(opt.value)
                   setIsOpen(false)
                 }}
-                className={`w-full text-left rounded-xl px-3 py-2 text-xs font-bold transition-colors cursor-pointer ${
+                className={`flex items-center gap-2 w-full text-left rounded-xl px-3 py-2 text-xs font-bold transition-colors cursor-pointer ${
                   isSelected
                     ? 'bg-primary text-white shadow-xs'
                     : 'text-slate-800 hover:bg-primary/10 hover:text-primary'
                 }`}
               >
-                {opt.label}
+                {opt.dotColor && (
+                  <span
+                    className={`size-2.5 rounded-full shrink-0 shadow-xs ${isSelected ? 'ring-1 ring-white/60' : ''}`}
+                    style={{ backgroundColor: opt.dotColor }}
+                  />
+                )}
+                <span className="truncate">{opt.label}</span>
               </button>
             )
           })}

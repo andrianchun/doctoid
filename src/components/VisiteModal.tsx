@@ -4,7 +4,7 @@ import { db, type Patient, type ProgressNote, type TerapiItem, type DiagnosisIte
 import { lineToTerapi } from '../parser'
 import { rapikan } from '../ai'
 import { convertToWebP } from '../utils/mediaCompress'
-import { getLocalDateString } from '../utils/dateFormat'
+import { getLocalDateString, hariKe } from '../utils/dateFormat'
 import { useBodyScrollLock } from '../utils/useBodyScrollLock'
 import { getVisiteSubjectivePrefill, extractClinicalMetrics } from '../utils/clinicalExtractor'
 import Masked from './Masked'
@@ -171,6 +171,18 @@ export default function VisiteModal({
 
   const handleRemoveDrug = (index: number) => {
     setP((prev) => prev.filter((_, idx) => idx !== index))
+  }
+
+  const handleUpdateDrugDose = (index: number, newDose: string) => {
+    setP((prev) =>
+      prev.map((item, idx) => {
+        if (idx !== index) return item
+        return {
+          ...item,
+          dosis_keterangan: newDose,
+        }
+      })
+    )
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -504,45 +516,121 @@ export default function VisiteModal({
                   <Plus size={14} /> Tambah
                 </button>
               </div>
-              <div className="space-y-0.5 max-h-32 overflow-y-auto pr-0.5 divide-y divide-slate-100">
+              <div className="space-y-1 max-h-48 overflow-y-auto pr-0.5 divide-y divide-slate-100">
                 {ptxList.map((item) => {
                   const originalIdx = P.indexOf(item)
                   const isStop = item.status === 'stop'
+                  const nameLower = `${item.nama_item} ${item.dosis_keterangan}`.toLowerCase()
+                  const isManitol = nameLower.includes('manitol') || nameLower.includes('mannitol')
+                  const isDexa = nameLower.includes('dexa')
+                  const isCeftri = nameLower.includes('ceftri')
+                  const isNimo = nameLower.includes('nimodipine') || nameLower.includes('nimotop')
+                  const isDapt = nameLower.includes('dapt') || (nameLower.includes('clopidogrel') && nameLower.includes('aspirin'))
+                  const day = hariKe(item.tracking?.tgl_mulai || item.tgl_mulai || todayStr)
+
                   return (
                     <div
                       key={originalIdx}
-                      className="flex items-center justify-between gap-2 py-1 text-xs"
+                      className="py-1.5 text-xs space-y-1"
                     >
-                      <div className="min-w-0 flex-1 truncate flex items-center gap-2">
-                        <span className={`size-1.5 rounded-full shrink-0 ${isStop ? 'bg-slate-300' : 'bg-primary'}`} />
-                        <span className={`truncate ${isStop ? 'line-through text-ink-muted/70' : 'text-ink'}`}>
-                          <b>{item.nama_item}</b>{' '}
-                          {item.dosis_keterangan && (
-                            <span className="text-ink-muted text-[11px]">({item.dosis_keterangan})</span>
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="min-w-0 flex-1 truncate flex items-center gap-1.5">
+                          <span className={`size-1.5 rounded-full shrink-0 ${isStop ? 'bg-slate-300' : 'bg-primary'}`} />
+                          <span className={`truncate ${isStop ? 'line-through text-ink-muted/70' : 'text-ink'}`}>
+                            <b>{item.nama_item}</b>{' '}
+                            {item.dosis_keterangan && (
+                              <span className="text-ink-muted text-[11px]">({item.dosis_keterangan})</span>
+                            )}
+                          </span>
+
+                          {!isStop && (
+                            <>
+                              {item.tracking?.tipe === 'durasi' ? (
+                                <span className="rounded-full bg-blue-50 text-blue-700 px-1.5 py-0.2 text-[10px] font-bold shrink-0">
+                                  ⏱ H-{day}/{item.tracking.target_hari || 7}
+                                </span>
+                              ) : isManitol ? (
+                                <span className="rounded-full bg-amber-100 text-amber-900 px-1.5 py-0.2 text-[10px] font-bold shrink-0">
+                                  ⚡ Manitol H-{day}
+                                </span>
+                              ) : isDexa ? (
+                                <span className="rounded-full bg-amber-100 text-amber-900 px-1.5 py-0.2 text-[10px] font-bold shrink-0">
+                                  ⚡ Dexa H-{day}
+                                </span>
+                              ) : isCeftri ? (
+                                <span className="rounded-full bg-blue-50 text-blue-700 px-1.5 py-0.2 text-[10px] font-bold shrink-0">
+                                  ⏱ H-{day}/7
+                                </span>
+                              ) : isNimo ? (
+                                <span className="rounded-full bg-blue-50 text-blue-700 px-1.5 py-0.2 text-[10px] font-bold shrink-0">
+                                  ⏱ H-{day}/21
+                                </span>
+                              ) : isDapt ? (
+                                <span className="rounded-full bg-blue-50 text-blue-700 px-1.5 py-0.2 text-[10px] font-bold shrink-0">
+                                  ⏱ H-{day}/21
+                                </span>
+                              ) : null}
+                            </>
                           )}
-                        </span>
+                        </div>
+
+                        <div className="flex items-center gap-1 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => handleToggleDrugStatus(originalIdx)}
+                            className={`px-2 py-0.5 rounded-lg text-[10px] font-bold cursor-pointer transition-colors ${
+                              isStop
+                                ? 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                                : 'text-ink-muted hover:bg-rose-50 hover:text-rose-600'
+                            }`}
+                          >
+                            {isStop ? 'Lanjut' : 'Stop'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveDrug(originalIdx)}
+                            className="p-1 text-ink-muted hover:text-rose-600 rounded-lg cursor-pointer"
+                            title="Hapus"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
                       </div>
-                      <div className="flex items-center gap-1 shrink-0">
-                        <button
-                          type="button"
-                          onClick={() => handleToggleDrugStatus(originalIdx)}
-                          className={`px-2 py-0.5 rounded-lg text-[10px] font-bold cursor-pointer transition-colors ${
-                            isStop
-                              ? 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-                              : 'text-ink-muted hover:bg-rose-50 hover:text-rose-600'
-                          }`}
-                        >
-                          {isStop ? 'Lanjut' : 'Stop'}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveDrug(originalIdx)}
-                          className="p-1 text-ink-muted hover:text-rose-600 rounded-lg cursor-pointer"
-                          title="Hapus"
-                        >
-                          <Trash2 size={13} />
-                        </button>
-                      </div>
+
+                      {/* Quick Taper Down Actions */}
+                      {!isStop && isManitol && (
+                        <div className="flex items-center gap-1 pl-3 text-[10px] text-amber-900">
+                          <span className="font-semibold">Tap down:</span>
+                          <button
+                            type="button"
+                            onClick={() => handleUpdateDrugDose(originalIdx, '3 x 100 cc iv')}
+                            className="px-1.5 py-0.5 rounded bg-amber-100 hover:bg-amber-200 font-bold cursor-pointer"
+                          >
+                            3x100
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleUpdateDrugDose(originalIdx, '2 x 100 cc iv')}
+                            className="px-1.5 py-0.5 rounded bg-amber-100 hover:bg-amber-200 font-bold cursor-pointer"
+                          >
+                            2x100
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleUpdateDrugDose(originalIdx, '1 x 100 cc iv')}
+                            className="px-1.5 py-0.5 rounded bg-amber-100 hover:bg-amber-200 font-bold cursor-pointer"
+                          >
+                            1x100
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleToggleDrugStatus(originalIdx)}
+                            className="px-1.5 py-0.5 rounded bg-rose-100 hover:bg-rose-200 text-rose-800 font-bold cursor-pointer"
+                          >
+                            Stop
+                          </button>
+                        </div>
+                      )}
                     </div>
                   )
                 })}

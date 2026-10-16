@@ -1,10 +1,11 @@
 import { useRef } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { LayoutDashboard, PenLine, FolderOpen, FileText } from 'lucide-react'
+import { LayoutDashboard, PenLine, BedDouble, FolderOpen, FileText } from 'lucide-react'
 
 const TABS = [
   { to: '/dasbor', label: 'Dasbor', Icon: LayoutDashboard },
   { to: '/brainstorm', label: 'Catat Pasien', Icon: PenLine },
+  { to: '/rawatinap', label: 'Rawat Inap', Icon: BedDouble },
   { to: '/rekammedis', label: 'Rekam Medis', Icon: FolderOpen },
   { to: '/template', label: 'Template', Icon: FileText },
 ]
@@ -15,21 +16,24 @@ export default function Layout() {
 
   const isDasbor = location.pathname === '/dasbor' || location.pathname === '/'
   const isBrainstorm = location.pathname === '/brainstorm'
+  const isRawatInap = location.pathname === '/rawatinap'
   const isRekamMedis =
     location.pathname === '/rekammedis' ||
     location.pathname.startsWith('/rekammedis/') ||
     location.pathname === '/rekap' ||
     location.pathname.startsWith('/pasien/')
   const isTemplate = location.pathname === '/template'
-  const isMainTab = isDasbor || isBrainstorm || isRekamMedis || isTemplate
+  const isMainTab = isDasbor || isBrainstorm || isRawatInap || isRekamMedis || isTemplate
   const activeIndex = isDasbor
     ? 0
     : isBrainstorm
     ? 1
-    : isRekamMedis
+    : isRawatInap
     ? 2
-    : isTemplate
+    : isRekamMedis
     ? 3
+    : isTemplate
+    ? 4
     : -1
 
   // Gestur Swipe Horizontal antar Tab Utama
@@ -111,13 +115,13 @@ export default function Layout() {
               {activeIndex >= 0 && (
                 <div
                   aria-hidden="true"
-                  className="absolute inset-y-0 left-0 w-1/4 flex items-center justify-center pointer-events-none z-10 transition-transform duration-300 ease-[cubic-bezier(0.25,1,0.5,1)]"
+                  className="absolute inset-y-0 left-0 w-1/5 flex items-center justify-center pointer-events-none z-10 transition-transform duration-300 ease-[cubic-bezier(0.25,1,0.5,1)]"
                   style={{
                     transform: `translate3d(${activeIndex * 100}%, 0, 0)`,
                   }}
                 >
                   <div
-                    className={`w-[70px] h-9.5 rounded-2xl bg-white shadow-sm shadow-black/10 transition-opacity duration-200 ${
+                    className={`w-[54px] sm:w-[60px] h-9 rounded-2xl bg-white shadow-sm shadow-black/10 transition-opacity duration-200 ${
                       isBrainstorm ? 'opacity-0' : 'opacity-100'
                     }`}
                   />
@@ -130,6 +134,8 @@ export default function Layout() {
                     ? isDasbor
                     : to === '/brainstorm'
                     ? isBrainstorm
+                    : to === '/rawatinap'
+                    ? isRawatInap
                     : to === '/rekammedis'
                     ? isRekamMedis
                     : to === '/template'
@@ -149,7 +155,7 @@ export default function Layout() {
                     {isBrainstormActive && (
                       <span
                         aria-hidden="true"
-                        className="absolute -top-3 inset-x-0 mx-auto w-[70px] bottom-0 bg-white rounded-b-2xl pointer-events-none z-10"
+                        className="absolute -top-3 inset-x-0 mx-auto w-[54px] sm:w-[60px] bottom-0 bg-white rounded-b-2xl pointer-events-none z-10"
                       >
                         {/* Lengkungan sudut kiri (inverted concave fillet) */}
                         <svg
@@ -176,13 +182,13 @@ export default function Layout() {
                     )}
 
                     <div
-                      className={`relative z-20 flex items-center justify-center transition-colors duration-200 w-[70px] h-9.5 rounded-2xl ${
+                      className={`relative z-20 flex items-center justify-center transition-colors duration-200 w-[54px] sm:w-[60px] h-9 rounded-2xl ${
                         isActive
                           ? 'text-primary'
                           : 'text-white/70 group-hover:text-white group-hover:bg-white/10 group-active:bg-white/15'
                       }`}
                     >
-                      <Icon size={23} strokeWidth={2.2} />
+                      <Icon size={21} strokeWidth={2.2} />
                     </div>
                   </NavLink>
                 )

@@ -36,6 +36,7 @@ import { useBodyScrollLock } from '../utils/useBodyScrollLock'
 import ClinicalTrendingView from '../components/ClinicalTrendingView'
 import PredictiveInput from '../components/PredictiveInput'
 import { extractClinicalMetrics } from '../utils/clinicalExtractor'
+import CustomSelect, { type SelectOption } from '../components/CustomSelect'
 
 const PARENTERAL = /\binj\b|injeksi|drip|\biv\b|infus|\bamp\b|bolus|syringe|titrasi|pump|nebul/i
 
@@ -73,6 +74,7 @@ const LAINNYA_SUGGESTIONS = [
 ]
 
 export const DEPT_ALIH_RAWAT = [
+  'Neuro (TS Lain)',
   'Bedah Saraf',
   'IPD',
   'Paru',
@@ -95,6 +97,69 @@ export const RS_RUJUKAN = [
   'RS Tipe A Terdekat',
   'RS Tipe B Terdekat',
 ]
+
+function getTerapiTrackingBadge(item: TerapiItem, noteDate?: string) {
+  if (item.status === 'stop' || item.kategori === 'Diagnostik') return null
+  const tglMulai = item.tracking?.tgl_mulai || item.tgl_mulai || noteDate
+  const day = hariKe(tglMulai)
+
+  if (item.tracking) {
+    if (item.tracking.tipe === 'tapering') {
+      return (
+        <span className="rounded-full bg-amber-50 text-amber-800 border border-amber-200/80 px-2 py-0.5 text-[10px] font-bold">
+          ⚡ Tap H-{day}
+        </span>
+      )
+    }
+    if (item.tracking.tipe === 'durasi') {
+      const target = item.tracking.target_hari || 7
+      return (
+        <span className="rounded-full bg-blue-50 text-blue-800 border border-blue-200/80 px-2 py-0.5 text-[10px] font-bold">
+          ⏱ H-{day}/{target}
+        </span>
+      )
+    }
+  }
+
+  const name = `${item.nama_item} ${item.dosis_keterangan}`.toLowerCase()
+  if (name.includes('manitol') || name.includes('mannitol')) {
+    return (
+      <span className="rounded-full bg-amber-50 text-amber-800 border border-amber-200/80 px-2 py-0.5 text-[10px] font-bold">
+        ⚡ Manitol H-{day}
+      </span>
+    )
+  }
+  if (name.includes('dexa')) {
+    return (
+      <span className="rounded-full bg-amber-50 text-amber-800 border border-amber-200/80 px-2 py-0.5 text-[10px] font-bold">
+        ⚡ Dexa H-{day}
+      </span>
+    )
+  }
+  if (name.includes('ceftri')) {
+    return (
+      <span className="rounded-full bg-blue-50 text-blue-800 border border-blue-200/80 px-2 py-0.5 text-[10px] font-bold">
+        ⏱ Ceftri H-{day}/7
+      </span>
+    )
+  }
+  if (name.includes('nimodipine') || name.includes('nimotop')) {
+    return (
+      <span className="rounded-full bg-blue-50 text-blue-800 border border-blue-200/80 px-2 py-0.5 text-[10px] font-bold">
+        ⏱ Nimodipine H-{day}/21
+      </span>
+    )
+  }
+  if ((name.includes('clopidogrel') && name.includes('aspirin')) || name.includes('dapt')) {
+    return (
+      <span className="rounded-full bg-blue-50 text-blue-800 border border-blue-200/80 px-2 py-0.5 text-[10px] font-bold">
+        ⏱ DAPT H-{day}/21
+      </span>
+    )
+  }
+
+  return null
+}
 
 function TerapiRow({
   item,
@@ -174,6 +239,7 @@ function TerapiRow({
       </div>
 
       <div className="flex items-center gap-1 shrink-0">
+        {getTerapiTrackingBadge(item, noteDate)}
         {baru && (
           <span className="rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200/60 px-2 py-0.5 text-[10px] font-bold">
             + Baru
@@ -260,8 +326,16 @@ export default function PatientProfile() {
     [patient?.hospital_id],
     initialHospital,
   )
-  const allHospitals = useLiveQuery(() => db.hospitals.toArray(), [], appCache.hospitals || [])
-  const allWards = useLiveQuery(() => db.wards.toArray(), [], appCache.wards || [])
+  const allHospitals = useLiveQuery(
+    async () => (await db.hospitals.toArray()).sort((a, b) => (a.order ?? 0) - (b.order ?? 0)),
+    [],
+    appCache.hospitals || []
+  )
+  const allWards = useLiveQuery(
+    async () => (await db.wards.toArray()).sort((a, b) => (a.order ?? 0) - (b.order ?? 0)),
+    [],
+    appCache.wards || []
+  )
 
   // Update in-memory cache when fresh data arrives
   useEffect(() => {
@@ -938,6 +1012,8 @@ export default function PatientProfile() {
       ? 'Alih Rawat'
       : krsForm.keterangan_krs === 'Rujuk'
       ? 'Rujuk'
+      : krsForm.keterangan_krs === 'Lepas Rawat'
+      ? 'Lepas Rawat'
       : 'KRS'
     notify(`Pasien ditandai ${statusLabel}${detailLabel} ✓`)
   }
@@ -963,7 +1039,7 @@ export default function PatientProfile() {
     const riwayatRawatKonteks = patient.riwayat_rawat && patient.riwayat_rawat.length > 0
       ? `\n\n[RIWAYAT RAWAT INAP TERDAHULU (REKAM MEDIS)]\n` +
         patient.riwayat_rawat.map((r, i) => {
-          const outcomeLabel = r.keterangan_krs === 'Meninggal' ? 'MD' : r.keterangan_krs === 'APS' ? 'APS' : r.keterangan_krs === 'Alih Rawat' ? 'Alih Rawat' : r.keterangan_krs === 'Rujuk' ? 'Rujuk' : 'KRS'
+          const outcomeLabel = r.keterangan_krs === 'Meninggal' ? 'MD' : r.keterangan_krs === 'APS' ? 'APS' : r.keterangan_krs === 'Alih Rawat' ? 'Alih Rawat' : r.keterangan_krs === 'Rujuk' ? 'Rujuk' : r.keterangan_krs === 'Lepas Rawat' ? 'Lepas Rawat' : 'KRS'
           return `- Rawat Ke-${i + 1}: MRS ${formatDate(r.tgl_mrs)}${r.tgl_krs ? ` s/d ${outcomeLabel} ${formatDate(r.tgl_krs)}` : ''}${r.keterangan_krs && r.keterangan_krs !== 'Izin Dokter' ? ` (${r.keterangan_krs}${r.detail_krs ? `: ${r.detail_krs}` : ''})` : ''} | Dx: ${r.diagnosis_utama}${r.catatan_krs ? ` | Terapi: ${r.catatan_krs}` : ''}`
         }).join('\n')
       : ''
@@ -1005,9 +1081,25 @@ export default function PatientProfile() {
     setPendingEdit('')
   }
 
-  const filteredWardsForEdit = (allWards ?? []).filter(
-    (w) => w.hospital_id === Number(editPatientForm.hospital_id)
-  )
+  const filteredWardsForEdit = (allWards ?? [])
+    .filter((w) => w.hospital_id === Number(editPatientForm.hospital_id))
+    .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+
+  const hospitalOptions: SelectOption[] = (allHospitals ?? [])
+    .slice()
+    .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+    .map((h) => ({
+      value: String(h.id),
+      label: h.nama,
+    }))
+
+  const wardOptions: SelectOption[] = filteredWardsForEdit.length
+    ? filteredWardsForEdit.map((w) => ({
+        value: String(w.id),
+        label: w.nama,
+        dotColor: w.kode_warna,
+      }))
+    : [{ value: '0', label: 'Belum ada ruangan' }]
 
   return (
     <main className="space-y-5 p-5">
@@ -1150,7 +1242,7 @@ export default function PatientProfile() {
             </span>
           ) : (
             <span className="rounded-full bg-slate-700/60 text-slate-200 border border-slate-600/60 px-3 py-1 text-xs font-bold">
-              {patient.tgl_krs ? `${patient.keterangan_krs === 'Meninggal' ? 'MD' : patient.keterangan_krs === 'APS' ? 'APS' : patient.keterangan_krs === 'Alih Rawat' ? 'Alih Rawat' : patient.keterangan_krs === 'Rujuk' ? 'Rujuk' : 'KRS'} ${formatDate(patient.tgl_krs)}` : 'Sudah Keluar'}
+              {patient.tgl_krs ? `${patient.keterangan_krs === 'Meninggal' ? 'MD' : patient.keterangan_krs === 'APS' ? 'APS' : patient.keterangan_krs === 'Alih Rawat' ? 'Alih Rawat' : patient.keterangan_krs === 'Rujuk' ? 'Rujuk' : patient.keterangan_krs === 'Lepas Rawat' ? 'Lepas Rawat' : 'KRS'} ${formatDate(patient.tgl_krs)}` : 'Sudah Keluar'}
               {patient.tgl_krs && patient.tgl_mrs ? ` · ${Math.max(1, Math.floor((new Date(patient.tgl_krs).getTime() - new Date(patient.tgl_mrs).getTime()) / 86400000) + 1)} hari rawat` : ''}
             </span>
           )}
@@ -1173,6 +1265,10 @@ export default function PatientProfile() {
           ) : patient.keterangan_krs === 'Rujuk' ? (
             <span className="rounded-full px-3 py-1 text-xs font-bold bg-sky-500/80 text-white border border-sky-400/50 shadow-xs">
               Rujuk {patient.detail_krs ? `→ ${patient.detail_krs}` : ''}
+            </span>
+          ) : patient.keterangan_krs === 'Lepas Rawat' ? (
+            <span className="rounded-full px-3 py-1 text-xs font-bold bg-teal-500/80 text-white border border-teal-400/50 shadow-xs">
+              Lepas Rawat
             </span>
           ) : (
             <span className="rounded-full px-3 py-1 text-xs font-bold bg-white/30 text-white">
@@ -1447,7 +1543,7 @@ export default function PatientProfile() {
                 onClick={openKrsModal}
                 className="flex h-10 cursor-pointer items-center gap-2 rounded-2xl bg-surface px-4 text-xs font-bold text-ink hover:bg-surface/80 active:scale-95 transition-all"
               >
-                <Pencil size={14} /> Ubah Status ({patient.keterangan_krs === 'Meninggal' ? 'MD' : patient.keterangan_krs === 'APS' ? 'APS' : patient.keterangan_krs === 'Alih Rawat' ? 'Alih Rawat' : patient.keterangan_krs === 'Rujuk' ? 'Rujuk' : 'KRS'})
+                <Pencil size={14} /> Ubah Status ({patient.keterangan_krs === 'Meninggal' ? 'MD' : patient.keterangan_krs === 'APS' ? 'APS' : patient.keterangan_krs === 'Alih Rawat' ? 'Alih Rawat' : patient.keterangan_krs === 'Rujuk' ? 'Rujuk' : patient.keterangan_krs === 'Lepas Rawat' ? 'Lepas Rawat' : 'KRS'})
               </button>
               <button
                 onClick={handleKembaliRawat}
@@ -1702,7 +1798,7 @@ export default function PatientProfile() {
               const h = allHospitals?.find((x) => x.id === ep.hospital_id)
               const w = allWards?.find((x) => x.id === ep.ward_id)
               const episodeIndex = patient.riwayat_rawat!.length - i
-              const epOutcome = ep.keterangan_krs === 'Meninggal' ? 'MD' : ep.keterangan_krs === 'APS' ? 'APS' : ep.keterangan_krs === 'Alih Rawat' ? 'Alih Rawat' : ep.keterangan_krs === 'Rujuk' ? 'Rujuk' : 'KRS'
+              const epOutcome = ep.keterangan_krs === 'Meninggal' ? 'MD' : ep.keterangan_krs === 'APS' ? 'APS' : ep.keterangan_krs === 'Alih Rawat' ? 'Alih Rawat' : ep.keterangan_krs === 'Rujuk' ? 'Rujuk' : ep.keterangan_krs === 'Lepas Rawat' ? 'Lepas Rawat' : 'KRS'
               return (
                 <div key={ep.id || i} className="rounded-2xl border border-surface bg-surface/60 p-3.5 space-y-1.5">
                   <div className="flex items-center justify-between text-ink-muted">
@@ -1919,15 +2015,12 @@ export default function PatientProfile() {
               <div className="grid grid-cols-4 gap-2">
                 <div className="col-span-1">
                   <label className="block text-[11px] font-semibold text-ink-muted mb-1">Panggilan</label>
-                  <select
+                  <CustomSelect
                     value={editPatientForm.title}
-                    onChange={(e) => setEditPatientForm({ ...editPatientForm, title: e.target.value })}
-                    className="w-full h-9 rounded-xl border border-slate-200 px-2 text-xs bg-white text-ink outline-none focus:border-primary"
-                  >
-                    {['Tn.', 'Ny.', 'An.', 'Sdr.', 'By.', 'dr.', 'Prof.'].map((t) => (
-                      <option key={t} value={t}>{t}</option>
-                    ))}
-                  </select>
+                    onChange={(val) => setEditPatientForm({ ...editPatientForm, title: val })}
+                    options={['Tn.', 'Ny.', 'An.', 'Sdr.', 'By.', 'dr.', 'Prof.']}
+                    buttonClassName="h-9 rounded-xl border border-slate-200 px-2.5 text-xs bg-white text-ink font-semibold"
+                  />
                 </div>
                 <div className="col-span-3">
                   <label className="block text-[11px] font-semibold text-ink-muted mb-1">Nama Pasien</label>
@@ -1979,38 +2072,32 @@ export default function PatientProfile() {
               <div className="grid grid-cols-2 gap-2">
                 <div>
                   <label className="block text-[11px] font-semibold text-ink-muted mb-1">Faskes / RS</label>
-                  <select
-                    value={editPatientForm.hospital_id}
-                    onChange={(e) => {
-                      const newHId = Number(e.target.value)
-                      const firstW = (allWards ?? []).find((w) => w.hospital_id === newHId)
+                  <CustomSelect
+                    value={String(editPatientForm.hospital_id)}
+                    onChange={(val) => {
+                      const newHId = Number(val)
+                      const wardsOfH = (allWards ?? [])
+                        .filter((w) => w.hospital_id === newHId)
+                        .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+                      const firstW = wardsOfH[0]
                       setEditPatientForm({
                         ...editPatientForm,
                         hospital_id: newHId,
                         lokasi_sekarang: firstW?.id || 0,
                       })
                     }}
-                    className="w-full h-9 rounded-xl border border-slate-200 px-2 text-xs bg-white text-ink outline-none focus:border-primary"
-                  >
-                    {allHospitals?.map((h) => (
-                      <option key={h.id} value={h.id}>{h.nama}</option>
-                    ))}
-                  </select>
+                    options={hospitalOptions}
+                    buttonClassName="h-9 rounded-xl border border-slate-200 px-2.5 text-xs bg-white text-ink font-semibold"
+                  />
                 </div>
                 <div>
                   <label className="block text-[11px] font-semibold text-ink-muted mb-1">Ruangan</label>
-                  <select
-                    value={editPatientForm.lokasi_sekarang}
-                    onChange={(e) => setEditPatientForm({ ...editPatientForm, lokasi_sekarang: Number(e.target.value) })}
-                    className="w-full h-9 rounded-xl border border-slate-200 px-2 text-xs bg-white text-ink outline-none focus:border-primary"
-                  >
-                    {filteredWardsForEdit.map((w) => (
-                      <option key={w.id} value={w.id}>{w.nama}</option>
-                    ))}
-                    {!filteredWardsForEdit.length && (
-                      <option value={0}>Belum ada ruangan</option>
-                    )}
-                  </select>
+                  <CustomSelect
+                    value={String(editPatientForm.lokasi_sekarang)}
+                    onChange={(val) => setEditPatientForm({ ...editPatientForm, lokasi_sekarang: Number(val) })}
+                    options={wardOptions}
+                    buttonClassName="h-9 rounded-xl border border-slate-200 px-2.5 text-xs bg-white text-ink font-semibold"
+                  />
                 </div>
               </div>
 
@@ -2045,20 +2132,12 @@ export default function PatientProfile() {
                 </div>
 
                 {editPatientForm.peran_rawat !== 'Leader' ? (
-                  <div>
-                    <label className="block text-[11px] font-semibold text-ink-muted mb-1">
-                      {editPatientForm.peran_rawat === 'Raber' ? 'DPJP Utama (Leader)' : 'Konsul dari (Leader)'}
-                    </label>
-                    <select
-                      value={editPatientForm.dpjp_utama}
-                      onChange={(e) => setEditPatientForm({ ...editPatientForm, dpjp_utama: e.target.value })}
-                      className="w-full h-9 rounded-xl border border-slate-200 px-2 text-xs bg-white text-ink outline-none focus:border-primary font-semibold"
-                    >
-                      {DEPT_ALIH_RAWAT.map((dept) => (
-                        <option key={dept} value={dept}>{dept}</option>
-                      ))}
-                    </select>
-                  </div>
+                  <CustomSelect
+                    value={editPatientForm.dpjp_utama}
+                    onChange={(val) => setEditPatientForm({ ...editPatientForm, dpjp_utama: val })}
+                    options={DEPT_ALIH_RAWAT}
+                    buttonClassName="h-9 rounded-xl border border-slate-200 px-2.5 text-xs bg-white text-ink font-semibold"
+                  />
                 ) : (
                   <div>
                     <label className="block text-[11px] font-semibold text-ink-muted mb-1">
@@ -2097,19 +2176,16 @@ export default function PatientProfile() {
               <div className="grid grid-cols-2 gap-2">
                 <div>
                   <label className="block text-[11px] font-semibold text-ink-muted mb-1">Jaminan</label>
-                  <select
+                  <CustomSelect
                     value={editPatientForm.jaminan}
-                    onChange={(e) => setEditPatientForm({ ...editPatientForm, jaminan: e.target.value as Jaminan })}
-                    className="w-full h-9 rounded-xl border border-slate-200 px-2 text-xs bg-white text-ink outline-none focus:border-primary"
-                  >
-                    <option value="BPJS">BPJS</option>
-                    <option value="Umum">Umum</option>
-                    <option value="Asuransi">Asuransi</option>
-                  </select>
+                    onChange={(val) => setEditPatientForm({ ...editPatientForm, jaminan: val as Jaminan })}
+                    options={['BPJS', 'Umum', 'Asuransi']}
+                    buttonClassName="h-9 rounded-xl border border-slate-200 px-2.5 text-xs bg-white text-ink font-semibold"
+                  />
                 </div>
                 <div>
                   <label className="block text-[11px] font-semibold text-ink-muted mb-1">Status Rawat</label>
-                  <select
+                  <CustomSelect
                     value={
                       editPatientForm.status_rawat === 'aktif'
                         ? 'aktif'
@@ -2121,10 +2197,11 @@ export default function PatientProfile() {
                         ? 'krs_alih'
                         : editPatientForm.keterangan_krs === 'Rujuk'
                         ? 'krs_rujuk'
+                        : editPatientForm.keterangan_krs === 'Lepas Rawat'
+                        ? 'krs_lepas'
                         : 'krs_izin'
                     }
-                    onChange={(e) => {
-                      const val = e.target.value
+                    onChange={(val) => {
                       if (val === 'aktif') {
                         setEditPatientForm({ ...editPatientForm, status_rawat: 'aktif' })
                       } else {
@@ -2134,6 +2211,7 @@ export default function PatientProfile() {
                           krs_meninggal: 'Meninggal',
                           krs_alih: 'Alih Rawat',
                           krs_rujuk: 'Rujuk',
+                          krs_lepas: 'Lepas Rawat',
                         }
                         setEditPatientForm({
                           ...editPatientForm,
@@ -2143,15 +2221,17 @@ export default function PatientProfile() {
                         })
                       }
                     }}
-                    className="w-full h-9 rounded-xl border border-slate-200 px-2 text-xs bg-white text-ink outline-none focus:border-primary font-medium"
-                  >
-                    <option value="aktif">Rawat Inap (Aktif)</option>
-                    <option value="krs_izin">KRS (Izin Dokter)</option>
-                    <option value="krs_aps">APS (Pulang Paksa)</option>
-                    <option value="krs_meninggal">MD (Meninggal Dunia)</option>
-                    <option value="krs_alih">Alih Rawat (Departemen Lain)</option>
-                    <option value="krs_rujuk">Rujuk (Faskes/RS Lain)</option>
-                  </select>
+                    options={[
+                      { value: 'aktif', label: 'Rawat Inap (Aktif)' },
+                      { value: 'krs_izin', label: 'KRS (Izin Dokter)' },
+                      { value: 'krs_aps', label: 'APS (Pulang Paksa)' },
+                      { value: 'krs_meninggal', label: 'MD (Meninggal Dunia)' },
+                      { value: 'krs_alih', label: 'Alih Rawat (Departemen Lain)' },
+                      { value: 'krs_rujuk', label: 'Rujuk (Faskes/RS Lain)' },
+                      { value: 'krs_lepas', label: 'Lepas Rawat (Selesai Konsul)' },
+                    ]}
+                    buttonClassName="h-9 rounded-xl border border-slate-200 px-2.5 text-xs bg-white text-ink font-medium"
+                  />
                 </div>
               </div>
 
@@ -2186,15 +2266,8 @@ export default function PatientProfile() {
                     </div>
                   )}
                   <div>
-                    <div className="flex items-center justify-between mb-1">
+                    <div className="mb-1">
                       <label className="block text-[11px] font-semibold text-ink-muted">Tanggal Keluar</label>
-                      <button
-                        type="button"
-                        onClick={() => setEditPatientForm({ ...editPatientForm, tgl_krs: getLocalDateString() })}
-                        className="text-[10px] font-bold text-primary hover:text-primary-deep cursor-pointer"
-                      >
-                        Hari ini
-                      </button>
                     </div>
                     <DateInput
                       value={editPatientForm.tgl_krs}
@@ -2207,15 +2280,8 @@ export default function PatientProfile() {
 
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <div className="flex items-center justify-between mb-1">
+                  <div className="mb-1">
                     <label className="block text-[11px] font-semibold text-ink-muted">Tgl MRS</label>
-                    <button
-                      type="button"
-                      onClick={() => setEditPatientForm({ ...editPatientForm, tgl_mrs: getLocalDateString() })}
-                      className="text-[10px] font-bold text-primary hover:text-primary-deep cursor-pointer"
-                    >
-                      Hari ini
-                    </button>
                   </div>
                   <DateInput
                     value={editPatientForm.tgl_mrs}
@@ -2224,15 +2290,8 @@ export default function PatientProfile() {
                   />
                 </div>
                 <div>
-                  <div className="flex items-center justify-between mb-1">
+                  <div className="mb-1">
                     <label className="block text-[11px] font-semibold text-ink-muted">Tgl Onset</label>
-                    <button
-                      type="button"
-                      onClick={() => setEditPatientForm({ ...editPatientForm, tgl_onset: getLocalDateString() })}
-                      className="text-[10px] font-bold text-primary hover:text-primary-deep cursor-pointer"
-                    >
-                      Hari ini
-                    </button>
                   </div>
                   <DateInput
                     value={editPatientForm.tgl_onset}
@@ -2294,20 +2353,17 @@ export default function PatientProfile() {
             <form onSubmit={handleSaveEditTerapi} className="space-y-3">
               <div>
                 <label className="block text-[11px] font-semibold text-ink-muted mb-1">Kategori</label>
-                <select
+                <CustomSelect
                   value={editingTerapi.item.kategori}
-                  onChange={(e) =>
+                  onChange={(val) =>
                     setEditingTerapi({
                       ...editingTerapi,
-                      item: { ...editingTerapi.item, kategori: e.target.value as KategoriTerapi },
+                      item: { ...editingTerapi.item, kategori: val as KategoriTerapi },
                     })
                   }
-                  className="w-full h-9 rounded-xl border border-slate-200 px-2.5 text-xs bg-white text-ink outline-none focus:border-primary"
-                >
-                  {KATEGORI_OPTIONS.map((k) => (
-                    <option key={k} value={k}>{k}</option>
-                  ))}
-                </select>
+                  options={KATEGORI_OPTIONS}
+                  buttonClassName="h-9 rounded-xl border border-slate-200 px-2.5 text-xs bg-white text-ink font-semibold"
+                />
               </div>
 
               <div>
@@ -2356,23 +2412,24 @@ export default function PatientProfile() {
               <div className="grid grid-cols-2 gap-2">
                 <div>
                   <label className="block text-[11px] font-semibold text-ink-muted mb-1">Status</label>
-                  <select
+                  <CustomSelect
                     value={editingTerapi.item.status}
-                    onChange={(e) =>
+                    onChange={(val) =>
                       setEditingTerapi({
                         ...editingTerapi,
                         item: {
                           ...editingTerapi.item,
-                          status: e.target.value as 'aktif' | 'stop',
-                          tgl_stop: e.target.value === 'stop' ? (editingTerapi.item.tgl_stop || getLocalDateString()) : null,
+                          status: val as 'aktif' | 'stop',
+                          tgl_stop: val === 'stop' ? (editingTerapi.item.tgl_stop || getLocalDateString()) : null,
                         },
                       })
                     }
-                    className="w-full h-9 rounded-xl border border-slate-200 px-2 text-xs bg-white text-ink outline-none focus:border-primary"
-                  >
-                    <option value="aktif">Aktif</option>
-                    <option value="stop">Stop</option>
-                  </select>
+                    options={[
+                      { value: 'aktif', label: 'Aktif' },
+                      { value: 'stop', label: 'Stop' },
+                    ]}
+                    buttonClassName="h-9 rounded-xl border border-slate-200 px-2.5 text-xs bg-white text-ink font-semibold"
+                  />
                 </div>
                 {editingTerapi.item.status === 'stop' && (
                   <div>
@@ -2387,6 +2444,167 @@ export default function PatientProfile() {
                       }
                       className="w-full h-9 rounded-xl border border-slate-200 px-2 text-xs text-ink outline-none focus:border-primary bg-white"
                     />
+                  </div>
+                )}
+              </div>
+
+              <div className="pt-2 border-t border-slate-100">
+                <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(editingTerapi.item.tracking)}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        setEditingTerapi({
+                          ...editingTerapi,
+                          item: {
+                            ...editingTerapi.item,
+                            tracking: {
+                              tipe: 'tapering',
+                              tgl_mulai: editingTerapi.item.tgl_mulai || getLocalDateString(),
+                              tahap_taper: editingTerapi.item.dosis_keterangan || '',
+                            },
+                          },
+                        })
+                      } else {
+                        setEditingTerapi({
+                          ...editingTerapi,
+                          item: {
+                            ...editingTerapi.item,
+                            tracking: undefined,
+                          },
+                        })
+                      }
+                    }}
+                    className="size-4 rounded text-primary focus:ring-primary/20"
+                  />
+                  <span>⚡ Lacak Obat (Tapering / Target Durasi)</span>
+                </label>
+
+                {editingTerapi.item.tracking && (
+                  <div className="mt-2.5 p-3 rounded-2xl bg-amber-50/60 border border-amber-200/70 space-y-2.5">
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-[10px] font-bold text-amber-900 uppercase mb-1">Tipe</label>
+                        <CustomSelect
+                          value={editingTerapi.item.tracking.tipe}
+                          onChange={(val) => {
+                            setEditingTerapi({
+                              ...editingTerapi,
+                              item: {
+                                ...editingTerapi.item,
+                                tracking: {
+                                  ...editingTerapi.item.tracking!,
+                                  tipe: val as 'tapering' | 'durasi',
+                                  target_hari: val === 'durasi' ? (editingTerapi.item.tracking?.target_hari || 7) : undefined,
+                                },
+                              },
+                            })
+                          }}
+                          options={[
+                            { value: 'tapering', label: 'Tapering (Tap-Down)' },
+                            { value: 'durasi', label: 'Durasi Terbatas' },
+                          ]}
+                          buttonClassName="h-8 rounded-xl border border-amber-200 bg-white text-xs text-amber-950 font-bold"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] font-bold text-amber-900 uppercase mb-1">Tgl Mulai</label>
+                        <DateInput
+                          value={editingTerapi.item.tracking.tgl_mulai}
+                          onChange={(val) => {
+                            setEditingTerapi({
+                              ...editingTerapi,
+                              item: {
+                                ...editingTerapi.item,
+                                tracking: {
+                                  ...editingTerapi.item.tracking!,
+                                  tgl_mulai: val,
+                                },
+                              },
+                            })
+                          }}
+                          className="w-full h-8 rounded-xl border border-amber-200 px-2 text-xs text-amber-950 bg-white"
+                        />
+                      </div>
+                    </div>
+
+                    {editingTerapi.item.tracking.tipe === 'durasi' ? (
+                      <div>
+                        <label className="block text-[10px] font-bold text-amber-900 uppercase mb-1">Target Hari</label>
+                        <div className="flex items-center gap-1.5">
+                          <input
+                            type="number"
+                            min={1}
+                            value={editingTerapi.item.tracking.target_hari || 7}
+                            onChange={(e) => {
+                              const num = parseInt(e.target.value, 10) || 7
+                              setEditingTerapi({
+                                ...editingTerapi,
+                                item: {
+                                  ...editingTerapi.item,
+                                  tracking: {
+                                    ...editingTerapi.item.tracking!,
+                                    target_hari: num,
+                                  },
+                                },
+                              })
+                            }}
+                            className="w-16 h-8 rounded-xl border border-amber-200 px-2 text-center text-xs font-bold bg-white text-amber-950"
+                          />
+                          <div className="flex gap-1">
+                            {[7, 14, 21].map(d => (
+                              <button
+                                key={d}
+                                type="button"
+                                onClick={() => {
+                                  setEditingTerapi({
+                                    ...editingTerapi,
+                                    item: {
+                                      ...editingTerapi.item,
+                                      tracking: {
+                                        ...editingTerapi.item.tracking!,
+                                        target_hari: d,
+                                      },
+                                    },
+                                  })
+                                }}
+                                className={`px-2 py-1 rounded-lg text-[10px] font-bold cursor-pointer ${
+                                  editingTerapi.item.tracking?.target_hari === d
+                                    ? 'bg-amber-600 text-white'
+                                    : 'bg-white border border-amber-200 text-amber-800'
+                                }`}
+                              >
+                                {d} Hari
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div>
+                        <label className="block text-[10px] font-bold text-amber-900 uppercase mb-1">Tahap / Dosis Tap-Down</label>
+                        <input
+                          type="text"
+                          value={editingTerapi.item.tracking.tahap_taper || ''}
+                          onChange={(e) => {
+                            setEditingTerapi({
+                              ...editingTerapi,
+                              item: {
+                                ...editingTerapi.item,
+                                tracking: {
+                                  ...editingTerapi.item.tracking!,
+                                  tahap_taper: e.target.value,
+                                },
+                              },
+                            })
+                          }}
+                          placeholder="mis. 4x100 -> 3x100 -> 2x100 -> Stop"
+                          className="w-full h-8 rounded-xl border border-amber-200 px-2.5 text-xs bg-white text-amber-950"
+                        />
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -2434,15 +2652,12 @@ export default function PatientProfile() {
             <form onSubmit={handleAddTerapi} className="space-y-3">
               <div>
                 <label className="block text-[11px] font-semibold text-ink-muted mb-1">Kategori</label>
-                <select
+                <CustomSelect
                   value={newTerapiForm.kategori}
-                  onChange={(e) => setNewTerapiForm({ ...newTerapiForm, kategori: e.target.value as KategoriTerapi })}
-                  className="w-full h-9 rounded-xl border border-slate-200 px-2.5 text-xs bg-white text-ink outline-none focus:border-primary"
-                >
-                  {KATEGORI_OPTIONS.map((k) => (
-                    <option key={k} value={k}>{k}</option>
-                  ))}
-                </select>
+                  onChange={(val) => setNewTerapiForm({ ...newTerapiForm, kategori: val as KategoriTerapi })}
+                  options={KATEGORI_OPTIONS}
+                  buttonClassName="h-9 rounded-xl border border-slate-200 px-2.5 text-xs bg-white text-ink font-semibold"
+                />
               </div>
 
               <div>
@@ -2475,6 +2690,146 @@ export default function PatientProfile() {
                   placeholder="mis. 3 x 4 mg iv, evaluasi per 8 jam..."
                   className="w-full h-9 rounded-xl border border-slate-200 px-3 text-xs text-ink outline-none focus:border-primary"
                 />
+              </div>
+
+              <div className="pt-2 border-t border-slate-100">
+                <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(newTerapiForm.tracking)}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        setNewTerapiForm({
+                          ...newTerapiForm,
+                          tracking: {
+                            tipe: 'tapering',
+                            tgl_mulai: newTerapiForm.tgl_mulai || getLocalDateString(),
+                            tahap_taper: newTerapiForm.dosis_keterangan || '',
+                          },
+                        })
+                      } else {
+                        setNewTerapiForm({
+                          ...newTerapiForm,
+                          tracking: undefined,
+                        })
+                      }
+                    }}
+                    className="size-4 rounded text-primary focus:ring-primary/20"
+                  />
+                  <span>⚡ Lacak Obat (Tapering / Target Durasi)</span>
+                </label>
+
+                {newTerapiForm.tracking && (
+                  <div className="mt-2.5 p-3 rounded-2xl bg-amber-50/60 border border-amber-200/70 space-y-2.5">
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-[10px] font-bold text-amber-900 uppercase mb-1">Tipe</label>
+                        <CustomSelect
+                          value={newTerapiForm.tracking.tipe}
+                          onChange={(val) => {
+                            setNewTerapiForm({
+                              ...newTerapiForm,
+                              tracking: {
+                                ...newTerapiForm.tracking!,
+                                tipe: val as 'tapering' | 'durasi',
+                                target_hari: val === 'durasi' ? (newTerapiForm.tracking?.target_hari || 7) : undefined,
+                              },
+                            })
+                          }}
+                          options={[
+                            { value: 'tapering', label: 'Tapering (Tap-Down)' },
+                            { value: 'durasi', label: 'Durasi Terbatas' },
+                          ]}
+                          buttonClassName="h-8 rounded-xl border border-amber-200 bg-white text-xs text-amber-950 font-bold"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] font-bold text-amber-900 uppercase mb-1">Tgl Mulai</label>
+                        <DateInput
+                          value={newTerapiForm.tracking.tgl_mulai}
+                          onChange={(val) => {
+                            setNewTerapiForm({
+                              ...newTerapiForm,
+                              tracking: {
+                                ...newTerapiForm.tracking!,
+                                tgl_mulai: val,
+                              },
+                            })
+                          }}
+                          className="w-full h-8 rounded-xl border border-amber-200 px-2 text-xs text-amber-950 bg-white"
+                        />
+                      </div>
+                    </div>
+
+                    {newTerapiForm.tracking.tipe === 'durasi' ? (
+                      <div>
+                        <label className="block text-[10px] font-bold text-amber-900 uppercase mb-1">Target Hari</label>
+                        <div className="flex items-center gap-1.5">
+                          <input
+                            type="number"
+                            min={1}
+                            value={newTerapiForm.tracking.target_hari || 7}
+                            onChange={(e) => {
+                              const num = parseInt(e.target.value, 10) || 7
+                              setNewTerapiForm({
+                                ...newTerapiForm,
+                                tracking: {
+                                  ...newTerapiForm.tracking!,
+                                  target_hari: num,
+                                },
+                              })
+                            }}
+                            className="w-16 h-8 rounded-xl border border-amber-200 px-2 text-center text-xs font-bold bg-white text-amber-950"
+                          />
+                          <div className="flex gap-1">
+                            {[7, 14, 21].map(d => (
+                              <button
+                                key={d}
+                                type="button"
+                                onClick={() => {
+                                  setNewTerapiForm({
+                                    ...newTerapiForm,
+                                    tracking: {
+                                      ...newTerapiForm.tracking!,
+                                      target_hari: d,
+                                    },
+                                  })
+                                }}
+                                className={`px-2 py-1 rounded-lg text-[10px] font-bold cursor-pointer ${
+                                  newTerapiForm.tracking?.target_hari === d
+                                    ? 'bg-amber-600 text-white'
+                                    : 'bg-white border border-amber-200 text-amber-800'
+                                }`}
+                              >
+                                {d} Hari
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div>
+                        <label className="block text-[10px] font-bold text-amber-900 uppercase mb-1">Tahap / Dosis Tap-Down</label>
+                        <input
+                          type="text"
+                          value={newTerapiForm.tracking.tahap_taper || ''}
+                          onChange={(e) => {
+                            setNewTerapiForm({
+                              ...newTerapiForm,
+                              tracking: {
+                                ...newTerapiForm.tracking!,
+                                tahap_taper: e.target.value,
+                              },
+                            })
+                          }}
+                          placeholder="mis. 4x100 -> 3x100 -> 2x100 -> Stop"
+                          className="w-full h-8 rounded-xl border border-amber-200 px-2.5 text-xs bg-white text-amber-950"
+                        />
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
 
               <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
@@ -2708,19 +3063,20 @@ export default function PatientProfile() {
                 </div>
                 <div>
                   <label className="block text-[11px] font-semibold text-ink-muted mb-1">Status Hasil</label>
-                  <select
+                  <CustomSelect
                     value={penunjangForm.status}
-                    onChange={(e) =>
+                    onChange={(val) =>
                       setPenunjangForm({
                         ...penunjangForm,
-                        status: e.target.value as 'selesai' | 'menunggu',
+                        status: val as 'selesai' | 'menunggu',
                       })
                     }
-                    className="w-full h-9 rounded-xl border border-slate-200 px-2.5 text-xs bg-white text-ink outline-none focus:border-primary"
-                  >
-                    <option value="selesai">✓ Selesai (Ada Hasil)</option>
-                    <option value="menunggu">⏳ Menunggu Hasil</option>
-                  </select>
+                    options={[
+                      { value: 'selesai', label: '✓ Selesai (Ada Hasil)' },
+                      { value: 'menunggu', label: '⏳ Menunggu Hasil' },
+                    ]}
+                    buttonClassName="h-9 rounded-xl border border-slate-200 px-2.5 text-xs bg-white text-ink font-semibold"
+                  />
                 </div>
               </div>
 
@@ -2970,6 +3326,13 @@ export default function PatientProfile() {
                     borderSelected: 'border-sky-500 bg-sky-50/60 ring-1 ring-sky-500/25 text-sky-950',
                     dotSelected: 'border-sky-600 bg-sky-600',
                   },
+                  {
+                    key: 'Lepas Rawat' as KeteranganKrs,
+                    label: 'Lepas Rawat',
+                    sub: 'Selesai Rawat Bersama / Konsul',
+                    borderSelected: 'border-teal-500 bg-teal-50/60 ring-1 ring-teal-500/25 text-teal-950',
+                    dotSelected: 'border-teal-600 bg-teal-600',
+                  },
                 ].map((opt) => {
                   const isSelected = krsForm.keterangan_krs === opt.key
                   const isAlihRawat = opt.key === 'Alih Rawat'
@@ -3010,10 +3373,9 @@ export default function PatientProfile() {
                       {/* Dropdown Spesifik Alih Rawat — Tepat di bawah Alih Rawat */}
                       {isAlihRawat && isSelected && (
                         <div className="pl-3.5 pr-0.5 py-1 space-y-1.5 animate-in fade-in">
-                          <select
+                          <CustomSelect
                             value={isCustomDept ? 'lainnya' : krsForm.detail_krs}
-                            onChange={(e) => {
-                              const val = e.target.value
+                            onChange={(val) => {
                               if (val === 'lainnya') {
                                 setIsCustomDept(true)
                                 setKrsForm((f) => ({ ...f, detail_krs: '' }))
@@ -3022,16 +3384,13 @@ export default function PatientProfile() {
                                 setKrsForm((f) => ({ ...f, detail_krs: val }))
                               }
                             }}
-                            className="w-full h-10 rounded-xl border border-indigo-200 px-3 text-xs bg-white text-ink font-semibold outline-none focus:border-indigo-500 shadow-2xs"
-                          >
-                            <option value="">— Pilih Departemen / Spesialis Tujuan —</option>
-                            {DEPT_ALIH_RAWAT.map((dept) => (
-                              <option key={dept} value={dept}>
-                                {dept}
-                              </option>
-                            ))}
-                            <option value="lainnya">Lainnya (Ketik Manual)...</option>
-                          </select>
+                            options={[
+                              ...DEPT_ALIH_RAWAT.map((dept) => ({ value: dept, label: dept })),
+                              { value: 'lainnya', label: 'Lainnya (Ketik Manual)...' },
+                            ]}
+                            placeholder="— Pilih Departemen / Spesialis Tujuan —"
+                            buttonClassName="h-10 rounded-xl border border-indigo-200 px-3 text-xs bg-white text-ink font-semibold shadow-2xs"
+                          />
 
                           {isCustomDept && (
                             <input
@@ -3049,10 +3408,9 @@ export default function PatientProfile() {
                       {/* Dropdown Spesifik Rujuk — Tepat di bawah Rujuk */}
                       {isRujuk && isSelected && (
                         <div className="pl-3.5 pr-0.5 py-1 space-y-1.5 animate-in fade-in">
-                          <select
+                          <CustomSelect
                             value={isCustomRs ? 'lainnya' : krsForm.detail_krs}
-                            onChange={(e) => {
-                              const val = e.target.value
+                            onChange={(val) => {
                               if (val === 'lainnya') {
                                 setIsCustomRs(true)
                                 setKrsForm((f) => ({ ...f, detail_krs: '' }))
@@ -3061,16 +3419,13 @@ export default function PatientProfile() {
                                 setKrsForm((f) => ({ ...f, detail_krs: val }))
                               }
                             }}
-                            className="w-full h-10 rounded-xl border border-sky-200 px-3 text-xs bg-white text-ink font-semibold outline-none focus:border-sky-500 shadow-2xs"
-                          >
-                            <option value="">— Pilih Rumah Sakit Rujukan —</option>
-                            {RS_RUJUKAN.map((rs) => (
-                              <option key={rs} value={rs}>
-                                {rs}
-                              </option>
-                            ))}
-                            <option value="lainnya">Lainnya (Ketik Nama RS)...</option>
-                          </select>
+                            options={[
+                              ...RS_RUJUKAN.map((rs) => ({ value: rs, label: rs })),
+                              { value: 'lainnya', label: 'Lainnya (Ketik Nama RS)...' },
+                            ]}
+                            placeholder="— Pilih Rumah Sakit Rujukan —"
+                            buttonClassName="h-10 rounded-xl border border-sky-200 px-3 text-xs bg-white text-ink font-semibold shadow-2xs"
+                          />
 
                           {isCustomRs && (
                             <input
@@ -3091,15 +3446,8 @@ export default function PatientProfile() {
 
               {/* Tanggal Keluar */}
               <div>
-                <div className="flex items-center justify-between mb-1">
+                <div className="mb-1">
                   <label className="block text-[11px] font-bold text-ink-muted">Tanggal Keluar</label>
-                  <button
-                    type="button"
-                    onClick={() => setKrsForm((f) => ({ ...f, tgl_krs: getLocalDateString() }))}
-                    className="text-[10px] font-bold text-primary hover:text-primary-deep cursor-pointer"
-                  >
-                    Hari ini
-                  </button>
                 </div>
                 <DateInput
                   value={krsForm.tgl_krs}
@@ -3128,10 +3476,12 @@ export default function PatientProfile() {
                       ? 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-600/25'
                       : krsForm.keterangan_krs === 'Rujuk'
                       ? 'bg-sky-600 hover:bg-sky-700 shadow-sky-600/25'
+                      : krsForm.keterangan_krs === 'Lepas Rawat'
+                      ? 'bg-teal-600 hover:bg-teal-700 shadow-teal-600/25'
                       : 'bg-primary hover:bg-primary-deep shadow-primary/25'
                   }`}
                 >
-                  Konfirmasi {krsForm.keterangan_krs === 'Meninggal' ? 'MD' : krsForm.keterangan_krs === 'APS' ? 'APS' : krsForm.keterangan_krs === 'Alih Rawat' ? 'Alih Rawat' : krsForm.keterangan_krs === 'Rujuk' ? 'Rujuk' : 'KRS'}
+                  Konfirmasi {krsForm.keterangan_krs === 'Meninggal' ? 'MD' : krsForm.keterangan_krs === 'APS' ? 'APS' : krsForm.keterangan_krs === 'Alih Rawat' ? 'Alih Rawat' : krsForm.keterangan_krs === 'Rujuk' ? 'Rujuk' : krsForm.keterangan_krs === 'Lepas Rawat' ? 'Lepas Rawat' : 'KRS'}
                 </button>
               </div>
             </form>
@@ -3184,16 +3534,15 @@ export default function PatientProfile() {
                 <label className="block text-xs font-bold text-slate-700 mb-1.5">
                   Pilih DPJP Utama (Leader) Baru
                 </label>
-                <select
+                <CustomSelect
                   value={newLeader}
-                  onChange={(e) => setNewLeader(e.target.value)}
-                  className="w-full h-10 rounded-xl border border-slate-300 px-3 text-xs bg-white text-ink font-semibold outline-none focus:border-primary shadow-2xs"
-                >
-                  <option value="Neuro">Neuro (DPJP Utama Saraf)</option>
-                  {DEPT_ALIH_RAWAT.map((dept) => (
-                    <option key={dept} value={dept}>{dept}</option>
-                  ))}
-                </select>
+                  onChange={(val) => setNewLeader(val)}
+                  options={[
+                    { value: 'Neuro', label: 'Neuro (DPJP Utama Saraf)' },
+                    ...DEPT_ALIH_RAWAT.map((dept) => ({ value: dept, label: dept })),
+                  ]}
+                  buttonClassName="h-10 rounded-xl border border-slate-300 px-3 text-xs bg-white text-ink font-semibold shadow-2xs"
+                />
                 <p className="text-[11px] text-ink-muted mt-1.5 leading-relaxed">
                   {newLeader === 'Neuro'
                     ? 'Neuro akan menjadi Leader / DPJP Utama pasien ini.'

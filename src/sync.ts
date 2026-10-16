@@ -18,6 +18,8 @@ export const TABLES = [
   'templates',
   'regexRules',
   'therapyHistory',
+  'penunjang',
+  'poliLogs',
 ] as const
 
 export const getDeviceId = () => {

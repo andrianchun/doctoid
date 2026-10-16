@@ -1,949 +1,57 @@
-import { useState, useRef, useEffect, useLayoutEffect, useMemo } from 'react'
+import React, { useState, useMemo, useRef } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
 import {
-  DndContext, MouseSensor, TouchSensor, useSensor, useSensors,
-  useDroppable, DragOverlay,
-  pointerWithin, closestCenter, type CollisionDetection, type DragEndEvent, type DragStartEvent,
-  defaultDropAnimationSideEffects, type DropAnimation,
-} from '@dnd-kit/core'
+  ResponsiveContainer,
+  AreaChart,
+  Area,
+  XAxis,
+  YAxis,
+  Tooltip,
+  CartesianGrid,
+  PieChart,
+  Pie,
+  Cell,
+} from 'recharts'
 import {
-  SortableContext, verticalListSortingStrategy, useSortable, arrayMove,
-} from '@dnd-kit/sortable'
-import { CSS } from '@dnd-kit/utilities'
-import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts'
-import {
-  BedDouble, Plus,
-  ChevronRight, Pencil, Eye, EyeOff, Settings, Building2, ChevronDown, X, Check, AlertTriangle
+  Eye,
+  EyeOff,
+  ChevronRight,
+  Plus,
+  Pencil,
+  Settings,
 } from 'lucide-react'
-import { db, type Patient, type Ward, type Hospital, type ProgressNote, type TerapiItem } from '../db'
+import { db, type Patient, type Hospital, type ProgressNote, type PoliLog, type TerapiItem } from '../db'
 import { useUi } from '../store'
 import { verifyBiometric } from '../webauthn'
-import Masked from '../components/Masked'
 import { formatDate, hariKe, getLocalDateString } from '../utils/dateFormat'
-import { extractClinicalHighlights, extractObjectivePositives } from '../utils/clinicalExtractor'
-import VisiteModal from '../components/VisiteModal'
-import { useBodyScrollLock } from '../utils/useBodyScrollLock'
-import { appCache, cacheHospitals, cacheWards, cachePatients, cacheNotes } from '../utils/dataCache'
+import PoliEntryModal from '../components/PoliEntryModal'
 
-function cleanSubjective(raw?: string): string {
-  if (!raw) return ''
-  const cleaned = raw
-    .trim()
-    .replace(/^(?:s|subjektif|keluhan)\s*:\s*/i, '')
-    .trim()
-  // '-' berarti tidak ada keluhan
-  if (cleaned === '-' || cleaned === '–') return ''
-  return cleaned
-}
+// Regex untuk deteksi otomatis obat yang butuh tapering atau durasi terbatas jika belum diset eksplisit
+const RE_TAPER_MANITOL = /manitol|mannitol/i
+const RE_TAPER_DEXA = /dexa|dexamethasone/i
+const RE_DURASI_CEFTRIAXONE = /ceftriaxone|ceftri/i
+const RE_DURASI_NIMODIPINE = /nimodipine|nimotop/i
+const RE_DURASI_DAPT = /clopidogrel.*(?:aspirin|asetosal)|(?:aspirin|asetosal).*clopidogrel|dapt/i
 
-function formatNoteDate(iso?: string): string {
-  if (!iso) return ''
-  const todayStr = getLocalDateString()
-  if (iso.startsWith(todayStr)) {
-    return 'Hari ini'
-  }
-  return formatDate(iso)
-}
-
-const dropAnimationConfig: DropAnimation = {
-  sideEffects: defaultDropAnimationSideEffects({
-    styles: {
-      active: {
-        opacity: '0.3',
-      },
-    },
-  }),
-  duration: 150,
-  easing: 'ease-out',
-}
-
-function getPatientId(id: string | number | undefined | null): number | null {
-  if (id === undefined || id === null) return null
-  const s = String(id)
-  if (s.startsWith('patient-')) {
-    const num = parseInt(s.slice(8), 10)
-    return isNaN(num) ? null : num
-  }
-  return null
-}
-
-function getWardId(id: string | number | undefined | null): number | null {
-  if (id === undefined || id === null) return null
-  const s = String(id)
-  if (s.startsWith('ward-')) {
-    const num = parseInt(s.slice(5), 10)
-    return isNaN(num) ? null : num
-  }
-  return null
-}
-
-const customCollisionDetection: CollisionDetection = (args) => {
-  const pointerCollisions = pointerWithin(args)
-  if (pointerCollisions.length > 0) {
-    const patientCollision = pointerCollisions.find((c) => String(c.id).startsWith('patient-'))
-    if (patientCollision) {
-      return [patientCollision]
-    }
-    return pointerCollisions
-  }
-  const centerCollisions = closestCenter(args)
-  if (centerCollisions.length > 0) {
-    const patientCollision = centerCollisions.find((c) => String(c.id).startsWith('patient-'))
-    if (patientCollision) {
-      return [patientCollision]
-    }
-    return centerCollisions
-  }
-  return []
-}
-
-const triggerHaptic = (type: 'start' | 'drop' | 'cancel') => {
-  if (typeof window !== 'undefined' && 'vibrate' in navigator) {
-    try {
-      if (type === 'start') {
-        navigator.vibrate(25)
-      } else if (type === 'drop') {
-        navigator.vibrate([15, 30, 20])
-      } else {
-        navigator.vibrate(10)
-      }
-    } catch {
-      // ignore unsupported
-    }
-  }
-}
-
-function getPatientDiagnoses(patient: Patient, latestNote?: ProgressNote): string[] {
-  const result: string[] = []
-  const seen = new Set<string>()
-
-  // 1. Diagnosis utama pasien
-  if (patient.diagnosis_utama) {
-    const parts = patient.diagnosis_utama.split(/[\n;]+/)
-    for (const p of parts) {
-      const name = p.trim().replace(/^(?:[-•*]|\d+[.)])\s*/, '')
-      if (name && !seen.has(name.toLowerCase())) {
-        seen.add(name.toLowerCase())
-        result.push(name)
-      }
-    }
-  }
-
-  // 2. Seluruh diagnosis dari CPPT / catatan medis terkini (termasuk sekunder)
-  if (latestNote?.A) {
-    if (Array.isArray(latestNote.A)) {
-      for (const item of latestNote.A) {
-        const name = (typeof item === 'string' ? item : item?.nama_diagnosis)?.trim()
-        if (name) {
-          const cleanName = name.replace(/^(?:[-•*]|\d+[.)])\s*/, '')
-          if (cleanName && !seen.has(cleanName.toLowerCase())) {
-            seen.add(cleanName.toLowerCase())
-            result.push(cleanName)
-          }
-        }
-      }
-    } else if (typeof latestNote.A === 'string') {
-      const parts = (latestNote.A as string).split(/[\n;]+/)
-      for (const p of parts) {
-        const name = p.trim().replace(/^(?:[-•*]|\d+[.)])\s*/, '')
-        if (name && !seen.has(name.toLowerCase())) {
-          seen.add(name.toLowerCase())
-          result.push(name)
-        }
-      }
-    }
-  }
-
-  return result
-}
-
-function PatientCardContent({
-  patient,
-  latestNote,
-  latestNoteWithS,
-  unmasked,
-  isVisitedToday,
-  onOpenVisite,
-  handleToggleMask,
-}: {
+interface DrugAlertItem {
   patient: Patient
-  latestNote?: ProgressNote
-  latestNoteWithS?: ProgressNote
-  unmasked: boolean
-  isVisitedToday?: boolean
-  onOpenVisite?: (e: React.MouseEvent) => void
-  handleToggleMask?: (e: React.MouseEvent) => void
-}) {
-  const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({})
-  const cleanUsia = patient.usia?.toString().replace(/\s*(th|tahun)\b/gi, '').trim()
-  const diagnoses = getPatientDiagnoses(patient, latestNote)
-  const currentNote = latestNote || latestNoteWithS
-  const noteForS = cleanSubjective(latestNote?.S) ? latestNote : (latestNoteWithS || latestNote)
-  const keluhan = cleanSubjective(noteForS?.S)
-  const clinical = extractClinicalHighlights(currentNote, noteForS)
-
-  const toggleSection = (key: string, e: React.MouseEvent) => {
-    e.stopPropagation()
-    setExpandedSections((prev) => ({ ...prev, [key]: !prev[key] }))
-  }
-
-  // S: Subjektif (selalu ringkas temuan positif)
-  const sFull = cleanSubjective(noteForS?.S)
-  const sSummary = clinical.sList.length > 0 ? clinical.sList.join(' · ') : keluhan
-  const hasS = !!(sSummary || sFull)
-
-  // O: Fisik & Penunjang dipisahkan
-  const oPemfis = currentNote?.O_pemfis?.trim() || ''
-  const oPenunjang = currentNote?.O_penunjang?.trim() || ''
-
-  const pemfisHighlights = useMemo(() => extractObjectivePositives(oPemfis, ''), [oPemfis])
-  const penunjangHighlights = useMemo(() => extractObjectivePositives('', oPenunjang), [oPenunjang])
-
-  const oFisikSummary = pemfisHighlights.length > 0 ? pemfisHighlights.join(' · ') : oPemfis
-  const oPenunjangSummary = penunjangHighlights.length > 0 ? penunjangHighlights.join(' · ') : oPenunjang
-
-  const hasOFisik = !!(oFisikSummary || oPemfis)
-  const hasOPenunjang = !!(oPenunjangSummary || oPenunjang)
-
-  const canExpandOFisik = !!(oPemfis && (oPemfis !== oFisikSummary || oPemfis.length > 50))
-  const canExpandOPenunjang = !!(oPenunjang && (oPenunjang !== oPenunjangSummary || oPenunjang.length > 50))
-
-  // A: Assessment
-  const aSummary = diagnoses.join(' · ')
-  const hasA = diagnoses.length > 0
-  const canExpandA = diagnoses.length > 1 || (Array.isArray(currentNote?.A) && currentNote.A.length > 0)
-
-  // P: Plan dipisahkan jadi PDx & PTx
-  const allTherapies = useMemo(() => (currentNote?.P || []) as TerapiItem[], [currentNote?.P])
-
-  // PDx: Plan Diagnostik & Hasil Pemeriksaan Terkait
-  const rawPenunjang = useLiveQuery(
-    () => (patient.id ? db.penunjang.where('patient_id').equals(patient.id).toArray() : []),
-    [patient.id]
-  )
-  const penunjangList = useMemo(() => rawPenunjang || [], [rawPenunjang])
-
-  const pdxRawItems = useMemo(() => allTherapies.filter((p) => p.kategori === 'Diagnostik'), [allTherapies])
-
-  const diagnosticItems = useMemo(() => {
-    const list: {
-      nama: string
-      hasil?: string
-      status: 'selesai' | 'menunggu'
-      kategori?: string
-      id?: number
-    }[] = []
-    const seenNames = new Set<string>()
-
-    // 1. Data terstruktur dari db.penunjang (rekam medis)
-    for (const p of penunjangList) {
-      const lower = p.nama_pemeriksaan.trim().toLowerCase()
-      seenNames.add(lower)
-      list.push({
-        nama: p.nama_pemeriksaan,
-        hasil: p.status === 'selesai' ? p.hasil : undefined,
-        status: p.status,
-        kategori: p.kategori,
-        id: p.id,
-      })
-    }
-
-    // 2. Data dari P (kategori 'Diagnostik') di CPPT jika belum tercatat di db.penunjang
-    for (const it of pdxRawItems) {
-      const lower = it.nama_item.trim().toLowerCase()
-      if (!seenNames.has(lower)) {
-        seenNames.add(lower)
-        const hasResult = !!it.dosis_keterangan?.trim()
-        list.push({
-          nama: it.nama_item,
-          hasil: hasResult ? it.dosis_keterangan : undefined,
-          status: hasResult ? 'selesai' : 'menunggu',
-          kategori: 'Lainnya',
-        })
-      }
-    }
-
-    // Jika pasien berstatus Konsul, tampilkan di PDx
-    if (patient.peran_rawat === 'Konsul') {
-      const konsulLabel = patient.dpjp_utama && patient.dpjp_utama !== 'Neuro' ? `Konsul ${patient.dpjp_utama}` : 'Konsul'
-      if (!seenNames.has(konsulLabel.toLowerCase())) {
-        list.unshift({
-          nama: konsulLabel,
-          status: 'selesai',
-          kategori: 'Lainnya',
-        })
-      }
-    }
-
-    return list
-  }, [penunjangList, pdxRawItems, patient.peran_rawat, patient.dpjp_utama])
-
-  const pdxSummary = useMemo(() => {
-    if (diagnosticItems.length === 0) return ''
-    return diagnosticItems
-      .map((item) => {
-        if (item.hasil) return `${item.nama} (${item.hasil})`
-        return item.nama
-      })
-      .join(', ')
-  }, [diagnosticItems])
-
-  const hasPdx = diagnosticItems.length > 0
-  const canExpandPdx = diagnosticItems.length > 0
-
-
-
-  // PTx: Plan Terapi (Farmakologi, Non-Farmakologi, Monitoring, Edukasi)
-  const ptxItems = useMemo(() => allTherapies.filter((p) => p.kategori !== 'Diagnostik'), [allTherapies])
-  const activePtx = useMemo(() => ptxItems.filter((p) => p.status === 'aktif'), [ptxItems])
-  const ptxSummary = activePtx.length > 0
-    ? activePtx.map((p) => p.nama_item).join(', ')
-    : ptxItems.map((p) => p.nama_item).join(', ')
-  const hasPtx = ptxItems.length > 0
-  const canExpandPtx = ptxItems.length > 0
-  const hasCatatan = !!currentNote?.catatan?.trim()
-
-  const hasSoap = !!currentNote && (hasS || hasOFisik || hasOPenunjang || hasA || hasPdx || hasPtx || hasCatatan)
-
-  return (
-    <div>
-      <div className="flex items-center justify-between gap-1.5">
-        <div className="flex items-center gap-1.5 truncate min-w-0">
-          <span className="text-xs font-bold text-ink truncate">
-            {patient.title} <Masked value={patient.nama_depan || (patient as any).inisial} type="name" />
-          </span>
-          {cleanUsia && <span className="caption text-xs font-medium shrink-0">({cleanUsia} th)</span>}
-        </div>
-
-        <div className="flex items-center gap-1.5 shrink-0">
-          {currentNote?.tanggal && (
-            <span
-              className={`text-xs shrink-0 ${
-                currentNote.tanggal.startsWith(getLocalDateString())
-                  ? 'font-bold text-primary'
-                  : 'font-medium text-ink-muted/80'
-              }`}
-            >
-              {formatNoteDate(currentNote.tanggal)}
-            </span>
-          )}
-
-          {/* Tombol Dedicated Sensor / Biometrik di Kanan Atas Kartu */}
-          {handleToggleMask ? (
-            <button
-              type="button"
-              onClick={handleToggleMask}
-              onPointerDown={(e) => e.stopPropagation()}
-              aria-label={unmasked ? 'Sensor Identitas Pasien' : 'Tampilkan Identitas Pasien (Biometrik)'}
-              title={unmasked ? 'Sensor Identitas' : 'Buka Sensor Identitas (Biometrik)'}
-              className="flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-xl text-ink-muted/70 hover:text-primary hover:bg-primary/10 active:scale-90 transition-all -mr-1"
-            >
-              {unmasked ? <Eye size={15} /> : <EyeOff size={15} />}
-            </button>
-          ) : (
-            <div className="flex size-7 shrink-0 items-center justify-center text-primary/70 -mr-1">
-              {unmasked ? <Eye size={15} /> : <EyeOff size={15} />}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Baris di bawah nama sebelum SOAP: No. RM & Badge Leader (DPJP Utama) */}
-      {(patient.no_rm?.trim() || (patient.dpjp_utama && patient.dpjp_utama !== 'Neuro')) && (
-        <div className="mt-1 flex flex-wrap items-center gap-1.5 min-w-0">
-          {patient.no_rm?.trim() && (
-            <p className="caption text-xs text-ink-muted">
-              <Masked value={patient.no_rm} type="rm" />
-            </p>
-          )}
-          {patient.dpjp_utama && patient.dpjp_utama !== 'Neuro' && (
-            <span
-              title={`Leader: ${patient.dpjp_utama}`}
-              className="rounded-full bg-indigo-50 border border-indigo-200/80 px-2.5 py-0.5 text-xs font-bold text-indigo-700 inline-flex items-center"
-            >
-              {patient.dpjp_utama}
-            </span>
-          )}
-        </div>
-      )}
-
-      {/* Daftar Diagnosis bila belum ada catatan SOAP */}
-      {!hasSoap && (
-        diagnoses.length > 0 ? (
-          <div className="mt-2 space-y-1">
-            {diagnoses.map((dx, idx) => (
-              <div key={idx} className="flex items-start gap-1.5 text-xs leading-snug">
-                <span className="text-primary font-bold shrink-0 mt-0.5 leading-none">•</span>
-                <span
-                  className={`break-words whitespace-normal text-left ${
-                    idx === 0 ? 'font-bold text-primary' : 'font-medium text-ink'
-                  }`}
-                >
-                  {dx}
-                </span>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="group mt-1.5 flex items-center justify-between gap-1 text-xs font-bold text-primary py-0.5">
-            <span className="truncate">Lihat Rekam Medis</span>
-            <ChevronRight size={14} className="shrink-0 text-primary/70 group-hover:translate-x-0.5 transition-transform" />
-          </div>
-        )
-      )}
-
-      {/* Format SOAP Temuan Positif dengan Separator Line Antar Baris & Klik Area Toggle */}
-      {hasSoap && (
-        <div
-          onClick={(e) => e.stopPropagation()}
-          className="mt-2 pt-1 border-t border-slate-100 divide-y divide-slate-100 text-xs"
-        >
-          {/* S: Subjektif (Temuan positif ringkas) */}
-          {hasS && (
-            <div className="py-1.5 -mx-1 px-1">
-              <div className="flex items-start gap-1.5 min-w-0">
-                <span className="font-bold text-primary text-xs shrink-0 mt-0.5">S:</span>
-                <span className="text-ink font-medium break-words text-xs line-clamp-2 min-w-0 flex-1 leading-relaxed">
-                  {sSummary}
-                </span>
-              </div>
-            </div>
-          )}
-
-          {/* O: Objektif (Fisik + Penunjang sebagai sub-baris) */}
-          {(hasOFisik || hasOPenunjang) && (
-            <div className="py-1.5 -mx-1 px-1">
-              <div className="flex items-start gap-1.5">
-                <span className="font-bold text-primary text-xs shrink-0 mt-0.5">O:</span>
-                <div className="min-w-0 flex-1 space-y-0.5">
-                  {/* Sub-baris 1: Fisik */}
-                  {hasOFisik && (
-                    <div
-                      onClick={(e) => { if (canExpandOFisik) toggleSection('OFisik', e) }}
-                      className={`flex items-start justify-between gap-1.5 rounded-lg -mx-0.5 px-0.5 ${
-                        canExpandOFisik ? 'cursor-pointer hover:bg-slate-50/70 active:bg-slate-100/70' : ''
-                      }`}
-                    >
-                      <div className="min-w-0 flex-1">
-                        {!expandedSections['OFisik'] ? (
-                          <span className="text-ink font-medium break-words text-xs line-clamp-2 leading-relaxed">
-                            {oFisikSummary}
-                          </span>
-                        ) : (
-                          <p className="text-ink font-medium break-words leading-relaxed whitespace-pre-line text-xs">
-                            {oPemfis}
-                          </p>
-                        )}
-                      </div>
-                      {canExpandOFisik && (
-                        <button type="button" onClick={(e) => toggleSection('OFisik', e)}
-                          className="text-ink-muted hover:text-ink p-0.5 shrink-0 cursor-pointer mt-0.5" aria-label="Toggle O Fisik">
-                          <ChevronDown size={14} className={`transition-transform duration-200 ${expandedSections['OFisik'] ? 'rotate-180' : 'rotate-0'}`} />
-                        </button>
-                      )}
-                    </div>
-                  )}
-                  {/* Sub-baris 2: Penunjang */}
-                  {hasOPenunjang && (
-                    <div
-                      onClick={(e) => { if (canExpandOPenunjang) toggleSection('OPenunjang', e) }}
-                      className={`flex items-start justify-between gap-1.5 rounded-lg -mx-0.5 px-0.5 ${
-                        canExpandOPenunjang ? 'cursor-pointer hover:bg-slate-50/70 active:bg-slate-100/70' : ''
-                      }`}
-                    >
-                      <div className="min-w-0 flex-1">
-                        {!expandedSections['OPenunjang'] ? (
-                          <span className="text-ink font-medium break-words text-xs line-clamp-2 leading-relaxed">
-                            {oPenunjangSummary}
-                          </span>
-                        ) : (
-                          <p className="text-ink font-medium break-words leading-relaxed whitespace-pre-line text-xs">
-                            {oPenunjang}
-                          </p>
-                        )}
-                      </div>
-                      {canExpandOPenunjang && (
-                        <button type="button" onClick={(e) => toggleSection('OPenunjang', e)}
-                          className="text-ink-muted hover:text-ink p-0.5 shrink-0 cursor-pointer mt-0.5" aria-label="Toggle O Penunjang">
-                          <ChevronDown size={14} className={`transition-transform duration-200 ${expandedSections['OPenunjang'] ? 'rotate-180' : 'rotate-0'}`} />
-                        </button>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* A: Assessment */}
-          {hasA && (
-            <div
-              onClick={(e) => {
-                if (canExpandA) toggleSection('A', e)
-              }}
-              className={`py-1.5 -mx-1 px-1 rounded-xl transition-colors ${
-                canExpandA ? 'cursor-pointer hover:bg-slate-50/70 active:bg-slate-100/70' : ''
-              }`}
-            >
-              <div className="flex items-start justify-between gap-1.5">
-                <div className="flex items-start gap-1.5 min-w-0 flex-1">
-                  <span className="font-bold text-primary text-xs shrink-0 mt-0.5">A:</span>
-                  <div className="min-w-0 flex-1">
-                    {!expandedSections['A'] ? (
-                      <span className="text-ink font-medium break-words text-xs line-clamp-2">
-                        {aSummary}
-                      </span>
-                    ) : (
-                      <div className="space-y-1 text-xs pt-1">
-                        {diagnoses.map((dx, idx) => (
-                          <div key={idx} className="flex items-start gap-1.5 text-ink font-medium">
-                            <span className="text-primary font-bold shrink-0 mt-0.5">•</span>
-                            <span className="break-words">{dx}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
-                {canExpandA && (
-                  <button
-                    type="button"
-                    onClick={(e) => toggleSection('A', e)}
-                    className="text-ink-muted hover:text-ink p-0.5 shrink-0 cursor-pointer mt-0.5"
-                    aria-label="Toggle detail A"
-                    title={expandedSections['A'] ? 'Tutup detail' : 'Buka detail'}
-                  >
-                    <ChevronDown
-                      size={14}
-                      className={`transition-transform duration-200 ${
-                        expandedSections['A'] ? 'rotate-180' : 'rotate-0'
-                      }`}
-                    />
-                  </button>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* P: Plan (PDx + PTx sebagai sub-baris) */}
-          {(hasPdx || hasPtx) && (
-            <div className="py-1.5 -mx-1 px-1">
-              <div className="flex items-start gap-1.5">
-                <span className="font-bold text-primary text-xs shrink-0 mt-0.5">P:</span>
-                <div className="min-w-0 flex-1 space-y-2">
-                  {/* Sub-baris 1: PDx */}
-                  {hasPdx && (
-                    <div
-                      onClick={(e) => { if (canExpandPdx) toggleSection('PDx', e) }}
-                      className={`flex items-start justify-between gap-1.5 rounded-lg -mx-0.5 px-0.5 ${
-                        canExpandPdx ? 'cursor-pointer hover:bg-slate-50/70 active:bg-slate-100/70' : ''
-                      }`}
-                    >
-                      <div className="min-w-0 flex-1">
-                        {!expandedSections['PDx'] ? (
-                          <span className="text-ink font-medium break-words text-xs line-clamp-2">
-                            {pdxSummary}
-                          </span>
-                        ) : (
-                          <div className="space-y-1 text-xs">
-                            {diagnosticItems.map((item, idx) => (
-                              <div key={idx} className="flex items-start gap-1.5 text-ink font-medium">
-                                <span className="text-primary font-bold shrink-0 mt-0.5">•</span>
-                                <span className="break-words">
-                                   <b>{item.nama}</b>{item.hasil ? ` (${item.hasil})` : ''}
-                                </span>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                      {canExpandPdx && (
-                        <button type="button" onClick={(e) => toggleSection('PDx', e)}
-                          className="text-ink-muted hover:text-ink p-0.5 shrink-0 cursor-pointer mt-0.5" aria-label="Toggle PDx">
-                          <ChevronDown size={14} className={`transition-transform duration-200 ${expandedSections['PDx'] ? 'rotate-180' : 'rotate-0'}`} />
-                        </button>
-                      )}
-                    </div>
-                  )}
-                  {/* Sub-baris 2: PTx */}
-                  {hasPtx && (
-                    <div
-                      onClick={(e) => { if (canExpandPtx) toggleSection('PTx', e) }}
-                      className={`flex items-start justify-between gap-1.5 rounded-lg -mx-0.5 px-0.5 ${
-                        hasPdx ? 'pt-2 border-t border-slate-100/90' : ''
-                      } ${
-                        canExpandPtx ? 'cursor-pointer hover:bg-slate-50/70 active:bg-slate-100/70' : ''
-                      }`}
-                    >
-                      <div className="min-w-0 flex-1">
-                        {!expandedSections['PTx'] ? (
-                          <span className="text-ink font-medium break-words text-xs line-clamp-5 leading-relaxed">
-                            {ptxSummary}
-                          </span>
-                        ) : (
-                          <div className="space-y-1 text-xs">
-                            {ptxItems.map((item, idx) => (
-                              <div key={idx} className="flex items-start gap-1.5 text-ink font-medium">
-                                <span className="text-primary font-bold shrink-0 mt-0.5">•</span>
-                                <span className="break-words">
-                                  <b>{item.nama_item}</b> {item.dosis_keterangan}
-                                </span>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                      {canExpandPtx && (
-                        <button type="button" onClick={(e) => toggleSection('PTx', e)}
-                          className="text-ink-muted hover:text-ink p-0.5 shrink-0 cursor-pointer mt-0.5" aria-label="Toggle PTx">
-                          <ChevronDown size={14} className={`transition-transform duration-200 ${expandedSections['PTx'] ? 'rotate-180' : 'rotate-0'}`} />
-                        </button>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Catatan Bebas di Bawah SOAP (rencana KRS, butuh extra, konsul, dll) */}
-          {hasCatatan && (
-            <div className="py-1 -mx-0.5 px-0.5">
-              <div className="flex items-start gap-1.5 text-xs">
-                <AlertTriangle size={13} className="text-amber-500 fill-amber-400/20 shrink-0 mt-0.5" />
-                <span className="text-amber-900 font-semibold break-words leading-relaxed min-w-0 flex-1">
-                  {currentNote.catatan}
-                </span>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Badges & Tombol Visite di Kanan Bawah */}
-      <div className="mt-2.5 flex items-center justify-between gap-2">
-        <div className="flex flex-wrap items-center gap-1.5 min-w-0">
-          <span className="rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-bold text-primary">
-            {patient.jaminan}
-          </span>
-          {patient.tgl_onset && (
-            <span className="rounded-full bg-surface px-2.5 py-0.5 text-xs font-semibold text-ink-muted">
-              OH-{hariKe(patient.tgl_onset)}
-            </span>
-          )}
-          <span className="rounded-full bg-amber-50 border border-amber-200/60 px-2.5 py-0.5 text-xs font-bold text-amber-700">
-            P-{hariKe(patient.tgl_mrs)}
-          </span>
-        </div>
-
-        {onOpenVisite ? (
-          <button
-            type="button"
-            onClick={onOpenVisite}
-            onPointerDown={(e) => e.stopPropagation()}
-            title={isVisitedToday ? 'Sudah divisite hari ini (Klik untuk edit)' : 'Belum divisite hari ini (Klik untuk catat visite)'}
-            className={`shrink-0 h-7.5 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center cursor-pointer select-none ${
-              isVisitedToday
-                ? 'bg-slate-100 hover:bg-slate-200/90 text-slate-500 hover:text-slate-700 border border-slate-200/90 shadow-2xs'
-                : 'bg-gradient-to-r from-primary to-primary-deep text-white shadow-sm shadow-primary/25 hover:shadow-md hover:shadow-primary/35 hover:brightness-105 animate-flicker-blue'
-            }`}
-          >
-            {isVisitedToday ? (
-              <span className="flex items-center gap-1 text-slate-600">
-                Visite <Check size={13} className="stroke-[2.5] text-emerald-600" />
-              </span>
-            ) : (
-              <span>Visite</span>
-            )}
-          </button>
-        ) : (
-          <span
-            className={`shrink-0 h-7.5 px-3 rounded-xl text-xs font-bold flex items-center justify-center select-none ${
-              isVisitedToday
-                ? 'bg-slate-100 text-slate-400 border border-slate-200/60'
-                : 'bg-gradient-to-r from-primary to-primary-deep text-white shadow-sm shadow-primary/25 opacity-80'
-            }`}
-          >
-            {isVisitedToday ? (
-              <span className="flex items-center gap-1">
-                Visite <Check size={13} className="stroke-[2.5]" />
-              </span>
-            ) : (
-              <span>Visite</span>
-            )}
-          </span>
-        )}
-      </div>
-    </div>
-  )
-}
-
-function PatientCard({
-  patient,
-  latestNote,
-  latestNoteWithS,
-  isAnyDragging,
-  isHighlighted,
-  onOpenVisite,
-  ward,
-  hospital,
-}: {
-  patient: Patient
-  latestNote?: ProgressNote
-  latestNoteWithS?: ProgressNote
-  isAnyDragging?: boolean
-  isHighlighted?: boolean
-  onOpenVisite?: (patient: Patient, latestNote?: ProgressNote) => void
-  ward?: Ward
-  hospital?: Hospital
-}) {
-  const {
-    attributes,
-    listeners,
-    setNodeRef,
-    transform,
-    transition,
-    isDragging,
-  } = useSortable({
-    id: `patient-${patient.id}`,
-  })
-  const navigate = useNavigate()
-  const { unmasked, setUnmasked } = useUi()
-  const todayStr = getLocalDateString()
-  const isVisitedToday = latestNote?.tanggal === todayStr
-
-  const handleToggleMask = async (e: React.MouseEvent) => {
-    e.stopPropagation()
-    if (unmasked) {
-      setUnmasked(false)
-    } else {
-      const ok = await verifyBiometric()
-      if (ok) setUnmasked(true)
-    }
-  }
-
-  const handleOpenVisiteClick = (e: React.MouseEvent) => {
-    e.stopPropagation()
-    onOpenVisite?.(patient, latestNote)
-  }
-
-  const style: React.CSSProperties = {
-    transform: CSS.Translate.toString(transform),
-    transition: isDragging ? undefined : transition,
-  }
-
-  return (
-    <div
-      id={`patient-card-${patient.id}`}
-      ref={setNodeRef}
-      style={style}
-      {...listeners}
-      {...attributes}
-      data-no-swipe="true"
-      onClick={() => {
-        if (!isDragging && !isAnyDragging) {
-          sessionStorage.setItem('doctoid_dasbor_scroll_y', String(window.scrollY))
-          sessionStorage.setItem('doctoid_last_patient_id', String(patient.id))
-          navigate(`/rekammedis/${patient.id}`, {
-            state: {
-              patient,
-              latestNote,
-              latestNoteWithS,
-              ward,
-              hospital,
-            },
-          })
-        }
-      }}
-      className={`group rounded-2xl p-3.5 sm:p-4 select-none touch-manipulation transition-colors duration-150 ${
-        isHighlighted
-          ? 'ring-2 ring-primary/80 shadow-md shadow-primary/15 bg-primary/[0.04]'
-          : ''
-      } ${
-        isDragging
-          ? 'opacity-25 grayscale-[30%] border-2 border-dashed border-primary/50 bg-primary/5 shadow-none pointer-events-none'
-          : isVisitedToday
-          ? 'bg-slate-50/80 border border-slate-200/80 opacity-70 hover:opacity-100 hover:border-primary/40 cursor-pointer shadow-2xs hover:shadow-md'
-          : 'glass-card border border-white/80 cursor-pointer hover:border-primary/40 shadow-xs hover:shadow-md'
-      }`}
-    >
-      <PatientCardContent
-        patient={patient}
-        latestNote={latestNote}
-        latestNoteWithS={latestNoteWithS}
-        unmasked={unmasked}
-        isVisitedToday={isVisitedToday}
-        onOpenVisite={handleOpenVisiteClick}
-        handleToggleMask={handleToggleMask}
-      />
-    </div>
-  )
-}
-
-function WardColumn({
-  ward,
-  hospital,
-  patients,
-  latestNoteMap,
-  latestNoteWithSMap,
-  isAnyDragging,
-  activePatient,
-  lastMovedWardId,
-  highlightPatientId,
-  onOpenVisite,
-}: {
-  ward: Ward
-  hospital?: Hospital
-  patients: Patient[]
-  latestNoteMap?: Map<number, ProgressNote>
-  latestNoteWithSMap?: Map<number, ProgressNote>
-  isAnyDragging?: boolean
-  activePatient?: Patient | null
-  lastMovedWardId?: number | null
-  highlightPatientId?: number | null
-  onOpenVisite?: (patient: Patient, latestNote?: ProgressNote) => void
-}) {
-  const { setNodeRef, isOver } = useDroppable({ id: `ward-${ward.id}` })
-  const { collapsedWards, toggleCollapsedWard, expandWard } = useUi()
-
-  // Otomatis buka ruangan bila ada pasien yang baru saja dipindahkan ke ruangan ini
-  useEffect(() => {
-    if (lastMovedWardId === ward.id && ward.id !== undefined) {
-      expandWard(ward.id)
-    }
-  }, [lastMovedWardId, ward.id, expandWard])
-
-  const collapsed =
-    ward.id !== undefined && collapsedWards[ward.id] !== undefined
-      ? collapsedWards[ward.id]
-      : patients.length === 0
-
-  const todayStr = getLocalDateString()
-  const unvisitedCount = useMemo(() => {
-    return patients.filter((p) => {
-      const note = latestNoteMap?.get(p.id!)
-      return note?.tanggal !== todayStr
-    }).length
-  }, [patients, latestNoteMap, todayStr])
-  const hasUnvisited = unvisitedCount > 0
-
-  const isOverDifferentWard = isOver && !!activePatient && activePatient.lokasi_sekarang !== ward.id
-
-  return (
-    <div
-      ref={setNodeRef}
-      className={`rounded-2xl border-2 transition-all duration-150 p-1.5 ${
-        isOverDifferentWard
-          ? 'border-primary/60 bg-primary/8 shadow-md ring-2 ring-primary/25'
-          : 'border-transparent bg-transparent'
-      }`}
-    >
-      <button
-        type="button"
-        onClick={() => ward.id !== undefined && toggleCollapsedWard(ward.id, collapsed)}
-        className="w-full mb-1.5 flex items-center justify-between px-1 cursor-pointer select-none group text-left"
-        aria-label={`Sembunyikan atau tampilkan ruangan ${ward.nama}`}
-      >
-        <div className="flex items-center gap-2 min-w-0">
-          <span
-            className="size-2.5 rounded-full ring-2 ring-white shadow-xs shrink-0"
-            style={{ backgroundColor: ward.kode_warna }}
-          />
-          <h3 className="text-xs font-bold text-ink tracking-tight truncate group-hover:text-primary transition-colors">
-            {ward.nama}
-          </h3>
-        </div>
-        <div className="flex items-center gap-1.5 shrink-0">
-          <span
-            className={`rounded-full px-2.5 py-0.5 text-[11px] font-bold shadow-2xs min-w-[1.4rem] text-center transition-all ${
-              isOverDifferentWard
-                ? 'bg-primary-deep text-white font-extrabold ring-2 ring-primary/40'
-                : patients.length > 0
-                ? 'bg-primary text-white shadow-xs'
-                : 'bg-slate-100 border border-slate-200/60 text-ink-muted'
-            }`}
-            title={
-              hasUnvisited
-                ? `${unvisitedCount} dari ${patients.length} pasien belum divisite hari ini`
-                : patients.length > 0
-                ? `Semua ${patients.length} pasien sudah divisite hari ini`
-                : 'Belum ada pasien'
-            }
-          >
-            {patients.length}
-          </span>
-          <ChevronDown
-            size={15}
-            className={`text-ink-muted group-hover:text-ink transition-transform duration-200 ${
-              collapsed ? 'rotate-180' : 'rotate-0'
-            }`}
-          />
-        </div>
-      </button>
-
-      {!collapsed && (
-        <SortableContext
-          items={patients.map((p) => `patient-${p.id}`)}
-          strategy={verticalListSortingStrategy}
-        >
-          <div className="space-y-2.5">
-            {patients.map((p) => (
-              <PatientCard
-                key={p.id}
-                patient={p}
-                latestNote={latestNoteMap?.get(p.id!)}
-                latestNoteWithS={latestNoteWithSMap?.get(p.id!)}
-                isAnyDragging={isAnyDragging}
-                isHighlighted={highlightPatientId === p.id}
-                onOpenVisite={onOpenVisite}
-                ward={ward}
-                hospital={hospital}
-              />
-            ))}
-
-            {!patients.length && (
-              <div
-                className={`rounded-2xl border-2 border-dashed py-3.5 px-4 text-center text-xs font-medium transition-all ${
-                  isOverDifferentWard
-                    ? 'border-primary bg-primary/10 text-primary font-bold animate-pulse'
-                    : 'border-slate-300/80 bg-white/40 text-ink-muted/70'
-                }`}
-              >
-                {isOverDifferentWard ? `Lepas untuk menempatkan di ${ward.nama}` : 'Belum ada pasien di ruangan ini'}
-              </div>
-            )}
-
-            {patients.length > 0 && isOverDifferentWard && (
-              <div className="rounded-xl border-2 border-dashed border-primary bg-primary/10 py-2.5 text-center text-xs font-bold text-primary animate-pulse">
-                Pindahkan ke {ward.nama}
-              </div>
-            )}
-          </div>
-        </SortableContext>
-      )}
-
-      {collapsed && isOverDifferentWard && (
-        <div className="rounded-xl border-2 border-dashed border-primary bg-primary/15 py-3 text-center text-xs font-bold text-primary animate-pulse">
-          Pindahkan ke {ward.nama} (Akan dibuka otomatis)
-        </div>
-      )}
-    </div>
-  )
+  terapi: TerapiItem
+  tipe: 'tapering' | 'durasi'
+  namaObat: string
+  dosis: string
+  hari: number
+  targetHari?: number
+  isUrgent: boolean
+  pesan: string
 }
 
 export default function Dasbor() {
   const navigate = useNavigate()
-  const {
-    user,
-    unmasked,
-    setUnmasked,
-    collapsedRs,
-    toggleCollapsedRs,
-    expandHospital,
-    expandWard,
-  } = useUi()
-  const [filterRs, setFilterRs] = useState<number>(() => {
+  const { user, unmasked, setUnmasked } = useUi()
+
+  // State filter & preferensi
+  const [filterHospitalId, setFilterHospitalId] = useState<number>(() => {
     try {
       const s = sessionStorage.getItem('doctoid_dasbor_filter_rs')
       return s ? parseInt(s, 10) : 0
@@ -951,15 +59,13 @@ export default function Dasbor() {
       return 0
     }
   })
-  const [toast, setToast] = useState('')
-  const [activePatient, setActivePatient] = useState<Patient | null>(null)
-  const [optimisticOrder, setOptimisticOrder] = useState<Record<number, number> | null>(null)
-  const [optimisticWard, setOptimisticWard] = useState<Record<number, number> | null>(null)
-  const [lastMovedWardId, setLastMovedWardId] = useState<number | null>(null)
-  const [addWardHospital, setAddWardHospital] = useState<Hospital | null>(null)
-  useBodyScrollLock(Boolean(addWardHospital))
-  const [newWardInput, setNewWardInput] = useState('')
-  const [visiteTarget, setVisiteTarget] = useState<{ patient: Patient; latestNote?: ProgressNote } | null>(null)
+  const [timeRange, setTimeRange] = useState<'7d' | '14d' | '30d'>('7d')
+  const [hideIncome, setHideIncome] = useState<boolean>(() => {
+    return localStorage.getItem('doctoid_hide_income') === 'true'
+  })
+  const [showPoliModal, setShowPoliModal] = useState(false)
+  const [selectedPoliForEdit, setSelectedPoliForEdit] = useState<PoliLog | undefined>(undefined)
+
   const filterScrollRef = useRef<HTMLDivElement>(null)
 
   const centerElement = (el: HTMLElement) => {
@@ -974,19 +80,11 @@ export default function Dasbor() {
   }
 
   const handleFilterClick = (id: number, e?: React.MouseEvent<HTMLButtonElement>) => {
-    setFilterRs(id)
+    setFilterHospitalId(id)
     sessionStorage.setItem('doctoid_dasbor_filter_rs', String(id))
     if (e?.currentTarget) {
       centerElement(e.currentTarget)
     }
-  }
-
-  const toggleRs = (id: number, currentCollapsed: boolean) => {
-    toggleCollapsedRs(id, currentCollapsed)
-  }
-  const notify = (m: string) => {
-    setToast(m)
-    setTimeout(() => setToast(''), 4000)
   }
 
   const handleToggleMask = async () => {
@@ -998,376 +96,348 @@ export default function Dasbor() {
     }
   }
 
-  const hospitals = useLiveQuery(
-    async () => {
-      const res = (await db.hospitals.toArray()).sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
-      cacheHospitals(res)
-      return res
-    },
-    [],
-    appCache.hospitals
-  )
+  const toggleHideIncome = () => {
+    const next = !hideIncome
+    setHideIncome(next)
+    localStorage.setItem('doctoid_hide_income', String(next))
+  }
 
-  useEffect(() => {
-    if (!filterScrollRef.current) return
-    const activeEl = filterScrollRef.current.querySelector<HTMLElement>('[data-active="true"]')
-    if (activeEl) {
-      const timer = setTimeout(() => {
-        centerElement(activeEl)
-      }, 50)
-      return () => clearTimeout(timer)
-    }
-  }, [filterRs, hospitals?.length])
+  // Live queries dari IndexedDB (dengan default array konstan agar referensi dependensi stabil)
+  const hospitals = useLiveQuery(() => db.hospitals.toArray().then(arr => arr.sort((a, b) => (a.order ?? 0) - (b.order ?? 0))), [], [] as Hospital[])
+  const activePatients = useLiveQuery(() => db.patients.where('status_rawat').equals('aktif').toArray(), [], [] as Patient[])
+  const allNotes = useLiveQuery(() => db.progressNotes.toArray(), [], [] as ProgressNote[])
+  const poliLogs = useLiveQuery(() => db.poliLogs.toArray(), [], [] as PoliLog[])
 
-  const wards = useLiveQuery(
-    async () => {
-      const res = (await db.wards.toArray()).sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
-      cacheWards(res)
-      return res
-    },
-    [],
-    appCache.wards
-  )
+  const todayStr = getLocalDateString()
 
-  const aktif = useLiveQuery(
-    async () => {
-      const list = await db.patients.where('status_rawat').equals('aktif').toArray()
-      const res = list.sort((a, b) => {
-        const orderA = a.order ?? Number.MAX_SAFE_INTEGER
-        const orderB = b.order ?? Number.MAX_SAFE_INTEGER
-        if (orderA !== orderB) return orderA - orderB
-        return (a.id ?? 0) - (b.id ?? 0)
-      })
-      cachePatients(res)
-      return res
-    },
-    [],
-    appCache.aktifPatients
-  )
+  // Filter faskes untuk pasien & log
+  const filteredActivePatients = useMemo(() => {
+    if (!filterHospitalId) return activePatients
+    return activePatients.filter(p => p.hospital_id === filterHospitalId)
+  }, [activePatients, filterHospitalId])
 
-  const sortedAktif = useMemo(() => {
-    if (!aktif) return []
-    return [...aktif]
-      .map((p) => {
-        const optWard = optimisticWard?.[p.id!]
-        const optOrder = optimisticOrder?.[p.id!]
-        if (optWard !== undefined || optOrder !== undefined) {
-          return {
-            ...p,
-            ...(optWard !== undefined ? { lokasi_sekarang: optWard } : {}),
-            ...(optOrder !== undefined ? { order: optOrder } : {}),
-          }
-        }
-        return p
-      })
-      .sort((a, b) => {
-        const orderA = a.order ?? Number.MAX_SAFE_INTEGER
-        const orderB = b.order ?? Number.MAX_SAFE_INTEGER
-        if (orderA !== orderB) return orderA - orderB
-        return (a.id ?? 0) - (b.id ?? 0)
-      })
-  }, [aktif, optimisticOrder, optimisticWard])
+  const filteredPoliLogs = useMemo(() => {
+    if (!filterHospitalId) return poliLogs
+    return poliLogs.filter(p => p.hospital_id === filterHospitalId)
+  }, [poliLogs, filterHospitalId])
 
-  const allNotes = useLiveQuery(
-    async () => {
-      const res = await db.progressNotes.toArray()
-      cacheNotes(res)
-      return res
-    },
-    [],
-    appCache.allNotes
-  )
+  // Beban Kasus PieChart per Faskes
+  const hospitalStats = useMemo(() => {
+    return hospitals.map((h) => ({
+      id: h.id!,
+      name: h.nama,
+      value: activePatients.filter((p) => p.hospital_id === h.id).length,
+      fill: h.kode_warna || '#3B82F6',
+    }))
+  }, [hospitals, activePatients])
 
-  // Restorasi dan pencatatan posisi scroll
-  const [highlightPatientId, setHighlightPatientId] = useState<number | null>(null)
-  const hasRestoredScroll = useRef(false)
-  const isRestoringScroll = useRef(false)
+  const chartSlices = useMemo(() => hospitalStats.filter((d) => d.value > 0), [hospitalStats])
 
-  // Rekam posisi scroll Dasbor saat user scrolling
-  useEffect(() => {
-    let timeoutId: any
-    const handleScroll = () => {
-      clearTimeout(timeoutId)
-      timeoutId = setTimeout(() => {
-        if (isRestoringScroll.current) return
-        sessionStorage.setItem('doctoid_dasbor_scroll_y', String(window.scrollY))
-      }, 100)
-    }
-
-    window.addEventListener('scroll', handleScroll, { passive: true })
-    return () => {
-      clearTimeout(timeoutId)
-      window.removeEventListener('scroll', handleScroll)
-      if (!isRestoringScroll.current && window.scrollY > 0) {
-        sessionStorage.setItem('doctoid_dasbor_scroll_y', String(window.scrollY))
+  // Map progress notes per pasien (ambil note terakhir untuk cek terapi & status visite hari ini)
+  const patientLatestNoteMap = useMemo(() => {
+    const map = new Map<number, ProgressNote>()
+    for (const note of allNotes) {
+      const existing = map.get(note.patient_id)
+      if (!existing || note.tanggal > existing.tanggal) {
+        map.set(note.patient_id, note)
       }
     }
-  }, [])
-
-  // Restorasi posisi scroll & highlight kartu pasien saat kembali ke Dasbor (sebelum paint agar bebas kedip)
-  useLayoutEffect(() => {
-    if (hasRestoredScroll.current) return
-    if (!aktif || !wards || !hospitals) return
-
-    const savedYStr = sessionStorage.getItem('doctoid_dasbor_scroll_y')
-    const savedPatientId = sessionStorage.getItem('doctoid_last_patient_id')
-    const savedY = savedYStr ? parseInt(savedYStr, 10) : 0
-
-    if (!savedY && !savedPatientId) {
-      hasRestoredScroll.current = true
-      return
-    }
-
-    // Pastikan faskes & ruangan pasien target dalam keadaan terbuka (expanded)
-    if (savedPatientId) {
-      const pId = parseInt(savedPatientId, 10)
-      const targetP = aktif.find((p) => p.id === pId)
-      if (targetP) {
-        if (targetP.hospital_id) expandHospital(targetP.hospital_id)
-        if (targetP.lokasi_sekarang) expandWard(targetP.lokasi_sekarang)
-      }
-    }
-
-    isRestoringScroll.current = true
-
-    if (savedY > 0) {
-      window.scrollTo({ top: savedY, behavior: 'instant' })
-    }
-
-    if (savedPatientId) {
-      const pId = parseInt(savedPatientId, 10)
-      setHighlightPatientId(pId)
-      setTimeout(() => {
-        setHighlightPatientId(null)
-        sessionStorage.removeItem('doctoid_last_patient_id')
-      }, 2500)
-    }
-
-    hasRestoredScroll.current = true
-    setTimeout(() => {
-      isRestoringScroll.current = false
-    }, 100)
-  }, [aktif, wards, hospitals, expandHospital, expandWard])
-
-  // Koreksi catatan awal pasien: jika tgl_mrs di masa lalu, catatan awal harus bertanggal tgl_mrs (bukan hari ini)
-  useEffect(() => {
-    const fixLegacyInitialNoteDates = async () => {
-      try {
-        const todayStr = getLocalDateString()
-        const patients = await db.patients.toArray()
-        for (const p of patients) {
-          if (!p.id || !p.tgl_mrs || p.tgl_mrs >= todayStr) continue
-          const notes = await db.progressNotes.where('patient_id').equals(p.id).toArray()
-          // Jika pasien hanya memiliki 1 catatan awal dan tanggalnya tersimpan hari ini (padahal MRS-nya di masa lalu)
-          if (notes.length === 1 && notes[0].tanggal === todayStr) {
-            await db.progressNotes.update(notes[0].id!, { tanggal: p.tgl_mrs })
-          }
-        }
-      } catch {
-        // ignore
-      }
-    }
-    fixLegacyInitialNoteDates()
-  }, [])
-
-  const { latestNoteMap, latestNoteWithSMap } = useMemo(() => {
-    const latestMap = new Map<number, ProgressNote>()
-    const withSMap = new Map<number, ProgressNote>()
-    if (!allNotes) return { latestNoteMap: latestMap, latestNoteWithSMap: withSMap }
-
-    const sorted = [...allNotes].sort((a, b) => {
-      const tA = a.tanggal ? new Date(a.tanggal).getTime() : 0
-      const tB = b.tanggal ? new Date(b.tanggal).getTime() : 0
-      if (tA !== tB) return tA - tB
-      return (a.id ?? 0) - (b.id ?? 0)
-    })
-
-    for (const note of sorted) {
-      latestMap.set(note.patient_id, note)
-      if (cleanSubjective(note.S)) {
-        withSMap.set(note.patient_id, note)
-      }
-    }
-
-    return { latestNoteMap: latestMap, latestNoteWithSMap: withSMap }
+    return map
   }, [allNotes])
 
-  const sensors = useSensors(
-    useSensor(MouseSensor, {
-      activationConstraint: {
-        distance: 8,
-      },
-    }),
-    useSensor(TouchSensor, {
-      activationConstraint: {
-        delay: 300, // Durasi long-press 300ms untuk sortir kartu secara responsif & aman saat scrolling
-        tolerance: 6, // Toleransi 6px pergeseran jari
-      },
-    }),
-  )
-
-  const onDragStart = (e: DragStartEvent) => {
-    const pId = getPatientId(e.active.id)
-    if (!pId) return
-    const found = (sortedAktif ?? []).find((p) => p.id === pId)
-    if (found) {
-      setActivePatient(found)
+  // Pasien rawat inap yang sudah divisite hari ini
+  const visitedTodayPatientIds = useMemo(() => {
+    const set = new Set<number>()
+    for (const note of allNotes) {
+      if (note.tanggal && note.tanggal.startsWith(todayStr)) {
+        set.add(note.patient_id)
+      }
     }
-    triggerHaptic('start')
-  }
+    return set
+  }, [allNotes, todayStr])
 
-  const onDragEnd = async (e: DragEndEvent) => {
-    const { active, over } = e
-    setActivePatient(null)
+  const visitedCountToday = filteredActivePatients.filter(p => visitedTodayPatientIds.has(p.id!)).length
 
-    if (!over || !active.id) {
-      return
-    }
+  // Pasien poli hari ini
+  const poliTodayLogs = useMemo(() => {
+    return filteredPoliLogs.filter(p => p.tanggal === todayStr)
+  }, [filteredPoliLogs, todayStr])
 
-    const activePatientId = getPatientId(active.id)
-    if (!activePatientId) return
+  const poliTodayCount = poliTodayLogs.reduce((acc, curr) => acc + (curr.jumlah_pasien || 0), 0)
 
-    const currentPatient = (sortedAktif ?? []).find((p) => p.id === activePatientId)
-    if (!currentPatient) return
+  // Total pasien dilayani hari ini (Inap Visited + Poli)
+  const totalPasienToday = visitedCountToday + poliTodayCount
 
-    const sourceWardId = currentPatient.lokasi_sekarang
-    const overPatientId = getPatientId(over.id)
-    const overWardId = getWardId(over.id)
+  // ==================== ALERTS: TAPERING & DURASI OBAT ====================
+  const drugAlerts = useMemo<DrugAlertItem[]>(() => {
+    const alerts: DrugAlertItem[] = []
 
-    // CASE 1: Dilepas di atas kartu pasien lain
-    if (overPatientId) {
-      if (overPatientId === activePatientId) return
+    for (const p of filteredActivePatients) {
+      const note = patientLatestNoteMap.get(p.id!)
+      if (!note || !note.P) continue
 
-      const overPatient = (sortedAktif ?? []).find((p) => p.id === overPatientId)
-      if (!overPatient) return
+      const activeTherapies = note.P.filter(item => item.status === 'aktif' && item.kategori === 'Farmakologi')
 
-      const targetWardId = overPatient.lokasi_sekarang
+      for (const t of activeTherapies) {
+        const tglMulai = t.tracking?.tgl_mulai || t.tgl_mulai || p.tgl_mrs || todayStr
+        const dayCount = hariKe(tglMulai)
 
-      if (sourceWardId === targetWardId) {
-        // --- 1A: Sortir urutan dalam ruangan yang sama (Urutan Bed) ---
-        const wardPatients = (sortedAktif ?? []).filter((p) => p.lokasi_sekarang === sourceWardId)
-        const oldIndex = wardPatients.findIndex((p) => p.id === activePatientId)
-        const newIndex = wardPatients.findIndex((p) => p.id === overPatientId)
-
-        if (oldIndex !== -1 && newIndex !== -1 && oldIndex !== newIndex) {
-          triggerHaptic('drop')
-          const reordered = arrayMove(wardPatients, oldIndex, newIndex)
-
-          const newOrderMap: Record<number, number> = {}
-          reordered.forEach((p, idx) => {
-            newOrderMap[p.id!] = idx + 1
-          })
-          setOptimisticOrder((prev) => ({ ...(prev || {}), ...newOrderMap }))
-
-          await db.transaction('rw', db.patients, async () => {
-            for (let i = 0; i < reordered.length; i++) {
-              await db.patients.update(reordered[i].id!, { order: i + 1 })
-            }
-          })
-
-          notify('Urutan pasien berhasil diubah')
-        }
-      } else {
-        // --- 1B: Pindahkan ke ruangan lain dan sisipkan di posisi pasien target ---
-        triggerHaptic('drop')
-        const targetWard = (wards ?? []).find((w) => w.id === targetWardId)
-        const targetHospital = targetWard
-          ? (hospitals ?? []).find((h) => h.id === targetWard.hospital_id)
-          : null
-
-        setLastMovedWardId(targetWardId)
-        expandWard(targetWardId)
-        if (targetHospital) {
-          expandHospital(targetHospital.id!)
-        }
-
-        const targetWardPatients = (sortedAktif ?? []).filter(
-          (p) => p.lokasi_sekarang === targetWardId && p.id !== activePatientId
-        )
-        const overIndex = targetWardPatients.findIndex((p) => p.id === overPatientId)
-        const insertIndex = overIndex === -1 ? targetWardPatients.length : overIndex
-
-        const updatedTargetList = [...targetWardPatients]
-        updatedTargetList.splice(insertIndex, 0, currentPatient)
-
-        const newOrderMap: Record<number, number> = {}
-        updatedTargetList.forEach((p, idx) => {
-          newOrderMap[p.id!] = idx + 1
-        })
-        setOptimisticOrder((prev) => ({ ...(prev || {}), ...newOrderMap }))
-        setOptimisticWard((prev) => ({ ...(prev || {}), [activePatientId]: targetWardId }))
-
-        await db.transaction('rw', db.patients, async () => {
-          await db.patients.update(activePatientId, {
-            lokasi_sekarang: targetWardId,
-            ...(targetHospital ? { hospital_id: targetHospital.id } : {}),
-          })
-          for (let i = 0; i < updatedTargetList.length; i++) {
-            await db.patients.update(updatedTargetList[i].id!, { order: i + 1 })
+        // 1. Cek explicit tracking
+        if (t.tracking) {
+          if (t.tracking.tipe === 'tapering') {
+            const isUrgent = dayCount >= 3
+            alerts.push({
+              patient: p,
+              terapi: t,
+              tipe: 'tapering',
+              namaObat: t.nama_item,
+              dosis: t.dosis_keterangan,
+              hari: dayCount,
+              isUrgent,
+              pesan: isUrgent
+                ? `H-${dayCount}: Waktunya evaluasi klinis untuk tap down dosis / weaning.`
+                : `H-${dayCount}: Dalam pemantauan tapering (${t.tracking.tahap_taper || t.dosis_keterangan}).`,
+            })
+            continue
+          } else if (t.tracking.tipe === 'durasi') {
+            const target = t.tracking.target_hari || 7
+            const isUrgent = dayCount >= target
+            alerts.push({
+              patient: p,
+              terapi: t,
+              tipe: 'durasi',
+              namaObat: t.nama_item,
+              dosis: t.dosis_keterangan,
+              hari: dayCount,
+              targetHari: target,
+              isUrgent,
+              pesan: dayCount >= target
+                ? `H-${dayCount}/${target}: Target durasi telah tercapai! Evaluasi stop atau switch.`
+                : `H-${dayCount}/${target}: Berjalan menuju target hari ke-${target}.`,
+            })
+            continue
           }
-        })
+        }
 
-        notify(
-          `Pasien ${currentPatient.title ? currentPatient.title + ' ' : ''}${
-            currentPatient.nama_depan || 'terpilih'
-          } dipindahkan ke ${targetWard?.nama || 'ruangan baru'}`
-        )
+        // 2. Deteksi Heuristik Otomatis (Manitol, Dexa, Ceftriaxone, Nimodipine, DAPT)
+        const combined = `${t.nama_item} ${t.dosis_keterangan}`
+
+        if (RE_TAPER_MANITOL.test(combined)) {
+          const isUrgent = dayCount >= 3
+          alerts.push({
+            patient: p,
+            terapi: t,
+            tipe: 'tapering',
+            namaObat: t.nama_item,
+            dosis: t.dosis_keterangan,
+            hari: dayCount,
+            isUrgent,
+            pesan: isUrgent
+              ? `H-${dayCount}: Manitol sudah ${dayCount} hari. Waktunya evaluasi tap-down per hari / stop bila klinis membaik!`
+              : `H-${dayCount}: Manitol dalam pemantauan ICP/klinis.`,
+          })
+        } else if (RE_TAPER_DEXA.test(combined)) {
+          const isUrgent = dayCount >= 4
+          alerts.push({
+            patient: p,
+            terapi: t,
+            tipe: 'tapering',
+            namaObat: t.nama_item,
+            dosis: t.dosis_keterangan,
+            hari: dayCount,
+            isUrgent,
+            pesan: isUrgent
+              ? `H-${dayCount}: Dexamethasone telah ${dayCount} hari. Pertimbangkan penurunan dosis bertahap.`
+              : `H-${dayCount}: Dexamethasone aktif.`,
+          })
+        } else if (RE_DURASI_CEFTRIAXONE.test(combined)) {
+          const target = 7
+          const isUrgent = dayCount >= 6
+          alerts.push({
+            patient: p,
+            terapi: t,
+            tipe: 'durasi',
+            namaObat: t.nama_item,
+            dosis: t.dosis_keterangan,
+            hari: dayCount,
+            targetHari: target,
+            isUrgent,
+            pesan: dayCount >= target
+              ? `H-${dayCount}/${target}: Ceftriaxone telah mencapai batas 7 hari standar. Evaluasi stop/ganti.`
+              : `H-${dayCount}/${target}: Menuju target 7 hari antibiotik empiris.`,
+          })
+        } else if (RE_DURASI_NIMODIPINE.test(combined)) {
+          const target = 21
+          const isUrgent = dayCount >= 19
+          alerts.push({
+            patient: p,
+            terapi: t,
+            tipe: 'durasi',
+            namaObat: t.nama_item,
+            dosis: t.dosis_keterangan,
+            hari: dayCount,
+            targetHari: target,
+            isUrgent,
+            pesan: dayCount >= target
+              ? `H-${dayCount}/${target}: Profilaksis vasospasme PSA Nimodipine selesai (21 hari).`
+              : `H-${dayCount}/${target}: Nimodipine target 21 hari pasca-PSA.`,
+          })
+        } else if (RE_DURASI_DAPT.test(combined)) {
+          const target = 21
+          const isUrgent = dayCount >= 20
+          alerts.push({
+            patient: p,
+            terapi: t,
+            tipe: 'durasi',
+            namaObat: t.nama_item,
+            dosis: t.dosis_keterangan,
+            hari: dayCount,
+            targetHari: target,
+            isUrgent,
+            pesan: dayCount >= target
+              ? `H-${dayCount}/${target}: DAPT (Aspirin+Clopidogrel) mencapai 21 hari (CHANCE/POINT protocol). Evaluasi de-eskalasi ke monoterapi.`
+              : `H-${dayCount}/${target}: Protokol DAPT 21 hari stroke minor / TIA risiko tinggi.`,
+          })
+        }
       }
-      return
     }
 
-    // CASE 2: Dilepas di area container ruangan
-    if (overWardId) {
-      if (sourceWardId === overWardId) return
+    return alerts.sort((a, b) => (b.isUrgent ? 1 : 0) - (a.isUrgent ? 1 : 0))
+  }, [filteredActivePatients, patientLatestNoteMap, todayStr])
 
-      triggerHaptic('drop')
-      const targetWard = (wards ?? []).find((w) => w.id === overWardId)
-      const targetHospital = targetWard
-        ? (hospitals ?? []).find((h) => h.id === targetWard.hospital_id)
-        : null
+  // ==================== GRAFIK TREN BEBAN PASIEN (DARKA-STYLE) ====================
+  const chartData = useMemo(() => {
+    const days = timeRange === '7d' ? 7 : timeRange === '14d' ? 14 : 30
+    const result = []
 
-      setLastMovedWardId(overWardId)
-      expandWard(overWardId)
-      if (targetHospital) {
-        expandHospital(targetHospital.id!)
+    const now = new Date()
+    for (let i = days - 1; i >= 0; i--) {
+      const d = new Date(now)
+      d.setDate(d.getDate() - i)
+      const year = d.getFullYear()
+      const month = String(d.getMonth() + 1).padStart(2, '0')
+      const day = String(d.getDate()).padStart(2, '0')
+      const dateKey = `${year}-${month}-${day}`
+
+      // Hitung pasien rawat inap yang divisite pada hari itu
+      const visitedInapOnDate = new Set<number>()
+      for (const n of allNotes) {
+        if (n.tanggal && n.tanggal.startsWith(dateKey)) {
+          visitedInapOnDate.add(n.patient_id)
+        }
       }
 
-      const targetWardPatients = (sortedAktif ?? []).filter((p) => p.lokasi_sekarang === overWardId)
-      const newOrder = targetWardPatients.length + 1
+      // Hitung pasien poli pada hari itu
+      let poliCountOnDate = 0
+      for (const pl of filteredPoliLogs) {
+        if (pl.tanggal === dateKey) {
+          poliCountOnDate += (pl.jumlah_pasien || 0)
+        }
+      }
 
-      setOptimisticWard((prev) => ({ ...(prev || {}), [activePatientId]: overWardId }))
-      setOptimisticOrder((prev) => ({ ...(prev || {}), [activePatientId]: newOrder }))
+      const dayName = d.toLocaleDateString('id-ID', { weekday: 'short' })
+      const dateLabel = `${dayName}, ${d.getDate()}`
 
-      await db.patients.update(activePatientId, {
-        lokasi_sekarang: overWardId,
-        ...(targetHospital ? { hospital_id: targetHospital.id } : {}),
-        order: newOrder,
+      result.push({
+        date: dateKey,
+        label: dateLabel,
+        inap: visitedInapOnDate.size,
+        poli: poliCountOnDate,
+        total: visitedInapOnDate.size + poliCountOnDate,
       })
-
-      notify(
-        `Pasien ${currentPatient.title ? currentPatient.title + ' ' : ''}${
-          currentPatient.nama_depan || 'terpilih'
-        } dipindahkan ke ${targetWard?.nama || 'ruangan baru'}`
-      )
     }
+
+    return result
+  }, [timeRange, allNotes, filteredPoliLogs])
+
+  // ==================== PROYEKSI FINANSIAL / JASA MEDIS ====================
+  const financialProjection = useMemo(() => {
+    const hospitalMap = new Map<number, Hospital>()
+    for (const h of hospitals) {
+      if (h.id) hospitalMap.set(h.id, h)
+    }
+
+    // 1. Penghasilan Hari Ini
+    let todayVisiteNominal = 0
+    for (const p of filteredActivePatients) {
+      if (visitedTodayPatientIds.has(p.id!)) {
+        const h = hospitalMap.get(p.hospital_id)
+        const isRaberOrKonsul = p.peran_rawat === 'Raber' || p.peran_rawat === 'Konsul'
+        const tarif = isRaberOrKonsul
+          ? (h?.tarif_visite_raber ?? 0)
+          : (h?.tarif_visite_leader ?? 0)
+        todayVisiteNominal += tarif
+      }
+    }
+
+    let todayPoliNominal = 0
+    for (const pl of poliTodayLogs) {
+      const h = hospitalMap.get(pl.hospital_id)
+      const tarif = pl.tipe_poli === 'eksekutif'
+        ? (h?.tarif_poli_eksekutif ?? 0)
+        : (h?.tarif_poli_reguler ?? 0)
+      todayPoliNominal += (pl.jumlah_pasien || 0) * tarif
+    }
+
+    const todayTotal = todayVisiteNominal + todayPoliNominal
+
+    // 2. Bulan Ini Berjalan (Month to Date)
+    const currentYear = new Date().getFullYear()
+    const currentMonth = new Date().getMonth() // 0-based
+    const currentMonthPrefix = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}`
+
+    let mtdVisiteNominal = 0
+    for (const n of allNotes) {
+      if (n.tanggal && n.tanggal.startsWith(currentMonthPrefix)) {
+        const p = activePatients.find(item => item.id === n.patient_id)
+        if (p) {
+          const h = hospitalMap.get(p.hospital_id)
+          const isRaberOrKonsul = p.peran_rawat === 'Raber' || p.peran_rawat === 'Konsul'
+          const tarif = isRaberOrKonsul
+            ? (h?.tarif_visite_raber ?? 0)
+            : (h?.tarif_visite_leader ?? 0)
+          mtdVisiteNominal += tarif
+        }
+      }
+    }
+
+    let mtdPoliNominal = 0
+    for (const pl of filteredPoliLogs) {
+      if (pl.tanggal && pl.tanggal.startsWith(currentMonthPrefix)) {
+        const h = hospitalMap.get(pl.hospital_id)
+        const tarif = pl.tipe_poli === 'eksekutif'
+          ? (h?.tarif_poli_eksekutif ?? 0)
+          : (h?.tarif_poli_reguler ?? 0)
+        mtdPoliNominal += (pl.jumlah_pasien || 0) * tarif
+      }
+    }
+
+    const mtdTotal = mtdVisiteNominal + mtdPoliNominal
+
+    // 3. Proyeksi Akhir Bulan
+    const dayOfMonth = new Date().getDate()
+    const totalDaysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate()
+    const projectedMonthEnd = dayOfMonth > 0 ? Math.round((mtdTotal / dayOfMonth) * totalDaysInMonth) : 0
+
+    return {
+      todayVisiteNominal,
+      todayPoliNominal,
+      todayTotal,
+      mtdTotal,
+      projectedMonthEnd,
+      dayOfMonth,
+      totalDaysInMonth,
+    }
+  }, [hospitals, filteredActivePatients, visitedTodayPatientIds, poliTodayLogs, allNotes, filteredPoliLogs, activePatients])
+
+  const formatRupiah = (num: number) => {
+    if (hideIncome) return 'Rp ••••••••'
+    return 'Rp ' + num.toLocaleString('id-ID')
   }
-
-  const onDragCancel = () => {
-    setActivePatient(null)
-    triggerHaptic('cancel')
-  }
-
-  const hospitalStats = (hospitals ?? []).map((h) => ({
-    id: h.id!,
-    name: h.nama,
-    value: (sortedAktif ?? []).filter((p) => p.hospital_id === h.id).length,
-    fill: h.kode_warna,
-  }))
-
-  const chartSlices = hospitalStats.filter((d) => d.value > 0)
 
   return (
-    <main className="space-y-5 p-5">
+    <main className="space-y-5 p-3.5 sm:p-5 pb-8">
+      
       {/* Hero Banner: Foto Besar Mengisi Sisi Kiri dengan Lengkungan Kanan Bawah */}
       <div className="glass-blue-hero rounded-3xl text-white shadow-xl overflow-hidden relative">
         <div className="flex items-stretch min-h-[148px]">
@@ -1410,7 +480,7 @@ export default function Dasbor() {
             <div className="flex items-end justify-between pt-3 border-t border-white/15 gap-2">
               <div>
                 <h1 className="h1 text-2xl sm:text-3xl font-black text-white leading-none">
-                  {aktif?.length ?? 0}
+                  {filteredActivePatients.length}
                 </h1>
                 <p className="text-xs font-bold text-white/95 mt-1 tracking-wide">
                   Pasien Dirawat
@@ -1420,6 +490,7 @@ export default function Dasbor() {
               {/* Tombol Aksi Cepat (Eye & Settings) */}
               <div className="flex items-center gap-1.5 shrink-0">
                 <button
+                  type="button"
                   onClick={handleToggleMask}
                   aria-label={unmasked ? 'Sensor Identitas Pasien' : 'Tampilkan Identitas Pasien (Biometrik)'}
                   className="flex size-8 sm:size-9 cursor-pointer items-center justify-center rounded-2xl bg-white/15 backdrop-blur-md text-white hover:bg-white/25 active:scale-95 transition-all"
@@ -1429,6 +500,7 @@ export default function Dasbor() {
                 </button>
 
                 <button
+                  type="button"
                   onClick={() => navigate('/pengaturan')}
                   aria-label="Pengaturan"
                   title="Pengaturan"
@@ -1442,7 +514,7 @@ export default function Dasbor() {
         </div>
       </div>
 
-      {/* Filter Faskes / RS + Tombol Kelola Faskes (Pencil) */}
+      {/* Filter Faskes / RS + Tombol Catat Poli + Tombol Kelola Faskes (Pencil) */}
       <div className="flex items-center gap-2">
         <div
           ref={filterScrollRef}
@@ -1450,10 +522,10 @@ export default function Dasbor() {
         >
           <button
             type="button"
-            data-active={!filterRs}
+            data-active={!filterHospitalId}
             onClick={(e) => handleFilterClick(0, e)}
             className={`h-9 cursor-pointer rounded-full px-4 text-xs font-bold shrink-0 transition-all whitespace-nowrap ${
-              !filterRs
+              !filterHospitalId
                 ? 'bg-gradient-to-br from-primary to-primary-deep text-white shadow-md shadow-primary/30'
                 : 'glass-card text-ink-muted hover:text-ink'
             }`}
@@ -1464,24 +536,39 @@ export default function Dasbor() {
             <button
               key={h.id}
               type="button"
-              data-active={filterRs === h.id}
+              data-active={filterHospitalId === h.id}
               onClick={(e) => handleFilterClick(h.id!, e)}
               className={`flex h-9 shrink-0 cursor-pointer items-center gap-2 rounded-full px-4 text-xs font-bold transition-all whitespace-nowrap ${
-                filterRs === h.id ? 'text-white shadow-md' : 'glass-card text-ink-muted hover:text-ink'
+                filterHospitalId === h.id ? 'text-white shadow-md' : 'glass-card text-ink-muted hover:text-ink'
               }`}
-              style={filterRs === h.id ? { backgroundColor: h.kode_warna } : undefined}
+              style={filterHospitalId === h.id ? { backgroundColor: h.kode_warna } : undefined}
             >
               <span
-                className={`size-2 rounded-full shrink-0 ${filterRs === h.id ? 'bg-white' : ''}`}
-                style={filterRs === h.id ? undefined : { backgroundColor: h.kode_warna }}
+                className={`size-2 rounded-full shrink-0 ${filterHospitalId === h.id ? 'bg-white' : ''}`}
+                style={filterHospitalId === h.id ? undefined : { backgroundColor: h.kode_warna }}
               />
               <span>{h.nama}</span>
             </button>
           ))}
         </div>
 
+        {/* Tombol Catat Poli Cepat */}
+        <button
+          type="button"
+          onClick={() => {
+            setSelectedPoliForEdit(undefined)
+            setShowPoliModal(true)
+          }}
+          className="flex items-center gap-1.5 h-9 px-3.5 rounded-full bg-gradient-to-r from-teal-600 to-teal-700 text-white text-xs font-bold shadow-md shadow-teal-600/20 hover:opacity-95 active:scale-95 transition-all shrink-0 cursor-pointer"
+        >
+          <Plus size={15} />
+          <span className="hidden sm:inline">Catat Poli</span>
+          <span className="sm:hidden">Poli</span>
+        </button>
+
         {/* Tombol Kelola Faskes (Icon Pensil Tanpa Teks) - Posisi tetap di kanan */}
         <button
+          type="button"
           onClick={() => navigate('/pengaturan?tab=manajemen')}
           title="Kelola Faskes & Ruangan"
           aria-label="Kelola Faskes & Ruangan"
@@ -1491,7 +578,7 @@ export default function Dasbor() {
         </button>
       </div>
 
-      {/* Beban Kasus Chart */}
+      {/* Beban Kasus Donut Chart (Distribusi Pasien per Faskes) */}
       {hospitalStats.length > 0 && (
         <div className="glass-card rounded-3xl p-3.5 sm:p-4 shadow-sm">
           <div className="h-36">
@@ -1531,12 +618,12 @@ export default function Dasbor() {
           </div>
           <div className="flex flex-wrap justify-center gap-2 pt-1 text-xs">
             {hospitalStats.map((d) => {
-              const isSelected = filterRs === d.id
+              const isSelected = filterHospitalId === d.id
               return (
                 <button
                   key={d.name}
                   type="button"
-                  onClick={() => handleFilterClick(filterRs === d.id ? 0 : d.id)}
+                  onClick={() => handleFilterClick(filterHospitalId === d.id ? 0 : d.id)}
                   className={`flex items-center gap-1.5 font-bold cursor-pointer transition-all px-3 py-1 rounded-full ${
                     isSelected
                       ? 'bg-gradient-to-r from-primary to-primary-deep text-white shadow-sm shadow-primary/25'
@@ -1557,227 +644,418 @@ export default function Dasbor() {
         </div>
       )}
 
-      {/* Board Ruangan & Pasien */}
-      <DndContext
-        sensors={sensors}
-        collisionDetection={customCollisionDetection}
-        onDragStart={onDragStart}
-        onDragEnd={onDragEnd}
-        onDragCancel={onDragCancel}
-      >
-        <div className="space-y-5" data-no-swipe="true">
-          {hospitals?.filter((h) => !filterRs || h.id === filterRs).map((h) => {
-            const wardsInH = (wards ?? []).filter((w) => w.hospital_id === h.id)
-            const wardIds = new Set(wardsInH.map((w) => w.id))
-            const totalPasienRs = (sortedAktif ?? []).filter((p) => wardIds.has(p.lokasi_sekarang)).length
-            const isRsCollapsed = collapsedRs[h.id!] !== undefined ? collapsedRs[h.id!] : totalPasienRs === 0
-
-            return (
-              <div key={h.id} className="space-y-3">
-                {!filterRs && (
-                  <div className="pt-2 pb-0.5">
-                    <button
-                      type="button"
-                      onClick={() => toggleRs(h.id!, isRsCollapsed)}
-                      className="w-full flex items-center justify-between gap-2 rounded-full bg-gradient-to-r from-primary to-primary-deep text-white px-4 py-2 shadow-sm shadow-primary/25 cursor-pointer select-none active:scale-[0.99] transition-all text-left"
-                      aria-label={`Sembunyikan atau tampilkan faskes ${h.nama}`}
-                    >
-                      <div className="flex items-center gap-2 min-w-0">
-                        <Building2 size={16} className="text-white/90 shrink-0" />
-                        <h2 className="text-xs sm:text-sm font-black tracking-tight truncate text-white">
-                          {h.nama}
-                        </h2>
-                      </div>
-                      <div className="flex items-center gap-1.5 shrink-0">
-                        <span className="rounded-full bg-white/20 backdrop-blur-md px-2 py-0.5 text-xs font-bold text-white min-w-[1.5rem] text-center">
-                          {totalPasienRs}
-                        </span>
-                        <ChevronDown
-                          size={16}
-                          className={`text-white transition-transform duration-200 ${
-                            isRsCollapsed ? 'rotate-180' : 'rotate-0'
-                          }`}
-                        />
-                      </div>
-                    </button>
-                  </div>
-                )}
-
-                {(!isRsCollapsed || !!filterRs) && (
-                  <div className="space-y-3.5">
-                    {wardsInH.length > 0 ? (
-                      wardsInH.map((w) => (
-                        <WardColumn
-                          key={w.id}
-                          ward={w}
-                          hospital={h}
-                          patients={(sortedAktif ?? []).filter((p) => p.lokasi_sekarang === w.id)}
-                          latestNoteMap={latestNoteMap}
-                          latestNoteWithSMap={latestNoteWithSMap}
-                          isAnyDragging={!!activePatient}
-                          activePatient={activePatient}
-                          lastMovedWardId={lastMovedWardId}
-                          highlightPatientId={highlightPatientId}
-                          onOpenVisite={(patient, note) => setVisiteTarget({ patient, latestNote: note })}
-                        />
-                      ))
-                    ) : (
-                      <div className="flex flex-col items-center justify-center gap-2.5 rounded-3xl glass-card p-6 text-center">
-                        <BedDouble size={28} className="text-primary-soft" />
-                        <p className="body-md text-xs text-ink-muted">
-                          Belum ada ruangan di <span className="font-bold text-ink">{h.nama}</span>.
-                        </p>
-                        <p className="caption text-[11px] text-ink-muted/70 max-w-xs">
-                          Buat ruangan terlebih dahulu untuk mulai menempatkan pasien di faskes ini.
-                        </p>
-                        <div className="flex flex-wrap items-center justify-center gap-2 pt-1.5">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setAddWardHospital(h)
-                              setNewWardInput('')
-                            }}
-                            className="flex items-center gap-1.5 rounded-2xl bg-gradient-to-br from-primary to-primary-deep px-4 py-2 text-xs font-bold text-white shadow-md shadow-primary/20 active:scale-95 transition-all cursor-pointer"
-                          >
-                            <Plus size={15} /> Buat Ruangan
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => navigate('/pengaturan?tab=manajemen')}
-                            className="flex items-center gap-1.5 rounded-2xl glass-card px-3.5 py-2 text-xs font-semibold text-ink-muted hover:text-ink active:scale-95 transition-all cursor-pointer"
-                          >
-                            Pengaturan Faskes
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            )
-          })}
-          {!hospitals?.length && (
-            <div className="flex flex-col items-center justify-center gap-3 rounded-3xl glass-card p-8 text-center">
-              <Building2 size={32} className="text-primary-soft" />
-              <p className="body-md text-xs text-ink-muted">Belum ada faskes yang terdaftar.</p>
-              <Link to="/pengaturan?tab=manajemen" className="flex items-center gap-2 rounded-2xl bg-gradient-to-br from-primary to-primary-deep px-4 py-2.5 text-xs font-bold text-white shadow-md shadow-primary/20">
-                <Plus size={16} /> Tambah Faskes Baru
-              </Link>
-            </div>
-          )}
-        </div>
-
-        <DragOverlay dropAnimation={dropAnimationConfig}>
-          {activePatient ? (
-            <div className="glass-card rounded-2xl p-3.5 sm:p-4 bg-white/95 border-2 border-primary shadow-xl ring-2 ring-primary/20 select-none pointer-events-none cursor-grabbing">
-              <PatientCardContent
-                patient={activePatient}
-                latestNote={latestNoteMap.get(activePatient.id!)}
-                latestNoteWithS={latestNoteWithSMap.get(activePatient.id!)}
-                unmasked={unmasked}
-                isVisitedToday={latestNoteMap.get(activePatient.id!)?.tanggal === getLocalDateString()}
-              />
-            </div>
-          ) : null}
-        </DragOverlay>
-      </DndContext>
-
-      {/* Modal Cepat Buat Ruangan */}
-      {addWardHospital && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4 animate-in fade-in duration-150 overscroll-contain touch-none select-none"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setAddWardHospital(null)
-          }}
+      {/* 4 Kartu KPI Ringkasan Beban & Pendapatan */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+        
+        {/* Card 1: Rawat Inap Aktif */}
+        <Link
+          to="/rawatinap"
+          className="group block p-4 rounded-3xl bg-white border border-slate-200/90 shadow-xs hover:border-primary/40 hover:shadow-md transition-all relative overflow-hidden"
         >
-          <div
-            className="w-full max-w-sm rounded-3xl bg-white p-5 shadow-2xl space-y-4 overscroll-contain touch-auto select-auto"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-start justify-between gap-2">
-              <div>
-                <h3 className="text-sm font-bold text-ink">Buat Ruangan Baru</h3>
-                <p className="text-xs text-ink-muted mt-0.5">
-                  Faskes: <span className="font-semibold text-primary">{addWardHospital.nama}</span>
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setAddWardHospital(null)}
-                className="rounded-full p-1 text-ink-muted hover:bg-slate-100 transition-colors cursor-pointer"
-                aria-label="Tutup"
-              >
-                <X size={18} />
-              </button>
-            </div>
+          <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
+            Rawat Inap Aktif
+          </span>
+          <div className="text-2xl sm:text-3xl font-black text-slate-800 tracking-tight mt-1">
+            {filteredActivePatients.length}
+            <span className="text-xs font-bold text-slate-400 ml-1">pasien</span>
+          </div>
+          <div className="mt-2.5 flex items-center">
+            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold ${
+              visitedCountToday >= filteredActivePatients.length && filteredActivePatients.length > 0
+                ? 'bg-emerald-100 text-emerald-800'
+                : 'bg-amber-100 text-amber-800'
+            }`}>
+              {visitedCountToday}/{filteredActivePatients.length} Visite
+            </span>
+          </div>
+        </Link>
 
-            <form
-              onSubmit={async (e) => {
-                e.preventDefault()
-                if (!newWardInput.trim()) return
-                const existingWards = await db.wards.where('hospital_id').equals(addWardHospital.id!).toArray()
-                await db.wards.add({
-                  hospital_id: addWardHospital.id!,
-                  nama: newWardInput.trim(),
-                  kode_warna: addWardHospital.kode_warna || '#3B82F6',
-                  order: existingWards.length + 1,
-                })
-                notify(`Ruangan "${newWardInput.trim()}" berhasil dibuat`)
-                setAddWardHospital(null)
-                setNewWardInput('')
-              }}
-              className="space-y-3"
-            >
-              <div>
-                <label className="block text-xs font-semibold text-ink-muted mb-1">
-                  Nama Ruangan
-                </label>
-                <input
-                  type="text"
-                  autoFocus
-                  value={newWardInput}
-                  onChange={(e) => setNewWardInput(e.target.value)}
-                  placeholder="mis. Ruang Anggrek, ICU, IGD, Poli Umum..."
-                  className="w-full h-10 rounded-2xl border border-slate-200 px-3.5 text-xs text-ink placeholder:text-ink-muted/50 focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none"
-                />
-              </div>
-
-              <div className="flex items-center justify-end gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setAddWardHospital(null)}
-                  className="h-9 px-4 rounded-xl text-xs font-bold text-ink-muted hover:bg-slate-100 transition-colors cursor-pointer"
-                >
-                  Batal
-                </button>
-                <button
-                  type="submit"
-                  disabled={!newWardInput.trim()}
-                  className="h-9 px-4 rounded-xl bg-gradient-to-br from-primary to-primary-deep text-xs font-bold text-white shadow-md shadow-primary/25 disabled:opacity-40 active:scale-95 transition-all cursor-pointer"
-                >
-                  Simpan Ruangan
-                </button>
-              </div>
-            </form>
+        {/* Card 2: Pasien Poli Hari Ini */}
+        <div
+          onClick={() => {
+            setSelectedPoliForEdit(undefined)
+            setShowPoliModal(true)
+          }}
+          className="group block p-4 rounded-3xl bg-white border border-slate-200/90 shadow-xs hover:border-primary/40 hover:shadow-md transition-all relative overflow-hidden cursor-pointer"
+        >
+          <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
+            Poli Hari Ini
+          </span>
+          <div className="text-2xl sm:text-3xl font-black text-slate-800 tracking-tight mt-1">
+            {poliTodayCount}
+            <span className="text-xs font-bold text-slate-400 ml-1">pasien</span>
+          </div>
+          <div className="mt-2.5 text-[11px] text-slate-500 font-medium truncate">
+            {poliTodayLogs.length > 0 ? `${poliTodayLogs.length} sesi tercatat` : '+ Catat Sesi Poli'}
           </div>
         </div>
-      )}
 
-      {/* Modal Visite Harian (SOAP Cepat) */}
-      {visiteTarget && (
-        <VisiteModal
-          patient={visiteTarget.patient}
-          latestNote={visiteTarget.latestNote}
-          onClose={() => setVisiteTarget(null)}
-          onSaved={(msg) => notify(msg)}
+        {/* Card 3: Total Pasien Dilayani Hari Ini */}
+        <div className="p-4 rounded-3xl bg-white border border-slate-200/90 shadow-xs relative overflow-hidden">
+          <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
+            Total Hari Ini
+          </span>
+          <div className="text-2xl sm:text-3xl font-black text-slate-800 tracking-tight mt-1">
+            {totalPasienToday}
+            <span className="text-xs font-bold text-slate-400 ml-1">pasien</span>
+          </div>
+          <div className="mt-2.5 text-[11px] text-slate-500 font-medium truncate">
+            {visitedCountToday} Inap · {poliTodayCount} Poli
+          </div>
+        </div>
+
+        {/* Card 4: Proyeksi Jasa Medis Hari Ini */}
+        <div className="p-4 rounded-3xl bg-white border border-slate-200/90 shadow-xs relative overflow-hidden">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+              Jasa Medis
+            </span>
+            <button
+              type="button"
+              onClick={toggleHideIncome}
+              className="p-1 -mr-1 rounded-lg text-slate-400 hover:text-slate-600 transition-colors cursor-pointer"
+              title={hideIncome ? 'Tampilkan nominal' : 'Sembunyikan nominal'}
+            >
+              {hideIncome ? <EyeOff size={15} /> : <Eye size={15} />}
+            </button>
+          </div>
+          <div className="text-xl sm:text-2xl font-black text-slate-800 tracking-tight mt-1 truncate">
+            {formatRupiah(financialProjection.todayTotal)}
+          </div>
+          <div className="mt-2.5 text-[11px] font-medium text-slate-500 truncate">
+            MTD: <span className="font-bold text-slate-700">{formatRupiah(financialProjection.mtdTotal)}</span>
+          </div>
+        </div>
+
+      </div>
+
+      {/* SECTION: ALERT TAPERING & DURASI OBAT */}
+      <div className="rounded-3xl bg-white border border-slate-200/90 shadow-xs p-5">
+        <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+          <h2 className="text-sm sm:text-base font-bold text-slate-800 flex items-center gap-2">
+            <span>Alert Obat (Tapering & Durasi)</span>
+            {drugAlerts.length > 0 && (
+              <span className="px-2 py-0.5 rounded-full bg-amber-500 text-white text-[11px] font-black">
+                {drugAlerts.length}
+              </span>
+            )}
+          </h2>
+        </div>
+
+        {drugAlerts.length === 0 ? (
+          <div className="py-6 text-center text-slate-400">
+            <p className="text-xs font-semibold text-slate-500">Semua terapi obat dalam batas aman</p>
+          </div>
+        ) : (
+          <div className="divide-y divide-slate-100 mt-1">
+            {drugAlerts.map((alert, idx) => (
+              <div
+                key={idx}
+                onClick={() => navigate(`/pasien/${alert.patient.id}`)}
+                className="py-3 px-2 -mx-2 rounded-2xl hover:bg-slate-50 flex items-center justify-between gap-3 cursor-pointer transition-colors group"
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-xs font-bold text-slate-800">
+                      {alert.patient.nama_depan || 'Pasien'}
+                    </span>
+                    {alert.patient.no_rm && (
+                      <span className="text-[11px] font-mono text-slate-400">
+                        ({alert.patient.no_rm})
+                      </span>
+                    )}
+                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${
+                      alert.isUrgent
+                        ? 'bg-rose-500 text-white'
+                        : 'bg-amber-100 text-amber-900 border border-amber-200'
+                    }`}>
+                      {alert.tipe === 'tapering' ? `⚡ Tapering H-${alert.hari}` : `⏱ Durasi H-${alert.hari}${alert.targetHari ? `/${alert.targetHari}` : ''}`}
+                    </span>
+                  </div>
+
+                  <div className="text-xs font-semibold text-slate-700 mt-1">
+                    {alert.namaObat} {alert.dosis ? `(${alert.dosis})` : ''}
+                  </div>
+
+                  <p className="text-[11px] text-slate-500 mt-0.5 leading-snug">
+                    {alert.pesan}
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-1 shrink-0 text-xs font-bold text-primary group-hover:translate-x-0.5 transition-transform">
+                  <span>CPPT</span>
+                  <ChevronRight size={14} />
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* SECTION: GRAFIK TREN PASIEN */}
+      <div className="rounded-3xl bg-white border border-slate-200/90 shadow-xs p-5">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
+          <h2 className="text-sm sm:text-base font-bold text-slate-800">
+            Tren Pasien
+          </h2>
+
+          {/* Time range selector pills */}
+          <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl self-start sm:self-auto">
+            {(['7d', '14d', '30d'] as const).map(tr => (
+              <button
+                key={tr}
+                type="button"
+                onClick={() => setTimeRange(tr)}
+                className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                  timeRange === tr
+                    ? 'bg-white text-slate-800 shadow-xs'
+                    : 'text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                {tr === '7d' ? '7 Hari' : tr === '14d' ? '14 Hari' : '30 Hari'}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Area Chart Container */}
+        <div className="h-64 sm:h-72 w-full pt-4">
+          <ResponsiveContainer width="100%" height="100%">
+            <AreaChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+              <defs>
+                <linearGradient id="colorTotal" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#3B82F6" stopOpacity={0.4} />
+                  <stop offset="95%" stopColor="#3B82F6" stopOpacity={0.0} />
+                </linearGradient>
+                <linearGradient id="colorPoli" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#14B8A6" stopOpacity={0.3} />
+                  <stop offset="95%" stopColor="#14B8A6" stopOpacity={0.0} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E2E8F0" />
+              <XAxis
+                dataKey="label"
+                tick={{ fontSize: 11, fill: '#64748B' }}
+                axisLine={false}
+                tickLine={false}
+              />
+              <YAxis
+                allowDecimals={false}
+                tick={{ fontSize: 11, fill: '#64748B' }}
+                axisLine={false}
+                tickLine={false}
+              />
+              <Tooltip
+                content={({ active, payload }) => {
+                  if (active && payload && payload.length) {
+                    const data = payload[0].payload
+                    return (
+                      <div className="rounded-2xl bg-slate-900/90 backdrop-blur-md p-3 text-white shadow-xl text-xs space-y-1 border border-slate-700">
+                        <div className="font-bold text-slate-300">{data.label}</div>
+                        <div className="flex items-center justify-between gap-4">
+                          <span className="text-blue-300">Rawat Inap (Visite):</span>
+                          <span className="font-bold">{data.inap} px</span>
+                        </div>
+                        <div className="flex items-center justify-between gap-4">
+                          <span className="text-teal-300">Rawat Jalan (Poli):</span>
+                          <span className="font-bold">{data.poli} px</span>
+                        </div>
+                        <div className="border-t border-slate-700 pt-1 flex items-center justify-between gap-4 font-black">
+                          <span>Total Pasien:</span>
+                          <span className="text-amber-400">{data.total} px</span>
+                        </div>
+                      </div>
+                    )
+                  }
+                  return null
+                }}
+              />
+              <Area
+                type="monotone"
+                dataKey="total"
+                stroke="#3B82F6"
+                strokeWidth={2.5}
+                fillOpacity={1}
+                fill="url(#colorTotal)"
+                name="Total Pasien"
+              />
+              <Area
+                type="monotone"
+                dataKey="poli"
+                stroke="#14B8A6"
+                strokeWidth={2}
+                fillOpacity={1}
+                fill="url(#colorPoli)"
+                name="Poli"
+              />
+            </AreaChart>
+          </ResponsiveContainer>
+        </div>
+
+        <div className="flex items-center justify-center gap-6 pt-3 text-xs text-slate-500 font-semibold">
+          <div className="flex items-center gap-2">
+            <span className="size-3 rounded-full bg-blue-500" />
+            <span>Total Pasien Dilayani</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="size-3 rounded-full bg-teal-500" />
+            <span>Pasien Rawat Jalan (Poli)</span>
+          </div>
+        </div>
+      </div>
+
+      {/* SECTION: REKAP PASIEN POLI HARI INI */}
+      <div className="rounded-3xl bg-white border border-slate-200/90 shadow-xs p-5">
+        <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+          <h2 className="text-sm sm:text-base font-bold text-slate-800">
+            Rekap Poli Hari Ini
+          </h2>
+          <button
+            type="button"
+            onClick={() => {
+              setSelectedPoliForEdit(undefined)
+              setShowPoliModal(true)
+            }}
+            className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-teal-50 hover:bg-teal-100 text-teal-800 font-bold text-xs transition-colors cursor-pointer"
+          >
+            <Plus size={14} />
+            <span>Tambah</span>
+          </button>
+        </div>
+
+        {poliTodayLogs.length === 0 ? (
+          <div className="py-6 text-center text-slate-400 space-y-2">
+            <p className="text-xs font-semibold text-slate-500">Belum ada sesi poli hari ini</p>
+            <button
+              type="button"
+              onClick={() => {
+                setSelectedPoliForEdit(undefined)
+                setShowPoliModal(true)
+              }}
+              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-primary text-white text-xs font-bold shadow-xs hover:bg-primary-deep transition-all cursor-pointer"
+            >
+              <Plus size={14} />
+              <span>Catat Pasien Poli</span>
+            </button>
+          </div>
+        ) : (
+          <div className="divide-y divide-slate-100 mt-2">
+            {poliTodayLogs.map((log) => {
+              const h = hospitals.find(item => item.id === log.hospital_id)
+              return (
+                <div
+                  key={log.id}
+                  onClick={() => {
+                    setSelectedPoliForEdit(log)
+                    setShowPoliModal(true)
+                  }}
+                  className="py-3 px-2 -mx-2 rounded-2xl hover:bg-slate-50 flex items-center justify-between gap-3 cursor-pointer transition-colors"
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-teal-50 text-teal-700 font-bold text-base shrink-0">
+                      {log.jumlah_pasien}
+                    </div>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold text-slate-800 truncate">
+                          {h?.nama || 'Rumah Sakit'}
+                        </span>
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                          log.tipe_poli === 'eksekutif'
+                            ? 'bg-purple-100 text-purple-800'
+                            : 'bg-blue-100 text-blue-800'
+                        }`}>
+                          Poli {log.tipe_poli === 'eksekutif' ? 'Eksekutif' : 'Reguler'}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-500 truncate mt-0.5">
+                        {log.catatan || (log.daftar_pasien ? `${log.daftar_pasien.length} nama pasien terdaftar` : 'Hitung cepat')}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className="text-xs font-bold text-teal-700 hover:text-teal-900">
+                      Edit
+                    </span>
+                    <ChevronRight size={14} className="text-slate-400" />
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* SECTION: PROYEKSI PENGHASILAN / JASA MEDIS */}
+      <div className="rounded-3xl bg-white border border-slate-200/90 shadow-xs p-5 space-y-4">
+        <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+          <h2 className="text-sm sm:text-base font-bold text-slate-800">
+            Proyeksi Jasa Medis
+          </h2>
+          <button
+            type="button"
+            onClick={toggleHideIncome}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 text-xs font-bold transition-colors cursor-pointer"
+          >
+            {hideIncome ? <EyeOff size={14} /> : <Eye size={14} />}
+            <span>{hideIncome ? 'Buka' : 'Samarkan'}</span>
+          </button>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-100">
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
+              Hari Ini ({formatDate(todayStr)})
+            </span>
+            <div className="text-lg font-black text-slate-800 mt-1">
+              {formatRupiah(financialProjection.todayTotal)}
+            </div>
+            <div className="text-[11px] text-slate-500 mt-1 space-y-0.5">
+              <div>Visite: {formatRupiah(financialProjection.todayVisiteNominal)}</div>
+              <div>Poli: {formatRupiah(financialProjection.todayPoliNominal)}</div>
+            </div>
+          </div>
+
+          <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-100">
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
+              Bulan Berjalan (H-{financialProjection.dayOfMonth})
+            </span>
+            <div className="text-lg font-black text-slate-800 mt-1">
+              {formatRupiah(financialProjection.mtdTotal)}
+            </div>
+          </div>
+
+          <div className="p-3.5 rounded-2xl bg-emerald-50/70 border border-emerald-100">
+            <span className="text-[10px] font-bold text-emerald-800 uppercase tracking-wider block">
+              Proyeksi Akhir Bulan
+            </span>
+            <div className="text-lg font-black text-emerald-900 mt-1">
+              {formatRupiah(financialProjection.projectedMonthEnd)}
+            </div>
+          </div>
+        </div>
+
+        <div className="flex items-center justify-end pt-1">
+          <Link
+            to="/pengaturan"
+            className="text-primary text-xs font-bold hover:underline flex items-center gap-0.5"
+          >
+            <span>Atur Tarif Faskes</span>
+            <ChevronRight size={14} />
+          </Link>
+        </div>
+      </div>
+
+      {/* Modal Input/Edit Rekap Poli */}
+      {showPoliModal && (
+        <PoliEntryModal
+          isOpen={showPoliModal}
+          onClose={() => setShowPoliModal(false)}
+          initialData={selectedPoliForEdit}
         />
       )}
 
-      {toast && (
-        <aside aria-label="Notifikasi" className="fixed inset-x-0 bottom-24 z-50 mx-auto w-fit max-w-[90%] rounded-2xl bg-gradient-to-r from-primary to-primary-deep px-5 py-2.5 text-xs font-bold text-white shadow-xl shadow-primary/35 border border-white/20 animate-in fade-in slide-in-from-bottom-2">
-          {toast}
-        </aside>
-      )}
     </main>
   )
 }

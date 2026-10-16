@@ -12,6 +12,7 @@ import PwaInstallPrompt from './components/PwaInstallPrompt'
 import UpdaterAlert from './components/UpdaterAlert'
 import Dasbor from './pages/Dasbor'
 import Brainstorm from './pages/Brainstorm'
+import RawatInap from './pages/RawatInap'
 import RekamMedis from './pages/RekamMedis'
 import TemplateTab from './pages/TemplateTab'
 import PatientProfile from './pages/PatientProfile'
@@ -135,6 +136,7 @@ export default function App() {
               <Route path="/" element={<Navigate to="/dasbor" replace />} />
               <Route path="/dasbor" element={<Dasbor />} />
               <Route path="/brainstorm" element={<Brainstorm />} />
+              <Route path="/rawatinap" element={<RawatInap />} />
               <Route path="/rekammedis" element={<RekamMedis />} />
               <Route path="/rekammedis/:id" element={<PatientProfile />} />
               <Route path="/rekap" element={<Navigate to="/rekammedis" replace />} />

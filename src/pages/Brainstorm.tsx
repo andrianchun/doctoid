@@ -21,7 +21,7 @@ const ShareReceiver: ShareReceiverPlugin | null = Capacitor.isNativePlatform()
 import {
   Mic,
   Trash2, Loader2, X, FileText, ChevronDown, Send,
-  Search
+  Search, Paperclip
 } from 'lucide-react'
 import { db, type Jaminan, type TerapiItem, type DiagnosisItem, type RegexField, type Patient, type RawatEpisode, type PeranRawat } from '../db'
 import { DEPT_ALIH_RAWAT } from './PatientProfile'
@@ -75,7 +75,7 @@ const inputCls =
   'w-full rounded-2xl border border-slate-300 bg-slate-100/90 px-4 py-3 text-xs font-semibold text-slate-900 placeholder:text-slate-400 placeholder:font-normal outline-none focus:bg-white focus:border-primary focus:ring-4 focus:ring-primary/20 transition-all shadow-2xs'
 
 const textareaCls =
-  'w-full min-h-[140px] rounded-2xl border border-slate-300 bg-slate-100/90 p-4 text-xs font-medium text-slate-900 placeholder:text-slate-400 placeholder:font-normal outline-none focus:bg-white focus:border-primary focus:ring-4 focus:ring-primary/20 transition-all shadow-2xs resize-y leading-relaxed'
+  'w-full min-h-[140px] rounded-2xl border border-slate-300 bg-slate-100/90 p-4 text-xs font-medium text-slate-900 placeholder:text-slate-400 placeholder:font-normal outline-none focus:bg-white focus:border-primary focus:ring-4 focus:ring-primary/20 transition-all shadow-2xs resize-none leading-relaxed'
 
 const compressImage = async (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
@@ -911,6 +911,8 @@ export default function Brainstorm() {
         ? 'Alih Rawat'
         : detectedPatient.keterangan_krs === 'Rujuk'
         ? 'Rujuk'
+        : detectedPatient.keterangan_krs === 'Lepas Rawat'
+        ? 'Lepas Rawat'
         : 'KRS'
       const confirmReadmission = window.confirm(
         `Pasien ${detectedPatient.title || ''} ${detectedPatient.nama_depan} (No. RM: ${detectedPatient.no_rm}) sudah ada di Rekam Medis (Status: ${keluarLabel}).\n\nApakah ini episode RAWAT INAP BARU (Readmisi)?\n\n• Klik OK untuk menghubungkan rekam medis dan arsipkan riwayat rawat sebelumnya.\n• Klik Batal untuk membuat data pasien baru terpisah.`
@@ -1334,15 +1336,7 @@ export default function Brainstorm() {
         </div>
 
         {/* Baris Peran Rawat: Leader, Raber, Konsul */}
-        <div className="space-y-1.5 pt-0.5">
-          <div className="flex items-center justify-between">
-            <label className="block text-xs font-bold text-slate-700">Peran Rawat</label>
-            {form.peran_rawat !== 'Leader' && (
-              <span className="text-[11px] font-semibold text-indigo-700">
-                Leader: {form.dpjp_utama}
-              </span>
-            )}
-          </div>
+        <div className="space-y-2">
           <div className="grid grid-cols-3 gap-1.5">
             {(['Leader', 'Raber', 'Konsul'] as PeranRawat[]).map((role) => (
               <button
@@ -1354,14 +1348,14 @@ export default function Brainstorm() {
                     dpjp_utama: role === 'Leader' ? 'Neuro' : form.dpjp_utama === 'Neuro' ? 'IPD' : form.dpjp_utama,
                   })
                 }}
-                className={`py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
+                className={`py-2.5 rounded-2xl text-xs font-bold border transition-all cursor-pointer ${
                   form.peran_rawat === role
                     ? role === 'Leader'
                       ? 'bg-primary text-white border-primary shadow-xs'
                       : role === 'Raber'
                       ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
                       : 'bg-sky-600 text-white border-sky-600 shadow-xs'
-                    : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                    : 'bg-slate-100/90 text-slate-700 border-slate-300 hover:bg-white'
                 }`}
               >
                 {role}
@@ -1369,22 +1363,14 @@ export default function Brainstorm() {
             ))}
           </div>
 
-          {/* Jika Raber atau Konsul, pilih DPJP Utama */}
+          {/* Jika Raber atau Konsul, pilih DPJP Utama langsung tanpa teks dobel */}
           {form.peran_rawat !== 'Leader' && (
-            <div className="mt-2 animate-in fade-in">
-              <label className="block text-[11px] font-semibold text-ink-muted mb-1">
-                {form.peran_rawat === 'Raber' ? 'DPJP Utama (Leader)' : 'Konsul dari (Leader)'}
-              </label>
-              <select
-                value={form.dpjp_utama}
-                onChange={(e) => set({ dpjp_utama: e.target.value })}
-                className="w-full h-9 rounded-xl border border-slate-200 px-3 text-xs bg-white text-ink font-semibold outline-none focus:border-primary shadow-2xs"
-              >
-                {DEPT_ALIH_RAWAT.map((dept) => (
-                  <option key={dept} value={dept}>{dept}</option>
-                ))}
-              </select>
-            </div>
+            <CustomSelect
+              value={form.dpjp_utama}
+              onChange={(val) => set({ dpjp_utama: val })}
+              options={[...DEPT_ALIH_RAWAT]}
+              placeholder="Pilih KSM / Departemen"
+            />
           )}
         </div>
 
@@ -1393,21 +1379,11 @@ export default function Brainstorm() {
           <div>
             <div className="flex items-center justify-between mb-1">
               <label className="block text-xs font-bold text-slate-700">Tgl Onset</label>
-              <div className="flex items-center gap-1.5">
-                {form.tgl_onset && (
-                  <span className="caption text-xs font-extrabold text-amber-900 bg-amber-100 border border-amber-300/80 px-1.5 py-0.5 rounded-md shadow-2xs">
-                    OH-{hariKe(form.tgl_onset)}
-                  </span>
-                )}
-                <button
-                  type="button"
-                  onClick={() => set({ tgl_onset: today() })}
-                  className="text-[10px] font-bold text-primary hover:text-primary-deep cursor-pointer"
-                  title="Set onset ke hari ini"
-                >
-                  Hari ini
-                </button>
-              </div>
+              {form.tgl_onset && (
+                <span className="caption text-xs font-extrabold text-amber-900 bg-amber-100 border border-amber-300/80 px-1.5 py-0.5 rounded-md shadow-2xs">
+                  OH-{hariKe(form.tgl_onset)}
+                </span>
+              )}
             </div>
             <DateInput
               value={form.tgl_onset}
@@ -1418,21 +1394,11 @@ export default function Brainstorm() {
           <div>
             <div className="flex items-center justify-between mb-1">
               <label className="block text-xs font-bold text-slate-700">Tgl MRS</label>
-              <div className="flex items-center gap-1.5">
-                {form.tgl_mrs && (
-                  <span className="caption text-xs font-extrabold text-emerald-900 bg-emerald-100 border border-emerald-300/80 px-1.5 py-0.5 rounded-md shadow-2xs">
-                    P-{hariKe(form.tgl_mrs)}
-                  </span>
-                )}
-                <button
-                  type="button"
-                  onClick={() => set({ tgl_mrs: today() })}
-                  className="text-[10px] font-bold text-primary hover:text-primary-deep cursor-pointer"
-                  title="Set MRS ke hari ini"
-                >
-                  Hari ini
-                </button>
-              </div>
+              {form.tgl_mrs && (
+                <span className="caption text-xs font-extrabold text-emerald-900 bg-emerald-100 border border-emerald-300/80 px-1.5 py-0.5 rounded-md shadow-2xs">
+                  P-{hariKe(form.tgl_mrs)}
+                </span>
+              )}
             </div>
             <DateInput
               value={form.tgl_mrs}
@@ -1544,9 +1510,11 @@ export default function Brainstorm() {
             <button
               type="button"
               onClick={() => pemfisAttachRef.current?.click()}
-              className="text-xs font-bold text-primary hover:underline cursor-pointer"
+              title="Lampirkan Foto/Video Pemeriksaan Fisik"
+              aria-label="Lampirkan Foto/Video Pemeriksaan Fisik"
+              className="p-1.5 rounded-xl text-slate-500 hover:text-primary hover:bg-primary/10 transition-colors cursor-pointer"
             >
-              + Lampiran Foto/Video
+              <Paperclip size={16} />
             </button>
           </div>
           <ResizableTextarea
@@ -1587,9 +1555,11 @@ export default function Brainstorm() {
             <button
               type="button"
               onClick={() => penunjangAttachRef.current?.click()}
-              className="text-xs font-bold text-primary hover:underline cursor-pointer"
+              title="Lampirkan CT/Lab/EKG"
+              aria-label="Lampirkan CT/Lab/EKG"
+              className="p-1.5 rounded-xl text-slate-500 hover:text-primary hover:bg-primary/10 transition-colors cursor-pointer"
             >
-              + Lampiran CT/Lab/EKG
+              <Paperclip size={16} />
             </button>
           </div>
           <ResizableTextarea
@@ -1672,13 +1642,13 @@ export default function Brainstorm() {
                 <button
                   type="button"
                   aria-label="Hapus diagnosis sekunder"
-                  className="p-1.5 cursor-pointer text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-xl shrink-0 transition-colors"
+                  className="p-1.5 cursor-pointer text-rose-500 hover:text-rose-600 hover:bg-rose-50 rounded-xl shrink-0 transition-colors"
                   onClick={() => {
                     const newA = form.A.filter((_, j) => j !== actualIndex)
                     set({ A: newA })
                   }}
                 >
-                  <Trash2 size={16} />
+                  <X size={16} strokeWidth={2.5} />
                 </button>
               </div>
             )
@@ -1694,7 +1664,7 @@ export default function Brainstorm() {
             }}
             className="text-xs font-bold text-primary hover:underline px-1 pt-1 cursor-pointer inline-flex items-center"
           >
-            + Tambah Diagnosis Sekunder
+            + Tambah Diagnosis
           </button>
         </div>
       </div>
@@ -1735,10 +1705,10 @@ export default function Brainstorm() {
                 <button
                   type="button"
                   aria-label="Hapus planning diagnostik"
-                  className="text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-xl cursor-pointer p-1.5 shrink-0 transition-colors"
+                  className="text-rose-500 hover:text-rose-600 hover:bg-rose-50 rounded-xl cursor-pointer p-1.5 shrink-0 transition-colors"
                   onClick={() => set({ P: form.P.filter((_, j) => j !== originalIndex) })}
                 >
-                  <Trash2 size={16} />
+                  <X size={16} strokeWidth={2.5} />
                 </button>
               </div>
             )
@@ -1746,7 +1716,7 @@ export default function Brainstorm() {
         </div>
 
         <input
-          placeholder="+ Tambahkan PDx (mis. CT Scan Kepala Non Kontras, EKG, DL)"
+          placeholder="CT Scan, EKG, DL..."
           className={inputCls}
           onKeyDown={(e) => {
             const v = (e.target as HTMLInputElement).value.trim()
@@ -1771,28 +1741,17 @@ export default function Brainstorm() {
               const originalIndex = form.P.indexOf(it)
               return (
                 <div key={originalIndex} className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const newP = [...form.P]
-                      newP[originalIndex].kategori = it.kategori === 'Farmakologi' ? 'Non-Farmakologi' : 'Farmakologi'
-                      set({ P: newP })
-                    }}
-                    className={`rounded-xl px-2.5 py-2.5 caption font-bold transition-colors cursor-pointer shrink-0 shadow-2xs ${
-                      it.kategori === 'Farmakologi'
-                        ? 'bg-primary text-white'
-                        : 'bg-emerald-600 text-white'
-                    }`}
-                    title="Klik untuk ubah Farmako / Non-Farmako"
-                  >
-                    {it.kategori === 'Farmakologi' ? 'Farmako' : 'Non-Farmako'}
-                  </button>
-
                   <input
                     value={it.nama_item}
                     onChange={(e) => {
+                      const val = e.target.value
+                      const isNonFarmako = /head\s*up|posisi|tirah\s*baring|diet|o2|oksigen|fisioterapi|mobilisasi|edukasi/i.test(val)
                       const newP = [...form.P]
-                      newP[originalIndex] = { ...newP[originalIndex], nama_item: e.target.value }
+                      newP[originalIndex] = {
+                        ...newP[originalIndex],
+                        nama_item: val,
+                        kategori: isNonFarmako ? 'Non-Farmakologi' : 'Farmakologi',
+                      }
                       set({ P: newP })
                     }}
                     placeholder="Nama Obat / Terapi"
@@ -1806,17 +1765,17 @@ export default function Brainstorm() {
                       newP[originalIndex] = { ...newP[originalIndex], dosis_keterangan: e.target.value }
                       set({ P: newP })
                     }}
-                    placeholder="Dosis & Rute (mis. 1x80mg PO)"
-                    className="w-32 sm:w-36 rounded-xl bg-slate-100/90 border border-slate-300 px-3 py-2.5 outline-none text-xs text-slate-800 font-semibold placeholder:text-slate-400 placeholder:font-normal focus:bg-white focus:border-primary shadow-2xs transition-all"
+                    placeholder="Dosis / Ket."
+                    className="w-28 sm:w-36 rounded-xl bg-slate-100/90 border border-slate-300 px-3 py-2.5 outline-none text-xs text-slate-800 font-semibold placeholder:text-slate-400 placeholder:font-normal focus:bg-white focus:border-primary shadow-2xs transition-all"
                   />
 
                   <button
                     type="button"
                     aria-label="Hapus planning terapi"
-                    className="text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-xl cursor-pointer p-1.5 shrink-0 transition-colors"
+                    className="text-rose-500 hover:text-rose-600 hover:bg-rose-50 rounded-xl cursor-pointer p-1.5 shrink-0 transition-colors"
                     onClick={() => set({ P: form.P.filter((_, j) => j !== originalIndex) })}
                   >
-                    <Trash2 size={16} />
+                    <X size={16} strokeWidth={2.5} />
                   </button>
                 </div>
               )
@@ -1840,7 +1799,7 @@ export default function Brainstorm() {
         )}
 
         <input
-          placeholder="+ Tambahkan Terapi (mis. Citicoline 2x500mg IV, Head up 30°)"
+          placeholder="Citicoline 3 x 500 mg, Head up 30°..."
           className={inputCls}
           onKeyDown={(e) => {
             const v = (e.target as HTMLInputElement).value.trim()
@@ -1929,13 +1888,13 @@ export default function Brainstorm() {
                 <button
                   type="button"
                   aria-label="Hapus diagnosis"
-                  className="p-1.5 cursor-pointer text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-xl shrink-0 transition-colors"
+                  className="p-1.5 cursor-pointer text-rose-500 hover:text-rose-600 hover:bg-rose-50 rounded-xl shrink-0 transition-colors"
                   onClick={() => {
                     const newA = stagedAnalysis.A.filter((_, j) => j !== idx)
                     setStagedAnalysis({ ...stagedAnalysis, A: newA })
                   }}
                 >
-                  <Trash2 size={16} />
+                  <X size={16} strokeWidth={2.5} />
                 </button>
               </div>
             ))}
@@ -1949,7 +1908,7 @@ export default function Brainstorm() {
               }}
               className="text-xs font-bold text-blue-600 hover:underline px-1 pt-1 cursor-pointer inline-flex items-center"
             >
-              + Tambah Usulan Diagnosis
+              + Tambah Diagnosis
             </button>
           </div>
 
@@ -1960,31 +1919,20 @@ export default function Brainstorm() {
             </label>
             {stagedAnalysis.P.map((item, idx) => (
               <div key={idx} className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    const newP = [...stagedAnalysis.P]
-                    newP[idx].kategori = item.kategori === 'Farmakologi' ? 'Non-Farmakologi' : 'Farmakologi'
-                    setStagedAnalysis({ ...stagedAnalysis, P: newP })
-                  }}
-                  className={`rounded-xl px-2.5 py-2 caption font-bold transition-colors cursor-pointer shrink-0 shadow-2xs ${
-                    item.kategori === 'Farmakologi'
-                      ? 'bg-primary text-white'
-                      : 'bg-emerald-600 text-white'
-                  }`}
-                  title="Klik untuk ganti jenis"
-                >
-                  {item.kategori === 'Farmakologi' ? 'Farmako' : 'Non-Farmako'}
-                </button>
-
                 <input
                   value={item.nama_item}
                   onChange={(e) => {
+                    const val = e.target.value
+                    const isNonFarmako = /head\s*up|posisi|tirah\s*baring|diet|o2|oksigen|fisioterapi|mobilisasi|edukasi/i.test(val)
                     const newP = [...stagedAnalysis.P]
-                    newP[idx] = { ...newP[idx], nama_item: e.target.value }
+                    newP[idx] = {
+                      ...newP[idx],
+                      nama_item: val,
+                      kategori: newP[idx].kategori === 'Diagnostik' ? 'Diagnostik' : (isNonFarmako ? 'Non-Farmakologi' : 'Farmakologi'),
+                    }
                     setStagedAnalysis({ ...stagedAnalysis, P: newP })
                   }}
-                  placeholder="Nama item..."
+                  placeholder="Nama Obat / Terapi"
                   className="flex-1 min-w-0 rounded-xl bg-white border border-slate-300 px-3.5 py-2 outline-none font-bold text-slate-900 text-xs focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-all shadow-2xs"
                 />
 
@@ -1995,20 +1943,20 @@ export default function Brainstorm() {
                     newP[idx] = { ...newP[idx], dosis_keterangan: e.target.value }
                     setStagedAnalysis({ ...stagedAnalysis, P: newP })
                   }}
-                  placeholder="Dosis / Keterangan"
-                  className="w-32 sm:w-36 rounded-xl bg-white border border-slate-300 px-3 py-2 outline-none text-xs text-slate-800 font-semibold focus:border-blue-500 shadow-2xs transition-all"
+                  placeholder="Dosis / Ket."
+                  className="w-28 sm:w-36 rounded-xl bg-white border border-slate-300 px-3 py-2 outline-none text-xs text-slate-800 font-semibold focus:border-blue-500 shadow-2xs transition-all"
                 />
 
                 <button
                   type="button"
                   aria-label="Hapus terapi"
-                  className="text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-xl cursor-pointer p-1.5 shrink-0 transition-colors"
+                  className="text-rose-500 hover:text-rose-600 hover:bg-rose-50 rounded-xl cursor-pointer p-1.5 shrink-0 transition-colors"
                   onClick={() => {
                     const newP = stagedAnalysis.P.filter((_, j) => j !== idx)
                     setStagedAnalysis({ ...stagedAnalysis, P: newP })
                   }}
                 >
-                  <Trash2 size={16} />
+                  <X size={16} strokeWidth={2.5} />
                 </button>
               </div>
             ))}

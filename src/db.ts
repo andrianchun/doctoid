@@ -2,7 +2,7 @@ import Dexie, { type EntityTable } from 'dexie'
 
 export type Jaminan = 'BPJS' | 'Umum' | 'Asuransi'
 export type StatusRawat = 'aktif' | 'krs'
-export type KeteranganKrs = 'Izin Dokter' | 'APS' | 'Meninggal' | 'Alih Rawat' | 'Rujuk'
+export type KeteranganKrs = 'Izin Dokter' | 'APS' | 'Meninggal' | 'Alih Rawat' | 'Rujuk' | 'Lepas Rawat'
 export type KategoriTerapi = 'Farmakologi' | 'Non-Farmakologi' | 'Diagnostik' | 'Monitoring' | 'Edukasi'
 export type PeranRawat = 'Leader' | 'Raber' | 'Konsul'
 
@@ -12,6 +12,10 @@ export interface Hospital {
   kode_warna: string
   icon?: string // path to icon image e.g., '/icons/hospital.png'
   order?: number
+  tarif_visite_leader?: number
+  tarif_visite_raber?: number
+  tarif_poli_reguler?: number
+  tarif_poli_eksekutif?: number
 }
 
 export interface Ward {
@@ -63,7 +67,16 @@ export interface DiagnosisItem {
   icd10: string
 }
 
+export interface TerapiTracking {
+  tipe: 'tapering' | 'durasi'
+  tgl_mulai: string // YYYY-MM-DD
+  target_hari?: number // durasi target, misal 7 (Ceftriaxone), 21 (Nimodipine/DAPT)
+  tahap_taper?: string | string[] // urutan penurunan dosis, misal '4 x 100 cc -> 3 x 100 cc'
+  catatan?: string
+}
+
 export interface TerapiItem {
+  id?: string
   nama_item: string
   dosis_keterangan: string
   tgl_mulai: string
@@ -71,6 +84,7 @@ export interface TerapiItem {
   status: 'aktif' | 'stop'
   kategori: KategoriTerapi
   icd9?: string // kode ICD-9-CM prosedur, relevan utk kategori Diagnostik (mirip icd10 pada DiagnosisItem)
+  tracking?: TerapiTracking
 }
 
 export interface ClinicalMetrics {
@@ -183,6 +197,25 @@ export interface PenunjangItem {
   updated_at?: string
 }
 
+export interface PoliLogItem {
+  nama: string
+  no_rm?: string
+  jaminan?: 'BPJS' | 'Umum' | 'Asuransi'
+  keterangan?: string
+}
+
+export interface PoliLog {
+  id?: number
+  tanggal: string // ISO date YYYY-MM-DD
+  hospital_id: number
+  tipe_poli: 'reguler' | 'eksekutif'
+  jumlah_pasien: number
+  daftar_pasien?: PoliLogItem[]
+  foto_urls?: string[]
+  catatan?: string
+  created_at: string
+}
+
 export const db = new Dexie('doctoid') as Dexie & {
   patients: EntityTable<Patient, 'id'>
   progressNotes: EntityTable<ProgressNote, 'id'>
@@ -194,6 +227,7 @@ export const db = new Dexie('doctoid') as Dexie & {
   therapyHistory: EntityTable<TherapyHistoryEntry, 'id'>
   brainstormDraft: EntityTable<BrainstormDraft, 'id'>
   penunjang: EntityTable<PenunjangItem, 'id'>
+  poliLogs: EntityTable<PoliLog, 'id'>
 }
 
 db.version(1).stores({
@@ -219,4 +253,8 @@ db.version(4).stores({
 
 db.version(5).stores({
   penunjang: '++id, patient_id, kategori, tanggal, status',
+})
+
+db.version(6).stores({
+  poliLogs: '++id, hospital_id, tanggal, tipe_poli',
 })

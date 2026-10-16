@@ -138,6 +138,8 @@ export default function TemplateTab() {
           ? 'Alih Rawat'
           : p.keterangan_krs === 'Rujuk'
           ? 'Rujuk'
+          : p.keterangan_krs === 'Lepas Rawat'
+          ? 'Lepas Rawat'
           : 'KRS'
         const krsTag = p.tgl_krs ? ` [${keluarLabel}: ${formatDate(p.tgl_krs)}]` : ` [${keluarLabel}]`
         opts.push({

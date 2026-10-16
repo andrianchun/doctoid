@@ -230,6 +230,10 @@ export default function Rekap() {
                           <span className="rounded-full bg-sky-50 text-sky-700 border border-sky-200 px-2.5 py-0.5 text-xs font-bold">
                             Rujuk {p.detail_krs ? `(${p.detail_krs})` : ''}
                           </span>
+                        ) : p.keterangan_krs === 'Lepas Rawat' ? (
+                          <span className="rounded-full bg-teal-50 text-teal-700 border border-teal-200 px-2.5 py-0.5 text-xs font-bold">
+                            Lepas Rawat
+                          </span>
                         ) : (
                           <span className="rounded-full bg-surface text-ink-muted border border-slate-200/60 px-2.5 py-0.5 text-xs font-bold">
                             KRS

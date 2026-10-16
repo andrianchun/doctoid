@@ -85,19 +85,19 @@ export default function ResizableTextarea({
       <textarea
         ref={setRefs}
         rows={rows}
-        className={`${className} ${highlightClass} pr-10`}
+        className={`${className.replace(/\bresize-\S+/g, '')} ${highlightClass} resize-none pr-8`}
         {...props}
       />
-      {/* Prominent Touch & Mouse Drag Handle di Pojok Kanan Bawah */}
+      {/* Single Touch & Mouse Drag Handle di Pojok Kanan Bawah */}
       <div
         onMouseDown={onMouseDown}
         onTouchStart={onTouchStart}
         title="Tarik untuk ubah tinggi"
         aria-label="Tarik ukuran teks"
-        className="absolute bottom-2.5 right-2.5 flex size-7 cursor-ns-resize touch-none items-center justify-center rounded-xl bg-slate-200/95 text-slate-700 hover:bg-primary hover:text-white active:bg-primary-deep active:text-white transition-all shadow-xs select-none ring-1 ring-slate-300"
+        className="absolute bottom-1.5 right-1.5 flex size-6 cursor-ns-resize touch-none items-center justify-center rounded-lg text-slate-400 hover:text-primary active:text-primary-deep transition-colors select-none"
       >
-        <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
-          <path d="M14 14H12V12H14V14ZM14 10H12V8H14V10ZM10 14H8V12H10V14ZM14 6H12V4H14V6ZM10 10H8V8H10V10ZM6 14H4V12H6V14Z" />
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round">
+          <path d="M10 3L3 10M10 7L7 10" />
         </svg>
       </div>
     </div>

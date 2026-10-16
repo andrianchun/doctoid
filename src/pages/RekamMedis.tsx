@@ -114,6 +114,7 @@ export default function RekamMedis() {
         if (filterStatus === 'krs_meninggal') return p.status_rawat === 'krs' && p.keterangan_krs === 'Meninggal'
         if (filterStatus === 'krs_alih') return p.status_rawat === 'krs' && p.keterangan_krs === 'Alih Rawat'
         if (filterStatus === 'krs_rujuk') return p.status_rawat === 'krs' && p.keterangan_krs === 'Rujuk'
+        if (filterStatus === 'krs_lepas') return p.status_rawat === 'krs' && p.keterangan_krs === 'Lepas Rawat'
         return true
       })()
       const matchesPeran = (() => {
@@ -151,6 +152,7 @@ export default function RekamMedis() {
               { value: 'krs_meninggal', label: 'MD (Meninggal)' },
               { value: 'krs_alih', label: 'Alih Rawat' },
               { value: 'krs_rujuk', label: 'Rujuk' },
+              { value: 'krs_lepas', label: 'Lepas Rawat' },
             ]}
             className="w-40"
           />
@@ -313,6 +315,10 @@ export default function RekamMedis() {
                       ) : p.keterangan_krs === 'Rujuk' ? (
                         <span className="rounded-full px-2.5 py-0.5 text-xs font-bold bg-sky-50 text-sky-700 border border-sky-200">
                           Rujuk {p.detail_krs ? `→ ${p.detail_krs}` : ''} {p.tgl_krs ? `· ${formatDate(p.tgl_krs)}` : ''}
+                        </span>
+                      ) : p.keterangan_krs === 'Lepas Rawat' ? (
+                        <span className="rounded-full px-2.5 py-0.5 text-xs font-bold bg-teal-50 text-teal-700 border border-teal-200">
+                          Lepas Rawat {p.tgl_krs ? `· ${formatDate(p.tgl_krs)}` : ''}
                         </span>
                       ) : (
                         <span className="rounded-full px-2.5 py-0.5 text-xs font-bold bg-slate-100 text-slate-700 border border-slate-200">

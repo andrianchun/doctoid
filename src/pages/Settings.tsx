@@ -439,6 +439,10 @@ function HospitalAccordion({
   const [name, setName] = useState(hospital.nama)
   const [color, setColor] = useState(hospital.kode_warna)
   const [icon, setIcon] = useState(hospital.icon || 'hospital-building')
+  const [tarifVisiteLeader, setTarifVisiteLeader] = useState<number | string>(hospital.tarif_visite_leader || '')
+  const [tarifVisiteRaber, setTarifVisiteRaber] = useState<number | string>(hospital.tarif_visite_raber || '')
+  const [tarifPoliReguler, setTarifPoliReguler] = useState<number | string>(hospital.tarif_poli_reguler || '')
+  const [tarifPoliEksekutif, setTarifPoliEksekutif] = useState<number | string>(hospital.tarif_poli_eksekutif || '')
 
   const [newWardName, setNewWardName] = useState('')
   const [newWardColor, setNewWardColor] = useState(hospital.kode_warna || PALETTE[0])
@@ -481,9 +485,13 @@ function HospitalAccordion({
       nama: name.trim(),
       kode_warna: color,
       icon: icon,
+      tarif_visite_leader: tarifVisiteLeader ? Number(tarifVisiteLeader) : undefined,
+      tarif_visite_raber: tarifVisiteRaber ? Number(tarifVisiteRaber) : undefined,
+      tarif_poli_reguler: tarifPoliReguler ? Number(tarifPoliReguler) : undefined,
+      tarif_poli_eksekutif: tarifPoliEksekutif ? Number(tarifPoliEksekutif) : undefined,
     })
     setShowEditModal(false)
-    notify?.('Faskes diperbarui ✓')
+    notify?.('Faskes & tarif diperbarui ✓')
   }
 
   const handleCopyRs = async () => {
@@ -600,6 +608,10 @@ function HospitalAccordion({
                   setName(hospital.nama)
                   setColor(hospital.kode_warna)
                   setIcon(hospital.icon || 'hospital-building')
+                  setTarifVisiteLeader(hospital.tarif_visite_leader || '')
+                  setTarifVisiteRaber(hospital.tarif_visite_raber || '')
+                  setTarifPoliReguler(hospital.tarif_poli_reguler || '')
+                  setTarifPoliEksekutif(hospital.tarif_poli_eksekutif || '')
                   setShowEditModal(true)
                 }}
                 title="Ubah Faskes"
@@ -841,6 +853,68 @@ function HospitalAccordion({
                       </button>
                     )
                   })}
+                </div>
+              </div>
+
+              {/* Tarif & Jasa Medis (Untuk Proyeksi Dasbor) */}
+              <div className="pt-3 border-t border-surface space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-ink">Tarif & Jasa Medis (Proyeksi)</span>
+                  <span className="text-[10px] text-ink-muted">Opsional</span>
+                </div>
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  <div>
+                    <label className="block text-[10px] font-semibold text-ink-muted mb-0.5">Visite Leader</label>
+                    <div className="relative">
+                      <span className="absolute left-2.5 top-2 text-[11px] text-slate-400 font-bold">Rp</span>
+                      <input
+                        type="number"
+                        placeholder="0"
+                        value={tarifVisiteLeader}
+                        onChange={(e) => setTarifVisiteLeader(e.target.value)}
+                        className="w-full rounded-xl border border-surface bg-surface/70 pl-8 pr-2.5 py-1.5 text-xs font-bold outline-none focus:border-primary text-ink"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-semibold text-ink-muted mb-0.5">Visite Raber</label>
+                    <div className="relative">
+                      <span className="absolute left-2.5 top-2 text-[11px] text-slate-400 font-bold">Rp</span>
+                      <input
+                        type="number"
+                        placeholder="0"
+                        value={tarifVisiteRaber}
+                        onChange={(e) => setTarifVisiteRaber(e.target.value)}
+                        className="w-full rounded-xl border border-surface bg-surface/70 pl-8 pr-2.5 py-1.5 text-xs font-bold outline-none focus:border-primary text-ink"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-semibold text-ink-muted mb-0.5">Poli Reguler / Px</label>
+                    <div className="relative">
+                      <span className="absolute left-2.5 top-2 text-[11px] text-slate-400 font-bold">Rp</span>
+                      <input
+                        type="number"
+                        placeholder="0"
+                        value={tarifPoliReguler}
+                        onChange={(e) => setTarifPoliReguler(e.target.value)}
+                        className="w-full rounded-xl border border-surface bg-surface/70 pl-8 pr-2.5 py-1.5 text-xs font-bold outline-none focus:border-primary text-ink"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-semibold text-ink-muted mb-0.5">Poli Eksekutif / Px</label>
+                    <div className="relative">
+                      <span className="absolute left-2.5 top-2 text-[11px] text-slate-400 font-bold">Rp</span>
+                      <input
+                        type="number"
+                        placeholder="0"
+                        value={tarifPoliEksekutif}
+                        onChange={(e) => setTarifPoliEksekutif(e.target.value)}
+                        className="w-full rounded-xl border border-surface bg-surface/70 pl-8 pr-2.5 py-1.5 text-xs font-bold outline-none focus:border-primary text-ink"
+                      />
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
