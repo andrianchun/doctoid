@@ -159,23 +159,50 @@ export default function Brainstorm() {
   const [stagedAnalysis, setStagedAnalysis] = useState<StagedAnalysis | null>(null)
 
   const handleImportInboxItem = (item: InboxItem) => {
-    if (item.parsed_data) {
-      set({
-        title: (item.parsed_data?.nama_depan?.match(/^(?:dr\.|Tn\.|Ny\.|Sdr\.|Sdri\.|An\.|By\.)/i)?.[0] as any) || form.title,
-        nama_depan: item.parsed_data.nama_depan || form.nama_depan,
-        usia: item.parsed_data.usia || form.usia,
-        no_rm: item.parsed_data.no_rm || form.no_rm,
-        jaminan: (item.parsed_data.jaminan as any) || form.jaminan,
-        S: item.parsed_data.S || form.S,
-        O_pemfis: item.parsed_data.O_pemfis || form.O_pemfis,
-        O_penunjang: item.parsed_data.O_penunjang || form.O_penunjang,
-        A: item.parsed_data.A && item.parsed_data.A.length > 0 ? item.parsed_data.A : form.A,
-        P: item.parsed_data.P && item.parsed_data.P.length > 0 ? item.parsed_data.P : form.P,
-      })
-    }
+    // 1. Ekstrak otomatis struktur SOAP dari teks mentah jika ada
+    let parsedSoapData: Partial<FormState> = {}
     if (item.raw_text) {
       setRaw(item.raw_text)
+      try {
+        const { data, success } = localParse(item.raw_text, regexRules)
+        if (success) {
+          parsedSoapData = {
+            title: (data.title as any) || (data.nama_depan?.match(/^(?:dr\.|Tn\.|Ny\.|Sdr\.|Sdri\.|An\.|By\.)/i)?.[0] as any) || form.title,
+            nama_depan: data.nama_depan || form.nama_depan,
+            usia: data.usia || form.usia,
+            no_rm: data.no_rm || form.no_rm,
+            jaminan: (data.jaminan as any) || form.jaminan,
+            S: data.S || form.S,
+            O_pemfis: data.O_pemfis || form.O_pemfis,
+            O_penunjang: data.O_penunjang || form.O_penunjang,
+            A: data.A && data.A.length > 0 ? data.A : form.A,
+            P: data.P && data.P.length > 0 ? data.P : form.P,
+          }
+        }
+      } catch (err) {
+        console.warn('Auto parse inbox failed, falling back:', err)
+      }
     }
+
+    // 2. Gabungkan data parsed_data (jika ada override)
+    if (item.parsed_data) {
+      set({
+        ...parsedSoapData,
+        title: (item.parsed_data?.nama_depan?.match(/^(?:dr\.|Tn\.|Ny\.|Sdr\.|Sdri\.|An\.|By\.)/i)?.[0] as any) || parsedSoapData.title || form.title,
+        nama_depan: item.parsed_data.nama_depan || parsedSoapData.nama_depan || form.nama_depan,
+        usia: item.parsed_data.usia || parsedSoapData.usia || form.usia,
+        no_rm: item.parsed_data.no_rm || parsedSoapData.no_rm || form.no_rm,
+        jaminan: (item.parsed_data.jaminan as any) || parsedSoapData.jaminan || form.jaminan,
+        S: item.parsed_data.S || parsedSoapData.S || form.S,
+        O_pemfis: item.parsed_data.O_pemfis || parsedSoapData.O_pemfis || form.O_pemfis,
+        O_penunjang: item.parsed_data.O_penunjang || parsedSoapData.O_penunjang || form.O_penunjang,
+        A: item.parsed_data.A && item.parsed_data.A.length > 0 ? item.parsed_data.A : (parsedSoapData.A || form.A),
+        P: item.parsed_data.P && item.parsed_data.P.length > 0 ? item.parsed_data.P : (parsedSoapData.P || form.P),
+      })
+    } else if (Object.keys(parsedSoapData).length > 0) {
+      set(parsedSoapData)
+    }
+
     if (item.attachments && item.attachments.length > 0) {
       setAttachments((prev) => [...prev, ...(item.attachments! as any)])
     }

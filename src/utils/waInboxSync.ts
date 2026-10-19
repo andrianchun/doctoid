@@ -5,12 +5,32 @@ export async function syncWaInboxToDexie() {
   try {
     let items: any[] = []
     try {
-      const res = await fetch(`http://127.0.0.1:3001/api/inbox?t=${Date.now()}`)
+      const gatewayUrl =
+        localStorage.getItem('doctoid_wa_gateway_url') ||
+        (typeof window !== 'undefined' &&
+        (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+          ? 'http://127.0.0.1:3001'
+          : 'http://192.168.1.45:3001')
+
+      // Timeout 1.8 detik: jika di luar Wi-Fi laptop, segera beralih ke fallback tanpa lag
+      const controller = new AbortController()
+      const timer = setTimeout(() => controller.abort(), 1800)
+      const res = await fetch(`${gatewayUrl}/api/inbox?t=${Date.now()}`, { signal: controller.signal })
+      clearTimeout(timer)
       if (res.ok) items = await res.json()
     } catch {
-      // Fallback ke file JSON statis jika server HTTP belum/tidak terjangkau
-      const res = await fetch(`/wa-inbox.json?t=${Date.now()}`)
-      if (res.ok) items = await res.json()
+      // Fallback ke file JSON cloud jika di luar jangkauan Wi-Fi lokal
+      try {
+        const res = await fetch(`https://docto-id.web.app/wa-inbox.json?t=${Date.now()}`)
+        if (res.ok) items = await res.json()
+      } catch {
+        try {
+          const res = await fetch(`/wa-inbox.json?t=${Date.now()}`)
+          if (res.ok) items = await res.json()
+        } catch {
+          // ignore
+        }
+      }
     }
 
     if (!Array.isArray(items) || items.length === 0) return
@@ -23,7 +43,7 @@ export async function syncWaInboxToDexie() {
         .filter(
           (q) =>
             (item.created_at && q.created_at === item.created_at) ||
-            (q.raw_text === item.raw_text && q.sender_phone === item.sender_phone)
+            (Boolean(item.raw_text) && q.raw_text === item.raw_text && q.sender_phone === item.sender_phone)
         )
         .first()
 

@@ -43,11 +43,27 @@ export const WhatsAppIntegrationCard: React.FC<WhatsAppIntegrationCardProps> = (
     setWaNumber(saved)
   }, [])
 
-  // Polling status bot dari endpoint lokal port 3001 (fallback: wa-status.json)
+  // Helper untuk menentukan alamat server bot gateway
+  const getGatewayBase = () => {
+    const custom = localStorage.getItem('doctoid_wa_gateway_url')
+    if (custom) return custom
+    if (typeof window !== 'undefined') {
+      const isLocal =
+        window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+      if (isLocal) return 'http://127.0.0.1:3001'
+      return 'http://192.168.1.45:3001'
+    }
+    return 'http://127.0.0.1:3001'
+  }
+
+  // Polling status bot dari endpoint gateway (fallback: wa-status.json)
   const fetchStatus = async () => {
     try {
-      // 1. Coba hubungi controller server port 3001
-      const res = await fetch(`http://127.0.0.1:3001/api/status?t=${Date.now()}`)
+      // 1. Coba hubungi controller server gateway port 3001
+      const controller = new AbortController()
+      const timer = setTimeout(() => controller.abort(), 1800)
+      const res = await fetch(`${getGatewayBase()}/api/status?t=${Date.now()}`, { signal: controller.signal })
+      clearTimeout(timer)
       if (res.ok) {
         const data = await res.json()
         setBotState(data)
@@ -80,7 +96,7 @@ export const WhatsAppIntegrationCard: React.FC<WhatsAppIntegrationCardProps> = (
     if (!botState) return
     setIsLoading(true)
     try {
-      const res = await fetch('http://127.0.0.1:3001/api/toggle', {
+      const res = await fetch(`${getGatewayBase()}/api/toggle`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ active: !botState.active }),
@@ -111,7 +127,7 @@ export const WhatsAppIntegrationCard: React.FC<WhatsAppIntegrationCardProps> = (
     }
     setIsLoading(true)
     try {
-      const res = await fetch('http://127.0.0.1:3001/api/disconnect', { method: 'POST' })
+      const res = await fetch(`${getGatewayBase()}/api/disconnect`, { method: 'POST' })
       if (res.ok) {
         notify('Sesi WhatsApp berhasil diputuskan ✓')
         fetchStatus()
@@ -133,7 +149,7 @@ export const WhatsAppIntegrationCard: React.FC<WhatsAppIntegrationCardProps> = (
     }
     setPairingLoading(true)
     try {
-      const res = await fetch('http://127.0.0.1:3001/api/pair-code', {
+      const res = await fetch(`${getGatewayBase()}/api/pair-code`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ phone: pairingPhone }),
@@ -160,7 +176,7 @@ export const WhatsAppIntegrationCard: React.FC<WhatsAppIntegrationCardProps> = (
     setIsSaved(true)
 
     try {
-      await fetch('http://127.0.0.1:3001/api/whitelist', {
+      await fetch(`${getGatewayBase()}/api/whitelist`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ whitelist: clean }),

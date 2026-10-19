@@ -227,12 +227,14 @@ async function initBaileys() {
         }
 
         // Ekstraksi otomatis nama, no RM, dan usia jika tertera di teks
-        const namaMatch = textContent.match(/(?:Nama|Pasien|Tn\.|Ny\.|Sdr\.|Sdri\.|An\.|By\.)\s*[:\.]?\s*([A-Z][a-zA-Z\s]{2,25})/i)
+        const titleMatch = textContent.match(/(?:Tn\.|Ny\.|Sdr\.|Sdri\.|An\.|By\.)\s*([A-Za-z\s]{2,30})/i)
+        const namaLabelMatch = textContent.match(/(?:Nama|Pasien)\s*[:\.]?\s*([A-Z][a-zA-Z\s]{2,25})/i)
         const rmMatch = textContent.match(/(?:RM|No\.?\s*RM|Rekam\s*Medis)\s*[:\.]?\s*([0-9\-\.\/]{4,15})/i)
         const usiaMatch = textContent.match(/(\d{1,3})\s*(?:th|tahun|yo|bulan)/i)
 
+        const extractedName = titleMatch ? titleMatch[0].trim() : (namaLabelMatch ? namaLabelMatch[1].trim() : '')
         const parsedData = {
-          nama_depan: namaMatch ? (namaMatch[0].startsWith('Nama') || namaMatch[0].startsWith('Pasien') ? namaMatch[1].trim() : namaMatch[0].trim()) : '',
+          nama_depan: extractedName,
           no_rm: rmMatch ? rmMatch[1].trim() : '',
           usia: usiaMatch ? usiaMatch[0].trim() : '',
         }
@@ -265,11 +267,36 @@ async function initBaileys() {
           if (fs.existsSync(INBOX_JSON_PATH)) {
             inboxList = JSON.parse(fs.readFileSync(INBOX_JSON_PATH, 'utf-8'))
           }
-          inboxList.unshift(inboxItem)
+
+          // CLUSTERING: Gabungkan jika ada pesan masuk dari grup/pengirim yang sama dalam 12 detik terakhir
+          const now = Date.now()
+          const recentItem = inboxList.find(
+            (it) =>
+              it.sender_name === inboxItem.sender_name &&
+              it.sender_phone === inboxItem.sender_phone &&
+              now - new Date(it.created_at).getTime() < 12000
+          )
+
+          if (recentItem) {
+            if (!recentItem.raw_text && inboxItem.raw_text) {
+              recentItem.raw_text = inboxItem.raw_text
+              recentItem.parsed_data = inboxItem.parsed_data
+            } else if (recentItem.raw_text && inboxItem.raw_text && recentItem.raw_text !== inboxItem.raw_text) {
+              recentItem.raw_text += '\n\n' + inboxItem.raw_text
+            }
+            if (inboxItem.attachments && inboxItem.attachments.length > 0) {
+              recentItem.attachments = [...(recentItem.attachments || []), ...inboxItem.attachments]
+            }
+            recentItem.created_at = new Date().toISOString()
+            console.log(`✓ Pesan/lampiran baru berhasil digabungkan ke konsulan pasien [${recentItem.parsed_data?.nama_depan || 'Aktif'}]! Total lampiran: ${recentItem.attachments.length}`)
+          } else {
+            inboxList.unshift(inboxItem)
+            console.log('✓ Konsulan WhatsApp baru berhasil dicatat ke antrean inbox!')
+          }
+
           fs.writeFileSync(INBOX_JSON_PATH, JSON.stringify(inboxList.slice(0, 50), null, 2), 'utf-8')
           botState.lastSync = new Date().toISOString()
           broadcastState()
-          console.log('✓ Konsulan WhatsApp berhasil dicatat ke antrean inbox!')
         } catch (err) {
           console.error('Gagal menulis inbox json:', err.message)
         }
@@ -445,10 +472,11 @@ const server = http.createServer((req, res) => {
 })
 
 const PORT = 3001
-server.listen(PORT, '127.0.0.1', () => {
+server.listen(PORT, '0.0.0.0', () => {
   console.log(`=====================================================`)
   console.log(`🩺 docto.id WA Gateway Controller berjalan di:`)
-  console.log(`   http://127.0.0.1:${PORT}`)
+  console.log(`   http://localhost:${PORT}`)
+  console.log(`   http://192.168.1.45:${PORT} (Akses dari HP via Wi-Fi)`)
   console.log(`=====================================================`)
   broadcastState()
   initBaileys()
