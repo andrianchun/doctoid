@@ -10,6 +10,7 @@ import { getVisiteSubjectivePrefill, extractClinicalMetrics } from '../utils/cli
 import Masked from './Masked'
 import DateInput from './DateInput'
 import PredictiveInput from './PredictiveInput'
+import { PemfisVisualizer } from './PemfisVisualizer'
 
 interface VisiteModalProps {
   patient: Patient
@@ -376,20 +377,18 @@ export default function VisiteModal({
 
             {/* O */}
             <div className="space-y-1.5">
-              <label className="font-bold text-xs text-primary block">O</label>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <div className="space-y-2">
                 <div>
-                  <span className="text-[10px] font-semibold text-ink-muted block mb-0.5">Fisik & TTV</span>
-                  <textarea
-                    rows={2}
+                  <PemfisVisualizer
                     value={O_pemfis}
-                    onChange={(e) => setOPemfis(e.target.value)}
+                    onChange={(val) => setOPemfis(val)}
+                    label="O - Fisik & TTV"
                     placeholder="KU, TTV, defisit fisik..."
-                    className="w-full rounded-xl border border-slate-200 p-2 text-xs text-ink placeholder:text-ink-muted/40 focus:border-primary focus:ring-1 focus:ring-primary/20 outline-none resize-y"
+                    rows={2}
                   />
                 </div>
                 <div>
-                  <span className="text-[10px] font-semibold text-ink-muted block mb-0.5">Penunjang / Lab</span>
+                  <span className="text-[10px] font-semibold text-ink-muted block mb-0.5">O - Penunjang / Lab</span>
                   <textarea
                     rows={2}
                     value={O_penunjang}

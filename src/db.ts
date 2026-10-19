@@ -216,6 +216,28 @@ export interface PoliLog {
   created_at: string
 }
 
+export interface InboxItem {
+  id?: number
+  source: 'whatsapp' | 'telegram' | 'share'
+  sender_name?: string
+  sender_phone?: string
+  raw_text?: string
+  attachments?: { id?: string; name: string; type: string; dataUrl: string; kategori?: 'pemfis' | 'penunjang' }[]
+  parsed_data?: {
+    nama_depan?: string
+    no_rm?: string
+    usia?: string
+    jaminan?: Jaminan | ''
+    S?: string
+    O_pemfis?: string
+    O_penunjang?: string
+    A?: DiagnosisItem[]
+    P?: TerapiItem[]
+  }
+  status: 'pending' | 'imported' | 'dismissed'
+  created_at: string
+}
+
 export const db = new Dexie('doctoid') as Dexie & {
   patients: EntityTable<Patient, 'id'>
   progressNotes: EntityTable<ProgressNote, 'id'>
@@ -228,6 +250,7 @@ export const db = new Dexie('doctoid') as Dexie & {
   brainstormDraft: EntityTable<BrainstormDraft, 'id'>
   penunjang: EntityTable<PenunjangItem, 'id'>
   poliLogs: EntityTable<PoliLog, 'id'>
+  inboxQueue: EntityTable<InboxItem, 'id'>
 }
 
 db.version(1).stores({
@@ -257,4 +280,8 @@ db.version(5).stores({
 
 db.version(6).stores({
   poliLogs: '++id, hospital_id, tanggal, tipe_poli',
+})
+
+db.version(7).stores({
+  inboxQueue: '++id, source, status, created_at',
 })

@@ -40,3 +40,8 @@ android/keystore.properties
 !.env.example
 
 
+# WhatsApp Gateway Local Session & Transient Files
+scripts/wa-bot/.auth_session
+scripts/wa-bot/node_modules
+public/wa-inbox.json
+public/wa-status.json

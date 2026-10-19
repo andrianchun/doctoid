@@ -81,7 +81,7 @@ export function renderTemplate(fmt: string, p: Patient, latest?: ProgressNote): 
   return fmt.replace(/\{\{(\w+)\}\}/g, (_, k) => vars[k] ?? `{{${k}}}`)
 }
 
-export default function TemplateTab() {
+export default function TemplateTab({ isEmbedded = false }: { isEmbedded?: boolean }) {
   const [toast, setToast] = useState('')
   const notify = (m: string) => {
     setToast(m)
@@ -166,6 +166,10 @@ export default function TemplateTab() {
           format_string: 'LEMBAR KONSULTASI KLINIS\nKepada Yth. Dokter Konsulen\nMohon evaluasi dan tatalaksana bersama pada pasien:\nNama: {{nama_depan}} ({{usia}})\nNo. RM: {{no_rm}}\nMRS: {{tgl_mrs}} (H-{{hari_rawat}})\nDiagnosis: {{diagnosis_utama}}\n\nIkhtisar Klinis:\nS: {{S}}\nO: {{O_pemfis}}\nPenunjang: {{O_penunjang}}\nTerapi Berjalan:\n{{terapi_aktif}}\n\nTerima kasih atas kerjasamanya.',
         },
         {
+          nama_template: 'Jawaban Konsulan Spesialis',
+          format_string: 'JAWABAN KONSUL SPESIALIS\nKepada Yth. TS Pengirim Konsul\n\nMenjawab konsul pasien:\nNama: {{nama_depan}} ({{usia}}) / RM: {{no_rm}}\nDiagnosis Utama: {{diagnosis_utama}}\n\nHasil Pemeriksaan & Ikhtisar:\nS: {{S}}\nO: {{O_pemfis}}\nPenunjang: {{O_penunjang}}\n\nKesimpulan / Asesmen:\n{{A}}\n\nSaran / Rekomendasi Terapi:\n{{PTX}}\n{{PTX_NONFARMAKO}}\n{{PMX}}\n\nTerima kasih atas kerjasamanya.',
+        },
+        {
           nama_template: 'Resume Singkat Pulang (KRS)',
           format_string: 'RESUME RAWAT INAP (KRS)\nNama: {{nama_depan}} | No. RM: {{no_rm}}\nMRS: {{tgl_mrs}} | Hari Rawat: {{hari_rawat}} hari\nDiagnosis Utama: {{diagnosis_utama}}\n\nObat Pulang:\n{{PTX}}\n\nInstruksi Kontrol & Edukasi:\n{{PEX}}',
         },
@@ -192,12 +196,13 @@ export default function TemplateTab() {
     }
   }
 
-  return (
-    <main className="space-y-5 p-5">
-      {/* Banner — 1 Baris */}
-      <div className="glass-blue-hero rounded-3xl px-5 py-4 text-white shadow-xl">
-        <h1 className="h1 text-2xl font-black text-white">Template Generator</h1>
-      </div>
+  const content = (
+    <>
+      {!isEmbedded && (
+        <div className="glass-blue-hero rounded-3xl px-5 py-4 text-white shadow-xl">
+          <h1 className="h1 text-2xl font-black text-white">Template Generator</h1>
+        </div>
+      )}
 
       {/* Main Generator Card */}
       <div className="glass-card rounded-3xl p-5 shadow-sm space-y-4">
@@ -342,6 +347,14 @@ export default function TemplateTab() {
           {toast}
         </aside>
       )}
-    </main>
+    </>
   )
+
+  if (isEmbedded) {
+    return <div className="space-y-4 animate-in fade-in">{content}</div>
+  }
+
+  return <main className="space-y-5 p-5">{content}</main>
 }
+
+export { TemplateTab as TemplateManager }

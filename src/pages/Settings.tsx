@@ -20,6 +20,8 @@ import { CSS } from '@dnd-kit/utilities'
 import { getStoredDateFormat, getStoredTimeFormat, saveDateFormat, saveTimeFormat, type DateFormat, type TimeFormat } from '../utils/dateFormat'
 import { convertToWebP } from '../utils/mediaCompress'
 import { useBodyScrollLock } from '../utils/useBodyScrollLock'
+import TemplateTab from './TemplateTab'
+import { WhatsAppIntegrationCard } from '../components/WhatsAppIntegrationCard'
 
 export const PRESET_ICONS = [
   { id: 'hospital-building', icon: Building2 },
@@ -952,16 +954,17 @@ export default function Settings() {
   }
 
   const rawTab = searchParams.get('tab')
-  const normalizeTab = (t: string | null): 'manajemen' | 'preferensi' | 'lanjutan' => {
+  const normalizeTab = (t: string | null): 'manajemen' | 'preferensi' | 'template' | 'lanjutan' => {
+    if (t === 'template' || t === 'templates' || t === 'ai-rules') return 'template'
     if (t === 'waktu' || t === 'preferensi') return 'preferensi'
     if (t === 'keamanan' || t === 'ai' || t === 'lanjutan') return 'lanjutan'
     return 'manajemen'
   }
-  const [activeTab, setActiveTab] = useState<'manajemen' | 'preferensi' | 'lanjutan'>(
+  const [activeTab, setActiveTab] = useState<'manajemen' | 'preferensi' | 'template' | 'lanjutan'>(
     normalizeTab(rawTab)
   )
 
-  const switchTab = (tab: 'manajemen' | 'preferensi' | 'lanjutan') => {
+  const switchTab = (tab: 'manajemen' | 'preferensi' | 'template' | 'lanjutan') => {
     setActiveTab(tab)
     setSearchParams({ tab }, { replace: true })
   }
@@ -1067,11 +1070,12 @@ export default function Settings() {
         </div>
       </div>
 
-      {/* Navigasi 3 Tab Tetap (Bersih Tanpa Ikon Sesuai Permintaan) */}
-      <div className="grid grid-cols-3 gap-2">
+      {/* Navigasi 4 Tab Pengaturan */}
+      <div className="grid grid-cols-4 gap-1.5 sm:gap-2">
         {[
           { id: 'manajemen' as const, label: 'Manajemen' },
           { id: 'preferensi' as const, label: 'Preferensi' },
+          { id: 'template' as const, label: 'Template & AI' },
           { id: 'lanjutan' as const, label: 'Lanjutan' },
         ].map((tab) => {
           const isActive = activeTab === tab.id
@@ -1079,13 +1083,13 @@ export default function Settings() {
             <button
               key={tab.id}
               onClick={() => switchTab(tab.id)}
-              className={`flex items-center justify-center rounded-2xl py-3 text-xs font-bold transition-all cursor-pointer ${
+              className={`flex items-center justify-center rounded-2xl py-2.5 sm:py-3 text-[11px] sm:text-xs font-bold transition-all cursor-pointer ${
                 isActive
                   ? 'bg-gradient-to-br from-primary to-primary-deep text-white shadow-md shadow-primary/20'
                   : 'glass-card text-ink-muted hover:text-ink hover:bg-surface/80'
               }`}
             >
-              <span>{tab.label}</span>
+              <span className="truncate">{tab.label}</span>
             </button>
           )
         })}
@@ -1251,7 +1255,12 @@ export default function Settings() {
         </div>
       )}
 
-      {/* TAB 3: LANJUTAN (API GEMINI + KEAMANAN, CADANGAN & UPDATE OTA) */}
+      {/* TAB 3: TEMPLATE & ATURAN AI (OPERAN, KONSUL, RESUME PULANG) */}
+      {activeTab === 'template' && (
+        <TemplateTab isEmbedded />
+      )}
+
+      {/* TAB 4: LANJUTAN (API GEMINI + KEAMANAN, CADANGAN & UPDATE OTA) */}
       {activeTab === 'lanjutan' && (
         <div className="space-y-4 animate-in fade-in">
           {/* Section 1: Asisten AI & Kunci API Google Gemini */}
@@ -1262,7 +1271,12 @@ export default function Settings() {
             <ApiKeyCard notify={notify} />
           </div>
 
-          {/* Section 2: Keamanan & Privasi Klinis, Kunci Layar, Cadangan & OTA */}
+          {/* Section 2: Integrasi WhatsApp & Ingestion Berkas */}
+          <div className="glass-card rounded-3xl p-5 shadow-sm">
+            <WhatsAppIntegrationCard notify={notify} />
+          </div>
+
+          {/* Section 3: Keamanan & Privasi Klinis, Kunci Layar, Cadangan & OTA */}
           <div className="glass-card rounded-3xl p-5 shadow-sm">
             <SecuritySection notify={notify} />
           </div>

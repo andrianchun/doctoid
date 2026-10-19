@@ -1,6 +1,7 @@
 import type { Jaminan, KategoriTerapi, RegexField, PoliLogItem } from './db'
 import { getNeuroLockPrompt, getAnalisisInstruksi, RAPIKAN_INSTRUKSI, DIRECT_EDIT_INSTRUKSI } from './prompts'
 import { db } from './db'
+import { sanitizePiiForAi, restorePiiFromAi } from './utils/privacySanitizer'
 
 class APIError extends Error {
   status: number
@@ -84,10 +85,13 @@ async function preferensiDokter(): Promise<string> {
   return `\n\n[PREFERENSI DOKTER]\n${prefs.map((p) => `- ${p.konteks}: ${p.pola}`).join('\n')}`
 }
 
-/* Mode Rapikan — LLM generik memparse teks berantakan + sugesti ICD */
+/* Mode Rapikan — LLM generik memparse teks berantakan + audio VN + foto/video/PDF + sugesti ICD */
 export async function rapikan(text: string, attachments: { type: string; dataUrl: string }[] = [], isRingkas: boolean = true): Promise<RapikanResult> {
   const keys = getAllKeys()
   if (!keys.length) throw new Error('Isi API Key di Pengaturan terlebih dahulu.')
+
+  // De-identifikasi PII sebelum payload meninggalkan perangkat (Kepatuhan UU PDP No. 27/2022)
+  const { sanitizedText, originalTokens } = sanitizePiiForAi(text)
 
   let lastError = new Error('Gagal menghubungi AI Server')
 
@@ -104,7 +108,7 @@ export async function rapikan(text: string, attachments: { type: string; dataUrl
       let res;
       
       if (provider === 'openai') {
-        const contentParts: any[] = [{ type: 'text', text: text || 'Tolong rapikan data ini sesuai instruksi.' }]
+        const contentParts: any[] = [{ type: 'text', text: sanitizedText || 'Tolong rapikan data ini sesuai instruksi.' }]
         for (const att of attachments) {
           if (att.type.startsWith('image/')) {
             contentParts.push({ type: 'image_url', image_url: { url: att.dataUrl } })
@@ -123,13 +127,20 @@ export async function rapikan(text: string, attachments: { type: string; dataUrl
           }),
         })
       } else {
-        // Google Gemini model fallback chain
+        // Google Gemini model fallback chain - Multimodal (Teks, Foto, Audio VN, Video Kejang, PDF Lab)
         const googleModels = ['gemini-3.5-flash', 'gemini-1.5-flash', 'gemini-flash-latest']
-        const parts: any[] = [{ text: systemPrompt + '\n\n[INPUT KASUS]\n' + (text || 'Tolong rapikan gambar/data ini sesuai schema JSON.') }]
+        const parts: any[] = [{ text: systemPrompt + '\n\n[INPUT KASUS]\n' + (sanitizedText || 'Tolong rapikan media/data klinis ini sesuai schema JSON.') }]
         for (const att of attachments) {
-          if (att.type.startsWith('image/')) {
-            const b64 = att.dataUrl.split(',')[1]
-            parts.push({ inline_data: { mime_type: att.type, data: b64 } })
+          if (
+            att.type.startsWith('image/') ||
+            att.type.startsWith('audio/') ||
+            att.type.startsWith('video/') ||
+            att.type === 'application/pdf'
+          ) {
+            const b64 = att.dataUrl.includes(',') ? att.dataUrl.split(',')[1] : att.dataUrl
+            if (b64) {
+              parts.push({ inline_data: { mime_type: att.type, data: b64 } })
+            }
           }
         }
         
@@ -166,6 +177,12 @@ export async function rapikan(text: string, attachments: { type: string; dataUrl
       }
       const jsonMatch = resultText.match(/\{[\s\S]*\}|\[[\s\S]*\]/)
       if (jsonMatch) resultText = jsonMatch[0]
+
+      // Pulihkan kembali PII asli secara lokal pada perangkat
+      if (originalTokens.size > 0) {
+        resultText = restorePiiFromAi(resultText, originalTokens)
+      }
+
       return JSON.parse(resultText)
     } catch (err: any) {
       lastError = err

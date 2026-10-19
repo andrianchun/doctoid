@@ -20,6 +20,7 @@ export const TABLES = [
   'therapyHistory',
   'penunjang',
   'poliLogs',
+  'inboxQueue',
 ] as const
 
 export const getDeviceId = () => {

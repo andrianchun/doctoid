@@ -117,10 +117,14 @@ public class ShareReceiverPlugin extends Plugin {
         try {
             String mime = ctx.getContentResolver().getType(uri);
             if (mime == null || mime.isEmpty()) {
-                mime = (mimeFallback != null && mimeFallback.startsWith("image/")) ? mimeFallback : "image/jpeg";
+                if (mimeFallback != null && !mimeFallback.isEmpty() && !mimeFallback.equals("*/*")) {
+                    mime = mimeFallback;
+                } else {
+                    mime = "application/octet-stream";
+                }
             }
 
-            String name = "shared_image.jpg";
+            String name = "shared_file";
             Cursor cursor = ctx.getContentResolver().query(uri, null, null, null, null);
             if (cursor != null) {
                 int nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME);
@@ -128,6 +132,18 @@ public class ShareReceiverPlugin extends Plugin {
                     name = cursor.getString(nameIndex);
                 }
                 cursor.close();
+            }
+
+            // Fallback ekstensi berkas jika mime masih generik
+            if ("application/octet-stream".equals(mime)) {
+                String lowerName = name.toLowerCase();
+                if (lowerName.endsWith(".jpg") || lowerName.endsWith(".jpeg")) mime = "image/jpeg";
+                else if (lowerName.endsWith(".png")) mime = "image/png";
+                else if (lowerName.endsWith(".webp")) mime = "image/webp";
+                else if (lowerName.endsWith(".pdf")) mime = "application/pdf";
+                else if (lowerName.endsWith(".opus") || lowerName.endsWith(".ogg")) mime = "audio/ogg";
+                else if (lowerName.endsWith(".m4a") || lowerName.endsWith(".mp3") || lowerName.endsWith(".aac")) mime = "audio/mp4";
+                else if (lowerName.endsWith(".mp4") || lowerName.endsWith(".3gp") || lowerName.endsWith(".mkv")) mime = "video/mp4";
             }
 
             InputStream is = ctx.getContentResolver().openInputStream(uri);

@@ -13,17 +13,19 @@ import UpdaterAlert from './components/UpdaterAlert'
 import Dasbor from './pages/Dasbor'
 import Brainstorm from './pages/Brainstorm'
 import RawatInap from './pages/RawatInap'
+import RawatJalan from './pages/RawatJalan'
 import RekamMedis from './pages/RekamMedis'
-import TemplateTab from './pages/TemplateTab'
 import PatientProfile from './pages/PatientProfile'
 import Settings from './pages/Settings'
 import DoctorProfile from './pages/DoctorProfile'
 import { initAuthListener } from './auth'
 import { checkRevoked, initRealtimeCloudSync, fbConfigured } from './sync'
+import { useWaInboxSync } from './utils/waInboxSync'
 
 const IDLE_LOCK_MS = 5 * 60 * 1000 // 5 menit tanpa aktivitas → auto-lock layar (proteksi data pasien)
 
 export default function App() {
+  useWaInboxSync()
   const { user, setUser, isUnlocked, setIsUnlocked, authLoading, setAuthLoading } = useUi()
 
   // Inisialisasi Native Android: Status Bar, Capgo, & Sinkronisasi Versi APK
@@ -137,10 +139,12 @@ export default function App() {
               <Route path="/dasbor" element={<Dasbor />} />
               <Route path="/brainstorm" element={<Brainstorm />} />
               <Route path="/rawatinap" element={<RawatInap />} />
+              <Route path="/rawatjalan" element={<RawatJalan />} />
+              <Route path="/poli" element={<Navigate to="/rawatjalan" replace />} />
               <Route path="/rekammedis" element={<RekamMedis />} />
               <Route path="/rekammedis/:id" element={<PatientProfile />} />
               <Route path="/rekap" element={<Navigate to="/rekammedis" replace />} />
-              <Route path="/template" element={<TemplateTab />} />
+              <Route path="/template" element={<Navigate to="/pengaturan?tab=template" replace />} />
               <Route path="/pasien/:id" element={<PatientProfile />} />
               <Route path="/pengaturan" element={<Settings />} />
               <Route path="/settings" element={<Navigate to="/pengaturan" replace />} />

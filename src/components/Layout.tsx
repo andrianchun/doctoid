@@ -1,13 +1,13 @@
 import { useRef } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { LayoutDashboard, PenLine, BedDouble, FolderOpen, FileText } from 'lucide-react'
+import { LayoutDashboard, PenLine, BedDouble, Stethoscope, FolderOpen } from 'lucide-react'
 
 const TABS = [
   { to: '/dasbor', label: 'Dasbor', Icon: LayoutDashboard },
   { to: '/brainstorm', label: 'Catat Pasien', Icon: PenLine },
   { to: '/rawatinap', label: 'Rawat Inap', Icon: BedDouble },
+  { to: '/rawatjalan', label: 'Rawat Jalan', Icon: Stethoscope },
   { to: '/rekammedis', label: 'Rekam Medis', Icon: FolderOpen },
-  { to: '/template', label: 'Template', Icon: FileText },
 ]
 
 export default function Layout() {
@@ -17,22 +17,22 @@ export default function Layout() {
   const isDasbor = location.pathname === '/dasbor' || location.pathname === '/'
   const isBrainstorm = location.pathname === '/brainstorm'
   const isRawatInap = location.pathname === '/rawatinap'
+  const isRawatJalan = location.pathname === '/rawatjalan' || location.pathname === '/poli'
   const isRekamMedis =
     location.pathname === '/rekammedis' ||
     location.pathname.startsWith('/rekammedis/') ||
     location.pathname === '/rekap' ||
     location.pathname.startsWith('/pasien/')
-  const isTemplate = location.pathname === '/template'
-  const isMainTab = isDasbor || isBrainstorm || isRawatInap || isRekamMedis || isTemplate
+  const isMainTab = isDasbor || isBrainstorm || isRawatInap || isRawatJalan || isRekamMedis
   const activeIndex = isDasbor
     ? 0
     : isBrainstorm
     ? 1
     : isRawatInap
     ? 2
-    : isRekamMedis
+    : isRawatJalan
     ? 3
-    : isTemplate
+    : isRekamMedis
     ? 4
     : -1
 
@@ -136,10 +136,10 @@ export default function Layout() {
                     ? isBrainstorm
                     : to === '/rawatinap'
                     ? isRawatInap
+                    : to === '/rawatjalan'
+                    ? isRawatJalan
                     : to === '/rekammedis'
                     ? isRekamMedis
-                    : to === '/template'
-                    ? isTemplate
                     : false
 
                 const isBrainstormActive = isActive && isBrainstorm && to === '/brainstorm'

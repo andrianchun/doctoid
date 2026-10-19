@@ -37,6 +37,7 @@ import ClinicalTrendingView from '../components/ClinicalTrendingView'
 import PredictiveInput from '../components/PredictiveInput'
 import { extractClinicalMetrics } from '../utils/clinicalExtractor'
 import CustomSelect, { type SelectOption } from '../components/CustomSelect'
+import { PemfisVisualizer } from '../components/PemfisVisualizer'
 
 const PARENTERAL = /\binj\b|injeksi|drip|\biv\b|infus|\bamp\b|bolus|syringe|titrasi|pump|nebul/i
 
@@ -2895,13 +2896,12 @@ export default function PatientProfile() {
               </div>
 
               <div>
-                <label className="block text-[11px] font-semibold text-ink-muted mb-1">Objective - Pemeriksaan Fisik (O Pemfis)</label>
-                <textarea
-                  rows={2}
+                <PemfisVisualizer
                   value={editingNote.O_pemfis}
-                  onChange={(e) => setEditingNote({ ...editingNote, O_pemfis: e.target.value })}
+                  onChange={(val) => setEditingNote({ ...editingNote, O_pemfis: val })}
+                  label="Objective - Pemeriksaan Fisik (O Pemfis)"
                   placeholder="Tanda vital, kesadaran, status lokalis..."
-                  className="w-full rounded-xl border border-slate-200 p-2.5 text-xs text-ink outline-none focus:border-primary resize-y"
+                  rows={2}
                 />
               </div>
 

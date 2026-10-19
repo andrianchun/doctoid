@@ -48,8 +48,28 @@ export default function CustomSelect({
   useEffect(() => {
     if (isOpen && containerRef.current) {
       const rect = containerRef.current.getBoundingClientRect()
-      const spaceBelow = window.innerHeight - rect.bottom
-      setOpenUpward(spaceBelow < 240 && rect.top > 240)
+      let spaceBelow = window.innerHeight - rect.bottom
+      let spaceAbove = rect.top
+
+      let parent = containerRef.current.parentElement
+      while (parent && parent !== document.body) {
+        const style = window.getComputedStyle(parent)
+        const overflowY = style.overflowY
+        if (
+          overflowY === 'auto' ||
+          overflowY === 'scroll' ||
+          overflowY === 'hidden' ||
+          parent.getAttribute('role') === 'dialog'
+        ) {
+          const parentRect = parent.getBoundingClientRect()
+          spaceBelow = Math.min(spaceBelow, parentRect.bottom - rect.bottom)
+          spaceAbove = Math.min(spaceAbove, rect.top - parentRect.top)
+          break
+        }
+        parent = parent.parentElement
+      }
+
+      setOpenUpward(spaceBelow < 240 && spaceAbove > 180)
     }
   }, [isOpen])
 

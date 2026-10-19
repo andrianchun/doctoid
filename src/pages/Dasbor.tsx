@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef } from 'react'
+import { useState, useMemo } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
 import {
@@ -18,7 +18,6 @@ import {
   EyeOff,
   ChevronRight,
   Plus,
-  Pencil,
   Settings,
 } from 'lucide-react'
 import { db, type Patient, type Hospital, type ProgressNote, type PoliLog, type TerapiItem } from '../db'
@@ -66,25 +65,9 @@ export default function Dasbor() {
   const [showPoliModal, setShowPoliModal] = useState(false)
   const [selectedPoliForEdit, setSelectedPoliForEdit] = useState<PoliLog | undefined>(undefined)
 
-  const filterScrollRef = useRef<HTMLDivElement>(null)
-
-  const centerElement = (el: HTMLElement) => {
-    const container = filterScrollRef.current
-    if (!container) return
-    const containerRect = container.getBoundingClientRect()
-    const elRect = el.getBoundingClientRect()
-    const relativeLeft = elRect.left - containerRect.left
-    const targetScrollLeft = container.scrollLeft + relativeLeft - container.clientWidth / 2 + elRect.width / 2
-    const maxScroll = Math.max(0, container.scrollWidth - container.clientWidth)
-    container.scrollTo({ left: Math.max(0, Math.min(maxScroll, targetScrollLeft)), behavior: 'smooth' })
-  }
-
-  const handleFilterClick = (id: number, e?: React.MouseEvent<HTMLButtonElement>) => {
+  const handleFilterClick = (id: number) => {
     setFilterHospitalId(id)
     sessionStorage.setItem('doctoid_dasbor_filter_rs', String(id))
-    if (e?.currentTarget) {
-      centerElement(e.currentTarget)
-    }
   }
 
   const handleToggleMask = async () => {
@@ -514,69 +497,7 @@ export default function Dasbor() {
         </div>
       </div>
 
-      {/* Filter Faskes / RS + Tombol Catat Poli + Tombol Kelola Faskes (Pencil) */}
-      <div className="flex items-center gap-2">
-        <div
-          ref={filterScrollRef}
-          className="flex-1 min-w-0 flex items-center gap-2 overflow-x-auto pb-1 hide-scrollbar scroll-smooth"
-        >
-          <button
-            type="button"
-            data-active={!filterHospitalId}
-            onClick={(e) => handleFilterClick(0, e)}
-            className={`h-9 cursor-pointer rounded-full px-4 text-xs font-bold shrink-0 transition-all whitespace-nowrap ${
-              !filterHospitalId
-                ? 'bg-gradient-to-br from-primary to-primary-deep text-white shadow-md shadow-primary/30'
-                : 'glass-card text-ink-muted hover:text-ink'
-            }`}
-          >
-            Semua
-          </button>
-          {hospitals?.map((h) => (
-            <button
-              key={h.id}
-              type="button"
-              data-active={filterHospitalId === h.id}
-              onClick={(e) => handleFilterClick(h.id!, e)}
-              className={`flex h-9 shrink-0 cursor-pointer items-center gap-2 rounded-full px-4 text-xs font-bold transition-all whitespace-nowrap ${
-                filterHospitalId === h.id ? 'text-white shadow-md' : 'glass-card text-ink-muted hover:text-ink'
-              }`}
-              style={filterHospitalId === h.id ? { backgroundColor: h.kode_warna } : undefined}
-            >
-              <span
-                className={`size-2 rounded-full shrink-0 ${filterHospitalId === h.id ? 'bg-white' : ''}`}
-                style={filterHospitalId === h.id ? undefined : { backgroundColor: h.kode_warna }}
-              />
-              <span>{h.nama}</span>
-            </button>
-          ))}
-        </div>
 
-        {/* Tombol Catat Poli Cepat */}
-        <button
-          type="button"
-          onClick={() => {
-            setSelectedPoliForEdit(undefined)
-            setShowPoliModal(true)
-          }}
-          className="flex items-center gap-1.5 h-9 px-3.5 rounded-full bg-gradient-to-r from-teal-600 to-teal-700 text-white text-xs font-bold shadow-md shadow-teal-600/20 hover:opacity-95 active:scale-95 transition-all shrink-0 cursor-pointer"
-        >
-          <Plus size={15} />
-          <span className="hidden sm:inline">Catat Poli</span>
-          <span className="sm:hidden">Poli</span>
-        </button>
-
-        {/* Tombol Kelola Faskes (Icon Pensil Tanpa Teks) - Posisi tetap di kanan */}
-        <button
-          type="button"
-          onClick={() => navigate('/pengaturan?tab=manajemen')}
-          title="Kelola Faskes & Ruangan"
-          aria-label="Kelola Faskes & Ruangan"
-          className="flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-full glass-card text-ink-muted hover:text-primary hover:bg-primary/10 active:scale-95 transition-all shadow-xs"
-        >
-          <Pencil size={15} />
-        </button>
-      </div>
 
       {/* Beban Kasus Donut Chart (Distribusi Pasien per Faskes) */}
       {hospitalStats.length > 0 && (
@@ -671,11 +592,8 @@ export default function Dasbor() {
         </Link>
 
         {/* Card 2: Pasien Poli Hari Ini */}
-        <div
-          onClick={() => {
-            setSelectedPoliForEdit(undefined)
-            setShowPoliModal(true)
-          }}
+        <Link
+          to="/rawatjalan"
           className="group block p-4 rounded-3xl bg-white border border-slate-200/90 shadow-xs hover:border-primary/40 hover:shadow-md transition-all relative overflow-hidden cursor-pointer"
         >
           <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
@@ -685,10 +603,11 @@ export default function Dasbor() {
             {poliTodayCount}
             <span className="text-xs font-bold text-slate-400 ml-1">pasien</span>
           </div>
-          <div className="mt-2.5 text-[11px] text-slate-500 font-medium truncate">
-            {poliTodayLogs.length > 0 ? `${poliTodayLogs.length} sesi tercatat` : '+ Catat Sesi Poli'}
+          <div className="mt-2.5 text-[11px] text-teal-600 font-semibold truncate flex items-center justify-between">
+            <span>{poliTodayLogs.length > 0 ? `${poliTodayLogs.length} sesi tercatat` : '+ Catat Sesi Poli'}</span>
+            <ChevronRight size={13} className="text-slate-400 group-hover:translate-x-0.5 transition-transform" />
           </div>
-        </div>
+        </Link>
 
         {/* Card 3: Total Pasien Dilayani Hari Ini */}
         <div className="p-4 rounded-3xl bg-white border border-slate-200/90 shadow-xs relative overflow-hidden">
@@ -907,9 +826,17 @@ export default function Dasbor() {
       {/* SECTION: REKAP PASIEN POLI HARI INI */}
       <div className="rounded-3xl bg-white border border-slate-200/90 shadow-xs p-5">
         <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-          <h2 className="text-sm sm:text-base font-bold text-slate-800">
-            Rekap Poli Hari Ini
-          </h2>
+          <div className="flex items-center gap-2">
+            <h2 className="text-sm sm:text-base font-bold text-slate-800">
+              Rekap Poli Hari Ini
+            </h2>
+            <Link
+              to="/rawatjalan"
+              className="text-[11px] font-bold text-teal-700 hover:text-teal-900 hover:underline flex items-center gap-0.5"
+            >
+              Buka Rawat Jalan <ChevronRight size={12} />
+            </Link>
+          </div>
           <button
             type="button"
             onClick={() => {

@@ -14,6 +14,50 @@ export interface DateInputProps {
   autoFocus?: boolean
 }
 
+function checkShouldOpenUpward(el: HTMLElement | null, minRequiredBelow = 180, minRequiredAbove = 140): boolean {
+  if (!el) return false
+  const rect = el.getBoundingClientRect()
+
+  let spaceBelow = window.innerHeight - rect.bottom
+  let spaceAbove = rect.top
+
+  // Cari container scroll atau modal/dialog terdekat
+  let parent = el.parentElement
+  while (parent && parent !== document.body) {
+    const style = window.getComputedStyle(parent)
+    const overflowY = style.overflowY
+    if (
+      overflowY === 'auto' ||
+      overflowY === 'scroll' ||
+      overflowY === 'hidden' ||
+      parent.getAttribute('role') === 'dialog'
+    ) {
+      const parentRect = parent.getBoundingClientRect()
+      spaceBelow = Math.min(spaceBelow, parentRect.bottom - rect.bottom)
+      spaceAbove = Math.min(spaceAbove, rect.top - parentRect.top)
+      break
+    }
+    parent = parent.parentElement
+  }
+
+  // Jika ruang di bawah sempit (< minRequiredBelow) dan ada cukup ruang di atas (>= minRequiredAbove), buka ke atas.
+  if (spaceBelow < minRequiredBelow && spaceAbove >= minRequiredAbove) {
+    return true
+  }
+
+  // Jika ruang di atas lebih lega daripada di bawah dan ruang di bawah agak terbatas (< minRequiredBelow + 50)
+  if (spaceAbove > spaceBelow && spaceBelow < minRequiredBelow + 50 && spaceAbove >= minRequiredAbove) {
+    return true
+  }
+
+  // Jika ruang di bawah sangat mepet (< 120px) dan ruang di atas > ruang di bawah, paksa ke atas
+  if (spaceBelow < 120 && spaceAbove > spaceBelow) {
+    return true
+  }
+
+  return false
+}
+
 export default function DateInput({
   value,
   onChange,
@@ -33,12 +77,16 @@ export default function DateInput({
 
   const toggleMenu = () => {
     if (!showMenu && containerRef.current) {
-      const rect = containerRef.current.getBoundingClientRect()
-      const spaceBelow = window.innerHeight - rect.bottom
-      setOpenUpward(spaceBelow < 170)
+      setOpenUpward(checkShouldOpenUpward(containerRef.current, 180, 140))
     }
     setShowMenu((prev) => !prev)
   }
+
+  useEffect(() => {
+    if (showMenu && containerRef.current) {
+      setOpenUpward(checkShouldOpenUpward(containerRef.current, 180, 140))
+    }
+  }, [showMenu])
 
   useEffect(() => {
     setText(toDisplayDate(value))

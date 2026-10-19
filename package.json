@@ -1,7 +1,7 @@
 {
   "name": "docto.id",
   "private": true,
-  "version": "0.1.38",
+  "version": "0.1.39",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -11,6 +11,7 @@
     "sync:android": "tsc -b && vite build && npx cap sync android",
     "generate:assets": "node scripts/generate-assets.js",
     "lint": "oxlint",
+    "wa:bot": "node scripts/wa-bot/server.js",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -48,8 +49,11 @@
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.3",
+    "@whiskeysockets/baileys": "^7.0.0-rc14",
     "archiver": "^8.0.0",
     "oxlint": "^1.71.0",
+    "pino": "^10.4.0",
+    "qrcode-terminal": "^0.12.0",
     "sharp": "^0.35.4",
     "typescript": "~6.0.2",
     "vite": "^8.1.1",
