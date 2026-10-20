@@ -4,7 +4,6 @@ import {
   ShieldCheck,
   Smartphone,
   Check,
-  Copy,
   Lock,
   Power,
   RefreshCw,
@@ -54,12 +53,35 @@ export const WhatsAppIntegrationCard: React.FC<WhatsAppIntegrationCardProps> = (
     return 'http://35.255.95.161:3001'
   }
 
-  // Polling status bot dari endpoint gateway
+  // Polling status bot dari Cloud Firestore HTTPS & Gateway VM
   const fetchStatus = async () => {
     try {
-      // Hubungi controller server gateway port 3001
+      // 1. Coba baca status terbaru dari Cloud Firestore HTTPS (Port 443, selalu tembus operator seluler & bebas Mixed Content)
+      try {
+        const firestoreUrl = `https://firestore.googleapis.com/v1/projects/docto-id/databases/(default)/documents/doctoid/bot_status?t=${Date.now()}`
+        const fRes = await fetch(firestoreUrl)
+        if (fRes.ok) {
+          const fData = await fRes.json()
+          const fields = fData.fields || {}
+          if (fields.active !== undefined) {
+            setBotState({
+              active: fields.active?.booleanValue ?? true,
+              connected: fields.connected?.booleanValue ?? false,
+              phone: fields.phone?.stringValue || null,
+              name: fields.name?.stringValue || null,
+              clinicalGroupId: fields.clinicalGroupId?.stringValue || null,
+              clinicalGroupName: fields.clinicalGroupName?.stringValue || 'Doctobot by Doctoid',
+              qrDataUrl: null,
+            })
+            setServerOnline(true)
+            return
+          }
+        }
+      } catch {}
+
+      // 2. Hubungi controller server gateway port 3001 sebagai alternatif
       const controller = new AbortController()
-      const timer = setTimeout(() => controller.abort(), 3500)
+      const timer = setTimeout(() => controller.abort(), 3000)
       const res = await fetch(`${getGatewayBase()}/api/status?t=${Date.now()}`, { signal: controller.signal })
       clearTimeout(timer)
       if (res.ok) {
@@ -267,7 +289,7 @@ export const WhatsAppIntegrationCard: React.FC<WhatsAppIntegrationCardProps> = (
             />
             <span className="font-semibold text-slate-300">
               {!serverOnline
-                ? 'Gateway Service Offline (Jalankan: npm run wa:bot)'
+                ? 'Menghubungkan ke Cloud Gateway Docto.id...'
                 : botState?.connected
                 ? `Terhubung: ${botState.name || 'Dokter'} (${botState.phone || 'Aktif'})`
                 : botState?.active
@@ -451,28 +473,18 @@ export const WhatsAppIntegrationCard: React.FC<WhatsAppIntegrationCardProps> = (
         </div>
       )}
 
-      {/* KONDISI 3: SERVER BELUM BERJALAN */}
+      {/* KONDISI 3: STATUS CLOUD GATEWAY */}
       {!serverOnline && (
-        <div className="p-3.5 rounded-2xl bg-slate-100 border border-slate-200 text-slate-700 space-y-2">
-          <span className="font-bold text-xs text-ink block">
-            Jalankan Gateway Service di Komputer Anda:
-          </span>
-          <p className="text-[11px] text-slate-600 leading-relaxed">
-            Buka terminal proyek dan ketik perintah berikut untuk memulai service bot:
-          </p>
-          <div className="p-2.5 rounded-xl bg-slate-900 text-emerald-400 font-mono text-[11px] flex items-center justify-between">
-            <span>npm run wa:bot</span>
-            <button
-              type="button"
-              onClick={() => {
-                navigator.clipboard.writeText('npm run wa:bot')
-                notify('Perintah disalin ke clipboard')
-              }}
-              className="text-slate-400 hover:text-white cursor-pointer"
-            >
-              <Copy size={13} />
-            </button>
+        <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 text-slate-700 space-y-2">
+          <div className="flex items-center gap-2">
+            <Loader2 size={14} className="animate-spin text-emerald-600" />
+            <span className="font-bold text-xs text-ink">
+              Cloud Gateway Docto.id (Google Cloud 24/7)
+            </span>
           </div>
+          <p className="text-[11px] text-slate-600 leading-relaxed">
+            Bot berjalan otomatis di cloud server Google Cloud. Anda tidak perlu menyalakan komputer atau menjalankan aplikasi secara manual.
+          </p>
         </div>
       )}
 

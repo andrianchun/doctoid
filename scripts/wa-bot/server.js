@@ -73,6 +73,33 @@ function broadcastState() {
   } catch (err) {
     console.error('Gagal menulis status json:', err.message)
   }
+  syncBotStateToFirestore()
+}
+
+async function syncBotStateToFirestore() {
+  try {
+    const accessToken = await getAccessToken()
+    if (!accessToken) return
+    const payload = {
+      fields: {
+        active: { booleanValue: Boolean(botState.active) },
+        connected: { booleanValue: Boolean(botState.connected) },
+        phone: { stringValue: botState.phone || '' },
+        name: { stringValue: botState.name || '' },
+        clinicalGroupId: { stringValue: botState.clinicalGroupId || '' },
+        clinicalGroupName: { stringValue: botState.clinicalGroupName || '' },
+        updatedAt: { integerValue: String(Date.now()) },
+      },
+    }
+    await fetch('https://firestore.googleapis.com/v1/projects/docto-id/databases/(default)/documents/doctoid/bot_status', {
+      method: 'PATCH',
+      headers: {
+        Authorization: 'Bearer ' + accessToken,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    })
+  } catch {}
 }
 
 const GROUP_DESCRIPTION_TEXT = `🩺 DOCTOBOT by DOCTO.ID — Gateway Konsul & Rekam Medis Klinis
@@ -95,12 +122,12 @@ Grup ini bekerja dalam mode pasif (silent listener) & terenkripsi end-to-end. Da
 
 Platform: https://docto-id.web.app`
 
-async function setupDoctoGroupBranding(groupId, currentSubject = '') {
+async function setupDoctoGroupBranding(groupId, currentSubject = '', customIconBuffer = null) {
   if (!sock || !groupId) return
   console.log(`🎨 Memeriksa branding resmi Doctobot pada grup ${groupId}...`)
 
   // 1. Rename nama grup menjadi "Doctobot by Doctoid" jika belum sesuai
-  if (currentSubject !== CLINICAL_GROUP_NAME) {
+  if (currentSubject && currentSubject !== CLINICAL_GROUP_NAME) {
     try {
       await sock.groupUpdateSubject(groupId, CLINICAL_GROUP_NAME)
       console.log(`✓ Nama grup WhatsApp berhasil diubah menjadi: "${CLINICAL_GROUP_NAME}"`)
@@ -113,16 +140,18 @@ async function setupDoctoGroupBranding(groupId, currentSubject = '') {
 
   // 2. Pasang Foto Profil Logo Resmi Docto.id
   try {
-    let iconBuffer = null
-    const iconLocalPath = path.join(__dirname, 'icon.jpg')
-    const iconPublicPath = path.join(PUBLIC_DIR, 'icon.jpg')
-    const iconB64Path = path.join(__dirname, 'icon_b64.txt')
-    if (fs.existsSync(iconLocalPath)) {
-      iconBuffer = fs.readFileSync(iconLocalPath)
-    } else if (fs.existsSync(iconPublicPath)) {
-      iconBuffer = fs.readFileSync(iconPublicPath)
-    } else if (fs.existsSync(iconB64Path)) {
-      iconBuffer = Buffer.from(fs.readFileSync(iconB64Path, 'utf8').trim(), 'base64')
+    let iconBuffer = customIconBuffer
+    if (!iconBuffer) {
+      const iconLocalPath = path.join(__dirname, 'icon.jpg')
+      const iconPublicPath = path.join(PUBLIC_DIR, 'icon.jpg')
+      const iconB64Path = path.join(__dirname, 'icon_b64.txt')
+      if (fs.existsSync(iconLocalPath)) {
+        iconBuffer = fs.readFileSync(iconLocalPath)
+      } else if (fs.existsSync(iconPublicPath)) {
+        iconBuffer = fs.readFileSync(iconPublicPath)
+      } else if (fs.existsSync(iconB64Path)) {
+        iconBuffer = Buffer.from(fs.readFileSync(iconB64Path, 'utf8').trim(), 'base64')
+      }
     }
 
     if (iconBuffer) {
@@ -138,6 +167,9 @@ async function setupDoctoGroupBranding(groupId, currentSubject = '') {
     await sock.groupUpdateDescription(groupId, GROUP_DESCRIPTION_TEXT)
     console.log(`✓ Deskripsi resmi panduan konsul berhasil dipasang pada grup!`)
   } catch (err) {
+    console.warn('⚠️ Gagal memasang deskripsi grup:', err.message)
+  }
+}
     console.warn('⚠️ Gagal memasang deskripsi grup:', err.message)
   }
 }
@@ -949,14 +981,32 @@ const server = http.createServer(async (req, res) => {
 
   // POST /api/sync-group-branding (Terapkan ulang Logo & Deskripsi Resmi ke grup aktif)
   if (req.method === 'POST' && url.pathname === '/api/sync-group-branding') {
-    if (!sock || !botState.connected || !botConfig.clinicalGroupId) {
-      res.writeHead(400, { 'Content-Type': 'application/json' })
-      res.end(JSON.stringify({ error: 'WhatsApp belum terhubung atau belum ada grup klinis terdaftar.' }))
-      return
-    }
-    await setupDoctoGroupBranding(botConfig.clinicalGroupId, '')
-    res.writeHead(200, { 'Content-Type': 'application/json' })
-    res.end(JSON.stringify({ success: true, message: 'Logo dan deskripsi grup berhasil diperbarui.' }))
+    let body = ''
+    req.on('data', (chunk) => (body += chunk))
+    req.on('end', async () => {
+      try {
+        if (!sock || !botState.connected || !botConfig.clinicalGroupId) {
+          res.writeHead(400, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ error: 'WhatsApp belum terhubung atau belum ada grup klinis terdaftar.' }))
+          return
+        }
+        let customBuffer = null
+        if (body) {
+          try {
+            const parsed = JSON.parse(body)
+            if (parsed.iconBase64) {
+              customBuffer = Buffer.from(parsed.iconBase64, 'base64')
+            }
+          } catch {}
+        }
+        await setupDoctoGroupBranding(botConfig.clinicalGroupId, '', customBuffer)
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ success: true, message: 'Logo dan deskripsi grup berhasil diperbarui.' }))
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: err.message }))
+      }
+    })
     return
   }
 
