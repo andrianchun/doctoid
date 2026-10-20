@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
+import { createPortal } from 'react-dom'
+import { Capacitor } from '@capacitor/core'
 import {
   X,
   ZoomIn,
@@ -217,18 +219,27 @@ export const ImageViewerModal: React.FC<ImageViewerModalProps> = ({
     document.body.removeChild(a)
   }
 
-  return (
+  if (!isOpen || images.length === 0) return null
+
+  return createPortal(
     <div
-      className="fixed inset-0 z-50 flex flex-col bg-slate-950/95 backdrop-blur-md animate-in fade-in duration-200 select-none"
+      className="fixed inset-0 z-[9999] flex flex-col bg-slate-950/98 backdrop-blur-md animate-in fade-in duration-200 select-none overflow-hidden overscroll-contain"
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose()
       }}
     >
-      {/* Top Header Bar */}
-      <div className="flex items-center justify-between px-4 py-3 bg-slate-900/80 border-b border-slate-800 text-white z-10 shrink-0">
-        <div className="flex items-center gap-3 min-w-0 pr-2">
+      {/* Top Header Bar (Safe Area Padding agar tidak tertabrak jam & status bar) */}
+      <div
+        className="flex items-center justify-between px-4 pb-3 bg-slate-900/90 border-b border-slate-800 text-white z-10 shrink-0"
+        style={{
+          paddingTop: Capacitor.isNativePlatform()
+            ? 'calc(max(env(safe-area-inset-top, 0px), 36px) + 0.5rem)'
+            : 'calc(env(safe-area-inset-top, 0px) + 0.75rem)',
+        }}
+      >
+        <div className="flex items-center gap-2.5 min-w-0 pr-2">
           {images.length > 1 && (
-            <span className="px-2.5 py-1 rounded-full bg-slate-800 text-xs font-bold text-slate-300 shrink-0">
+            <span className="px-2 py-0.5 rounded-full bg-slate-800 text-[11px] font-bold text-slate-300 shrink-0">
               {currentIndex + 1} / {images.length}
             </span>
           )}
@@ -294,7 +305,7 @@ export const ImageViewerModal: React.FC<ImageViewerModalProps> = ({
             src={currentImage.url}
             alt={currentImage.name || 'Lampiran'}
             draggable={false}
-            className="max-h-[80vh] max-w-[95vw] object-contain rounded-lg shadow-2xl pointer-events-none"
+            className="max-h-[82vh] max-w-[96vw] object-contain rounded-lg shadow-2xl pointer-events-none"
           />
         </div>
 
@@ -329,9 +340,14 @@ export const ImageViewerModal: React.FC<ImageViewerModalProps> = ({
         )}
       </div>
 
-      {/* Bottom Floating Control Dock */}
-      <div className="flex items-center justify-center px-4 py-3 bg-slate-900/90 border-t border-slate-800 z-10 shrink-0">
-        <div className="flex items-center gap-2 bg-slate-800/90 border border-slate-700 px-3 py-1.5 rounded-2xl shadow-xl">
+      {/* Bottom Floating Control Dock (Safe Area Padding untuk Nav Pill HP) */}
+      <div
+        className="flex items-center justify-center px-4 py-2 bg-slate-900/90 border-t border-slate-800 z-10 shrink-0"
+        style={{
+          paddingBottom: 'calc(max(env(safe-area-inset-bottom, 0px), 0.5rem) + 0.25rem)',
+        }}
+      >
+        <div className="flex items-center gap-2 bg-slate-800/90 border border-slate-700 px-3 py-1 rounded-xl shadow-xl">
           <button
             type="button"
             onClick={handleZoomOut}
@@ -340,10 +356,10 @@ export const ImageViewerModal: React.FC<ImageViewerModalProps> = ({
             title="Perkecil (-)"
             className="p-1.5 rounded-lg text-slate-300 hover:text-white hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
           >
-            <ZoomOut size={18} />
+            <ZoomOut size={16} />
           </button>
 
-          <span className="text-xs font-mono font-bold text-slate-300 min-w-[50px] text-center select-none">
+          <span className="text-xs font-mono font-bold text-slate-300 min-w-[45px] text-center select-none">
             {Math.round(scale * 100)}%
           </span>
 
@@ -355,7 +371,7 @@ export const ImageViewerModal: React.FC<ImageViewerModalProps> = ({
             title="Perbesar (+)"
             className="p-1.5 rounded-lg text-slate-300 hover:text-white hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
           >
-            <ZoomIn size={18} />
+            <ZoomIn size={16} />
           </button>
 
           {scale !== 1 || rotation !== 0 ? (
@@ -366,11 +382,12 @@ export const ImageViewerModal: React.FC<ImageViewerModalProps> = ({
               title="Reset Tampilan (100%)"
               className="p-1.5 rounded-lg text-amber-400 hover:text-amber-300 hover:bg-slate-700 transition-colors cursor-pointer ml-1"
             >
-              <RefreshCw size={16} />
+              <RefreshCw size={15} />
             </button>
           ) : null}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }

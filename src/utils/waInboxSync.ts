@@ -3,6 +3,7 @@ import { Capacitor } from '@capacitor/core'
 import { LocalNotifications } from '@capacitor/local-notifications'
 import { PushNotifications } from '@capacitor/push-notifications'
 import { db } from '../db'
+import { triggerCloudSync } from '../sync'
 
 let notifPermissionRequested = false
 let pushInitialized = false
@@ -196,6 +197,149 @@ export async function clearAllDeliveredNotifications() {
   } catch {}
 }
 
+/**
+ * Abaikan satu item konsulan WA dan sinkronkan ke server & cloud
+ */
+export async function dismissInboxItem(idOrCreatedAt: number | string) {
+  try {
+    const query = db.inboxQueue.filter(
+      (q) => String(q.id) === String(idOrCreatedAt) || q.created_at === String(idOrCreatedAt)
+    )
+    const match = await query.first()
+    if (match && match.id) {
+      await db.inboxQueue.update(match.id, { status: 'dismissed' })
+    }
+  } catch {}
+
+  clearDeliveredNotifications(idOrCreatedAt)
+  triggerCloudSync(100)
+
+  // 1. Hubungi Gateway VM (Port 3001)
+  try {
+    const gatewayUrl = localStorage.getItem('doctoid_wa_gateway_url') || 'http://35.255.95.161:3001'
+    fetch(`${gatewayUrl}/api/inbox/dismiss`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: idOrCreatedAt }),
+    }).catch(() => {})
+  } catch {}
+
+  // 2. Hubungi Firestore doctoid/inbox_${USER_UID}
+  try {
+    const USER_UID = 'fOGcJmF0vGR5EKzlN2l9ZR7WPZu1'
+    const firestoreUrl = `https://firestore.googleapis.com/v1/projects/docto-id/databases/(default)/documents/doctoid/inbox_${USER_UID}`
+    const fRes = await fetch(firestoreUrl)
+    if (fRes.ok) {
+      const fData = await fRes.json()
+      const vals = fData.fields?.items?.arrayValue?.values || []
+      const filtered = vals.filter((v: any) => {
+        const item = fromFirestoreMap(v.mapValue?.fields || {})
+        return String(item.id) !== String(idOrCreatedAt) && item.created_at !== String(idOrCreatedAt)
+      })
+      await fetch(firestoreUrl, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fields: {
+            items: { arrayValue: { values: filtered } },
+            updatedAt: { integerValue: String(Date.now()) },
+          },
+        }),
+      }).catch(() => {})
+    }
+  } catch {}
+}
+
+/**
+ * Tandai satu item konsulan WA sebagai 'imported' (sudah dicatat ke rekam medis) dan hapus dari antrean server
+ */
+export async function markInboxItemImported(idOrCreatedAt: number | string) {
+  try {
+    const query = db.inboxQueue.filter(
+      (q) => String(q.id) === String(idOrCreatedAt) || q.created_at === String(idOrCreatedAt)
+    )
+    const match = await query.first()
+    if (match && match.id) {
+      await db.inboxQueue.update(match.id, { status: 'imported' })
+    }
+  } catch {}
+
+  clearDeliveredNotifications(idOrCreatedAt)
+  triggerCloudSync(100)
+
+  // Hapus dari antrean server gateway agar tidak muncul di device lain
+  try {
+    const gatewayUrl = localStorage.getItem('doctoid_wa_gateway_url') || 'http://35.255.95.161:3001'
+    fetch(`${gatewayUrl}/api/inbox/dismiss`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: idOrCreatedAt }),
+    }).catch(() => {})
+  } catch {}
+
+  try {
+    const USER_UID = 'fOGcJmF0vGR5EKzlN2l9ZR7WPZu1'
+    const firestoreUrl = `https://firestore.googleapis.com/v1/projects/docto-id/databases/(default)/documents/doctoid/inbox_${USER_UID}`
+    const fRes = await fetch(firestoreUrl)
+    if (fRes.ok) {
+      const fData = await fRes.json()
+      const vals = fData.fields?.items?.arrayValue?.values || []
+      const filtered = vals.filter((v: any) => {
+        const item = fromFirestoreMap(v.mapValue?.fields || {})
+        return String(item.id) !== String(idOrCreatedAt) && item.created_at !== String(idOrCreatedAt)
+      })
+      await fetch(firestoreUrl, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fields: {
+            items: { arrayValue: { values: filtered } },
+            updatedAt: { integerValue: String(Date.now()) },
+          },
+        }),
+      }).catch(() => {})
+    }
+  } catch {}
+}
+
+/**
+ * Bersihkan seluruh antrean konsulan WA (Abaikan Semua) baik lokal maupun cloud server
+ */
+export async function dismissAllInboxItems() {
+  try {
+    await db.inboxQueue.where('status').equals('pending').modify({ status: 'dismissed' })
+  } catch {}
+
+  clearAllDeliveredNotifications()
+  triggerCloudSync(100)
+
+  // 1. Hubungi Gateway VM
+  try {
+    const gatewayUrl = localStorage.getItem('doctoid_wa_gateway_url') || 'http://35.255.95.161:3001'
+    fetch(`${gatewayUrl}/api/inbox/clear`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ all: true }),
+    }).catch(() => {})
+  } catch {}
+
+  // 2. Kosongkan Firestore doctoid/inbox_${USER_UID}
+  try {
+    const USER_UID = 'fOGcJmF0vGR5EKzlN2l9ZR7WPZu1'
+    const firestoreUrl = `https://firestore.googleapis.com/v1/projects/docto-id/databases/(default)/documents/doctoid/inbox_${USER_UID}`
+    await fetch(firestoreUrl, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        fields: {
+          items: { arrayValue: { values: [] } },
+          updatedAt: { integerValue: String(Date.now()) },
+        },
+      }),
+    }).catch(() => {})
+  } catch {}
+}
+
 // Daftarkan listener klik notifikasi agar saat notifikasi di status bar ditekan, langsung membuka modal inbox
 if (typeof window !== 'undefined') {
   try {
@@ -227,6 +371,14 @@ export async function sendLocalNotification(item: any) {
   // 1. Android Native Local Notifications
   try {
     if (Capacitor.isNativePlatform()) {
+      // Jika push notifications (FCM) sudah aktif/terdaftar pada HP dokter,
+      // FCM cloud push sudah otomatis menembakkan notifikasi status bar.
+      // Hindari memicu LocalNotification agar tidak muncul 2 kartu notifikasi kembar (double) di tray HP.
+      const hasFcmToken = Boolean(localStorage.getItem('doctoid_fcm_token'))
+      if (hasFcmToken) {
+        return
+      }
+
       if (!notifPermissionRequested) {
         notifPermissionRequested = true
         const check = await LocalNotifications.checkPermissions()
@@ -299,6 +451,7 @@ function fromFirestoreMap(fields: Record<string, any>): any {
 export async function syncWaInboxToDexie() {
   try {
     let items: any[] = []
+    let serverResponded = false
 
     // 1. Coba hubungi Gateway VM langsung (Port 3001) dengan timeout 3.5s
     try {
@@ -309,11 +462,14 @@ export async function syncWaInboxToDexie() {
       const timer = setTimeout(() => controller.abort(), 3500)
       const res = await fetch(`${gatewayUrl}/api/inbox?t=${Date.now()}`, { signal: controller.signal })
       clearTimeout(timer)
-      if (res.ok) items = await res.json()
+      if (res.ok) {
+        items = await res.json()
+        serverResponded = true
+      }
     } catch {}
 
     // 2. Fallback: Cloud Firestore REST API langsung (Port 443 HTTPS, selalu tembus operator seluler & PWA)
-    if (!items || items.length === 0) {
+    if (!serverResponded) {
       try {
         const USER_UID = 'fOGcJmF0vGR5EKzlN2l9ZR7WPZu1'
         const firestoreUrl = `https://firestore.googleapis.com/v1/projects/docto-id/databases/(default)/documents/doctoid/inbox_${USER_UID}?t=${Date.now()}`
@@ -322,24 +478,48 @@ export async function syncWaInboxToDexie() {
           const fData = await fRes.json()
           const vals = fData.fields?.items?.arrayValue?.values || []
           items = vals.map((v: any) => fromFirestoreMap(v.mapValue?.fields || {}))
+          serverResponded = true
         }
       } catch {}
     }
 
     // 3. Fallback: File JSON cloud dari Firebase Hosting
-    if (!items || items.length === 0) {
+    if (!serverResponded) {
       try {
         const res = await fetch(`https://docto-id.web.app/wa-inbox.json?t=${Date.now()}`)
-        if (res.ok) items = await res.json()
+        if (res.ok) {
+          items = await res.json()
+          serverResponded = true
+        }
       } catch {
         try {
           const res = await fetch(`/wa-inbox.json?t=${Date.now()}`)
-          if (res.ok) items = await res.json()
+          if (res.ok) {
+            items = await res.json()
+            serverResponded = true
+          }
         } catch {}
       }
     }
 
-    if (!Array.isArray(items) || items.length === 0) return
+    if (!serverResponded || !Array.isArray(items)) return
+
+    // Sinkronisasi status: Jika item aktif di server sudah berkurang/dibersihkan,
+    // maka item lokal yang pending namun sudah tidak ada di server otomatis di-dismiss
+    const activeServerKeys = new Set(
+      items.map((it) => String(it.id || it.created_at || ''))
+    )
+
+    const localPending = await db.inboxQueue.where('status').equals('pending').toArray()
+    for (const loc of localPending) {
+      const locKey1 = String(loc.id || '')
+      const locKey2 = String(loc.created_at || '')
+      if (!activeServerKeys.has(locKey1) && !activeServerKeys.has(locKey2)) {
+        await db.inboxQueue.update(loc.id!, { status: 'dismissed' })
+      }
+    }
+
+    if (items.length === 0) return
 
     for (const item of items) {
       if (!item.raw_text && (!item.attachments || item.attachments.length === 0)) continue

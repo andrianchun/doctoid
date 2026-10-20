@@ -377,11 +377,11 @@ async function initBaileys() {
               mediaName = `Foto_${Date.now()}.webp`
               try {
                 const comp = await sharp(buffer)
-                  .resize(1280, 1280, { fit: 'inside', withoutEnlargement: true })
-                  .webp({ quality: 75 })
+                  .resize(800, 800, { fit: 'inside', withoutEnlargement: true })
+                  .webp({ quality: 60 })
                   .toBuffer()
                 mediaDataUrl = `data:image/webp;base64,${comp.toString('base64')}`
-                console.log(`✓ Foto berhasil dikompresi ke WebP resolusi tinggi dari ${(buffer.length/1024).toFixed(0)} KB -> ${(comp.length/1024).toFixed(0)} KB`)
+                console.log(`✓ Foto berhasil dikompresi ke WebP dari ${(buffer.length/1024).toFixed(0)} KB -> ${(comp.length/1024).toFixed(0)} KB`)
               } catch (e) {
                 console.warn('Kompresi webp gagal, fallback ke jpeg:', e.message)
                 mediaType = 'image/jpeg'
@@ -406,11 +406,21 @@ async function initBaileys() {
           console.error('Gagal mengunduh berkas:', e.message)
         }
 
+        // Deteksi apakah pengirim pesan adalah dokter sendiri
+        const isFromDoctor = Boolean(msg.key.fromMe || (participantPhone && participantPhone === myPhone))
+
         // Ekstraksi otomatis nama, no RM, dan usia jika tertera di teks
         const titleMatch = textContent.match(/(?:Tn\.|Ny\.|Sdr\.|Sdri\.|An\.|By\.)\s*([A-Za-z\s]{2,30})/i)
         const namaLabelMatch = textContent.match(/(?:Nama|Pasien)\s*[:\.]?\s*([A-Z][a-zA-Z\s]{2,25})/i)
         const rmMatch = textContent.match(/(?:RM|No\.?\s*RM|Rekam\s*Medis)\s*[:\.]?\s*([0-9\-\.\/]{4,15})/i)
         const usiaMatch = textContent.match(/(\d{1,3})\s*(?:th|tahun|yo|bulan)/i)
+
+        // Cek apakah pesan ini membawa identitas pasien baru (awalan konsulan baru)
+        const hasNewPatientHeader = Boolean(
+          titleMatch ||
+          /(?:mohon izin konsul|izin konsul|konsul pasien|pasien baru|identitas pasien)\b/i.test(textContent) ||
+          /(?:subjektif|keluhan utama|rps)\s*[:\.]/i.test(textContent)
+        )
 
         const extractedName = titleMatch ? titleMatch[0].trim() : (namaLabelMatch ? namaLabelMatch[1].trim() : '')
         const parsedData = {
@@ -448,21 +458,36 @@ async function initBaileys() {
             inboxList = JSON.parse(fs.readFileSync(INBOX_JSON_PATH, 'utf-8'))
           }
 
-          // CLUSTERING: Gabungkan jika ada pesan/berkas masuk dari grup/pengirim yang sama dalam 90 detik terakhir
+          // CLUSTERING PINTAR GRUP KLINIS:
+          // Gabungkan jika ada balasan dokter (advis/terapi), foto lanjutan, atau chat lanjutan dalam 20 menit terakhir
           const now = Date.now()
-          const recentItem = inboxList.find(
-            (it) =>
-              it.sender_name === inboxItem.sender_name &&
-              it.sender_phone === inboxItem.sender_phone &&
-              now - new Date(it.created_at).getTime() < 90000
-          )
+          const recentItem = inboxList.find((it) => {
+            if (it.status !== 'pending') return false
+            const diffMs = now - new Date(it.created_at).getTime()
+            if (diffMs > 20 * 60 * 1000) return false // Jendela 20 menit agar dokter leluasa membaca & membalas
+
+            // 1. Jika pesan baru berasal dari dokter sendiri (jawaban advis/terapi), PASTI gabungkan ke konsulan aktif!
+            if (isFromDoctor) return true
+
+            // 2. Jika pesan baru bukan awalan pasien baru (misal: lanjutan chat/advis atau kiriman foto lab), gabungkan!
+            if (!hasNewPatientHeader) return true
+
+            // 3. Jika pengirim sama persis dalam 20 menit
+            return it.sender_phone === inboxItem.sender_phone
+          })
 
           if (recentItem) {
             if (!recentItem.raw_text && inboxItem.raw_text) {
               recentItem.raw_text = inboxItem.raw_text
-              recentItem.parsed_data = inboxItem.parsed_data
-            } else if (recentItem.raw_text && inboxItem.raw_text && recentItem.raw_text !== inboxItem.raw_text) {
+              if (inboxItem.parsed_data?.nama_depan) recentItem.parsed_data = inboxItem.parsed_data
+            } else if (inboxItem.raw_text) {
+              // Tambahkan teks baru (advis dokter atau chat lanjutan) dengan pemisah baris rapi
               recentItem.raw_text += '\n\n' + inboxItem.raw_text
+
+              // Jika item sebelumnya belum punya nama pasien tapi pesan baru punya, update
+              if (inboxItem.parsed_data?.nama_depan && !recentItem.parsed_data?.nama_depan) {
+                recentItem.parsed_data.nama_depan = inboxItem.parsed_data.nama_depan
+              }
             }
             if (inboxItem.attachments && inboxItem.attachments.length > 0) {
               const curAtts = recentItem.attachments || []
@@ -472,17 +497,16 @@ async function initBaileys() {
                   if (a.id && newAtt.id && a.id === newAtt.id) return true
                   if (!a.dataUrl || !newAtt.dataUrl) return false
                   if (a.dataUrl === newAtt.dataUrl) return true
-                  // Cek kesamaan panjang dan tail base64 untuk verifikasi akurat
                   return a.dataUrl.length === newAtt.dataUrl.length && a.dataUrl.slice(-120) === newAtt.dataUrl.slice(-120)
                 })
-                if (!isDup && curAtts.length < 15) {
+                if (!isDup && curAtts.length < 25) {
                   curAtts.push(newAtt)
                 }
               }
               recentItem.attachments = curAtts
             }
             recentItem.created_at = new Date().toISOString()
-            console.log(`✓ Pesan/lampiran baru berhasil digabungkan ke konsulan pasien [${recentItem.parsed_data?.nama_depan || 'Aktif'}]! Total lampiran: ${recentItem.attachments.length}`)
+            console.log(`✓ Pesan/lampiran/advis berhasil digabungkan ke konsulan pasien [${recentItem.parsed_data?.nama_depan || 'Aktif'}]! Total lampiran: ${recentItem.attachments.length}`)
           } else {
             inboxList.unshift(inboxItem)
             console.log('✓ Konsulan WhatsApp baru berhasil dicatat ke antrean inbox!')
@@ -595,37 +619,51 @@ async function syncInboxToFirestore(inboxList) {
       return { stringValue: String(val) }
     }
 
-    // Ambil maksimal 5 item pending, bersihkan lampiran video besar agar tidak tembus batas 1MB
-    const pendingItems = inboxList
+    // Ambil maksimal 5 item pending
+    let pendingItems = inboxList
       .filter((i) => i.status === 'pending')
       .slice(0, 5)
-      .map((it) => {
-        const clone = JSON.parse(JSON.stringify(it))
-        if (clone.attachments && clone.attachments.length > 0) {
-          clone.attachments = clone.attachments.map((att) => {
-            if (att.dataUrl && att.dataUrl.length > 400000) {
-              return { ...att, dataUrl: '' }
-            }
-            return att
-          })
-        }
-        return clone
-      })
+      .map((it) => JSON.parse(JSON.stringify(it)))
 
-    const payload = {
-      fields: {
-        items: {
-          arrayValue: {
-            values: pendingItems.map(toFirestoreValue),
+    function buildPayload(items) {
+      return {
+        fields: {
+          items: {
+            arrayValue: {
+              values: items.map(toFirestoreValue),
+            },
+          },
+          updatedAt: {
+            integerValue: String(Date.now()),
           },
         },
-        updatedAt: {
-          integerValue: String(Date.now()),
-        },
-      },
+      }
     }
 
-    // Tulis ke dokumen terisolasi khusus inbox WhatsApp: doctoid/inbox_{USER_UID} (Jaminan tidak pernah tembus batas 1MB)
+    let payload = buildPayload(pendingItems)
+    let payloadStr = JSON.stringify(payload)
+
+    // Jaminan Firestore 1MB: jika payload > 850KB, pangkas dataUrl dari item lama terlebih dahulu
+    if (payloadStr.length > 850000) {
+      for (let i = pendingItems.length - 1; i >= 1; i--) {
+        if (pendingItems[i].attachments) {
+          pendingItems[i].attachments.forEach((att) => {
+            att.dataUrl = ''
+          })
+        }
+      }
+      payload = buildPayload(pendingItems)
+      payloadStr = JSON.stringify(payload)
+    }
+
+    // Jika masih > 850KB, batasi lampiran item aktif ke 12 lampiran terbaru
+    if (payloadStr.length > 850000 && pendingItems[0]?.attachments?.length > 12) {
+      pendingItems[0].attachments = pendingItems[0].attachments.slice(-12)
+      payload = buildPayload(pendingItems)
+      payloadStr = JSON.stringify(payload)
+    }
+
+    // Tulis ke dokumen terisolasi khusus inbox WhatsApp: doctoid/inbox_{USER_UID} (Jaminan aman < 1MB)
     const firestoreUrl = `https://firestore.googleapis.com/v1/projects/docto-id/databases/(default)/documents/doctoid/inbox_${USER_UID}`
 
     const res = await fetch(firestoreUrl, {
@@ -634,7 +672,7 @@ async function syncInboxToFirestore(inboxList) {
         Authorization: 'Bearer ' + accessToken,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify(payload),
+      body: payloadStr,
     })
 
     if (res.ok) {
@@ -726,6 +764,7 @@ async function sendFcmPushNotification(item) {
             android: {
               priority: 'HIGH',
               notification: {
+                tag: 'wa_inbox_' + (item.id || 'active'),
                 icon: 'ic_stat_doctoid',
                 color: '#0D9488',
                 channel_id: 'wa_inbox_channel',
@@ -811,6 +850,50 @@ const server = http.createServer(async (req, res) => {
     }
     res.writeHead(200, { 'Content-Type': 'application/json' })
     res.end(JSON.stringify(inboxList))
+    return
+  }
+
+  // POST /api/inbox/dismiss (Abaikan item spesifik atau semua)
+  if (req.method === 'POST' && (url.pathname === '/api/inbox/dismiss' || url.pathname === '/api/inbox/clear')) {
+    let body = ''
+    req.on('data', (chunk) => (body += chunk))
+    req.on('end', async () => {
+      try {
+        const { id, all } = JSON.parse(body || '{}')
+        let inboxList = []
+        if (fs.existsSync(INBOX_JSON_PATH)) {
+          try {
+            inboxList = JSON.parse(fs.readFileSync(INBOX_JSON_PATH, 'utf-8'))
+          } catch {}
+        }
+
+        if (all || url.pathname === '/api/inbox/clear') {
+          inboxList = []
+        } else if (id) {
+          inboxList = inboxList.filter(
+            (it) => String(it.id) !== String(id) && it.created_at !== String(id)
+          )
+        }
+
+        fs.writeFileSync(INBOX_JSON_PATH, JSON.stringify(inboxList, null, 2), 'utf-8')
+        const distInbox = path.join(ROOT_DIR, 'dist', 'wa-inbox.json')
+        try {
+          if (fs.existsSync(path.dirname(distInbox))) {
+            fs.writeFileSync(distInbox, JSON.stringify(inboxList, null, 2), 'utf-8')
+          }
+        } catch {}
+
+        try {
+          await syncInboxToFirestore(inboxList)
+        } catch {}
+
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ success: true, count: inboxList.length }))
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: err.message }))
+      }
+    })
     return
   }
 

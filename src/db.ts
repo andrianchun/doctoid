@@ -118,6 +118,8 @@ export interface ClinicalMetrics {
   }[]
 }
 
+export type AttachmentTag = 'EKG' | 'Radiologi' | 'Lab' | 'Pemfis' | 'Lainnya'
+
 export interface ProgressNote {
   id?: number
   patient_id: number
@@ -128,7 +130,7 @@ export interface ProgressNote {
   A: DiagnosisItem[]
   P: TerapiItem[]
   catatan?: string // Catatan bebas di luar SOAP (rencana KRS, konsul, extra, dll)
-  attachments?: { name: string; type: string; dataUrl: string; kategori: 'pemfis' | 'penunjang' }[]
+  attachments?: { name: string; type: string; dataUrl: string; kategori: 'pemfis' | 'penunjang'; tag?: AttachmentTag }[]
   metrics?: ClinicalMetrics
 }
 
@@ -174,7 +176,7 @@ export interface BrainstormDraft {
   id: 1
   raw: string
   form: unknown // FormState (tipe didefinisikan di Brainstorm.tsx)
-  attachments: { id: string; name: string; type: string; dataUrl: string; kategori: 'pemfis' | 'penunjang' }[]
+  attachments: { id: string; name: string; type: string; dataUrl: string; kategori: 'pemfis' | 'penunjang'; tag?: AttachmentTag }[]
   hospitalId: number
   wardId: number
   readmissionPatientId?: number | null
@@ -222,7 +224,7 @@ export interface InboxItem {
   sender_name?: string
   sender_phone?: string
   raw_text?: string
-  attachments?: { id?: string; name: string; type: string; dataUrl: string; kategori?: 'pemfis' | 'penunjang' }[]
+  attachments?: { id?: string; name: string; type: string; dataUrl: string; kategori?: 'pemfis' | 'penunjang'; tag?: AttachmentTag }[]
   parsed_data?: {
     nama_depan?: string
     no_rm?: string

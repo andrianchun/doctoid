@@ -18,6 +18,7 @@ export interface ClinicalMediaItem {
   type: string
   dataUrl: string
   kategori?: 'pemfis' | 'penunjang'
+  tag?: 'EKG' | 'Radiologi' | 'Lab' | 'Pemfis' | 'Lainnya'
 }
 
 interface ClinicalMediaCardProps {
@@ -237,6 +238,24 @@ export const ClinicalMediaCard: React.FC<ClinicalMediaCardProps> = ({
             isBlurred ? 'blur-md scale-110' : 'cursor-pointer hover:scale-105'
           }`}
         />
+
+        {item.tag && !isBlurred && (
+          <div className="absolute top-1 left-1 pointer-events-none z-10">
+            <span
+              className={`px-1.5 py-0.5 rounded-md text-[9px] font-bold tracking-tight shadow-xs backdrop-blur-md ${
+                item.tag === 'EKG'
+                  ? 'bg-amber-500/90 text-white'
+                  : item.tag === 'Radiologi'
+                  ? 'bg-purple-600/90 text-white'
+                  : item.tag === 'Lab'
+                  ? 'bg-teal-600/90 text-white'
+                  : 'bg-slate-700/90 text-white'
+              }`}
+            >
+              {item.tag}
+            </span>
+          </div>
+        )}
 
         {isBlurred ? (
           <button

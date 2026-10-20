@@ -13,7 +13,8 @@ Panduan dan kaidah perancangan UI/UX serta arsitektur kode untuk asisten AI pada
 
 ### B. Bersih dari Emoji Dekoratif & Ikon Berlebihan
 - **Tanpa emoji dekoratif**: Hindari penggunaan emoji seperti 📥, ⚡, 📎, 🚀, dsb. pada tombol kerja atau label status.
-- Gunakan ikon SVG fungsional yang ramping (**Lucide icons**) hanya jika memang menambah kejelasan fungsi tombol.
+- **Tanpa ikon dekoratif pada daftar / baris**: Jangan meletakkan ikon-ikon kecil (seperti ikon pil, kaca pembesar, orang, checklist, dsb.) di setiap baris daftar planning, alert, atau item catatan. Cukup gunakan teks yang jelas, badge status minimalis, atau penanda fungsional murni (seperti lingkaran checklist sederhana).
+- Gunakan ikon SVG fungsional yang ramping (**Lucide icons**) hanya jika memang menambah kejelasan fungsi tombol navigasi/aksi utama.
 - Tombol aksi harus memiliki teks yang jelas, standar, dan tegas (misal: `Gunakan di Rekam Medis`, `Abaikan`, `Batal`).
 
 ### C. Keterbacaan Teks Klinis (SOAP & Konsulan)

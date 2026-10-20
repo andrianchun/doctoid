@@ -20,10 +20,10 @@ const ShareReceiver: ShareReceiverPlugin | null = Capacitor.isNativePlatform()
   : null
 import {
   Mic,
-  Trash2, Loader2, X, FileText, ChevronDown, Send,
-  Search, Paperclip, Bell
+  Trash2, Loader2, X, ChevronDown, Send,
+  Search, Paperclip, Bell, ScanEye
 } from 'lucide-react'
-import { db, type Jaminan, type TerapiItem, type DiagnosisItem, type RegexField, type Patient, type RawatEpisode, type PeranRawat, type InboxItem } from '../db'
+import { db, type Jaminan, type TerapiItem, type DiagnosisItem, type RegexField, type Patient, type RawatEpisode, type PeranRawat, type InboxItem, type AttachmentTag } from '../db'
 import { DEPT_ALIH_RAWAT } from './PatientProfile'
 import Masked from '../components/Masked'
 import ResizableTextarea from '../components/ResizableTextarea'
@@ -39,7 +39,13 @@ import { formatDate, hariKe, getLocalDateString } from '../utils/dateFormat'
 import DateInput from '../components/DateInput'
 import { useBodyScrollLock } from '../utils/useBodyScrollLock'
 import { extractClinicalMetrics } from '../utils/clinicalExtractor'
-import { clearDeliveredNotifications, clearAllDeliveredNotifications } from '../utils/waInboxSync'
+import { analyzeAndClassifyAttachments } from '../utils/clinicalVision'
+import {
+  clearAllDeliveredNotifications,
+  dismissInboxItem,
+  markInboxItemImported,
+  dismissAllInboxItems,
+} from '../utils/waInboxSync'
 
 const today = () => getLocalDateString()
 
@@ -131,7 +137,7 @@ export default function Brainstorm() {
   const [komentarAnalisis, setKomentarAnalisis] = useState('')
 
   type Kategori = 'pemfis' | 'penunjang'
-  const [attachments, setAttachments] = useState<{ id: string, name: string, type: string, dataUrl: string, kategori: Kategori }[]>([])
+  const [attachments, setAttachments] = useState<{ id: string, name: string, type: string, dataUrl: string, kategori: Kategori, tag?: AttachmentTag }[]>([])
   const [viewerState, setViewerState] = useState<{
     isOpen: boolean
     images: ViewerImage[]
@@ -184,7 +190,7 @@ export default function Brainstorm() {
   const [patientSearchQ, setPatientSearchQ] = useState('')
   const [stagedAnalysis, setStagedAnalysis] = useState<StagedAnalysis | null>(null)
 
-  const handleImportInboxItem = (item: InboxItem) => {
+  const handleImportInboxItem = async (item: InboxItem) => {
     // 1. Ekstrak otomatis struktur SOAP dari teks mentah jika ada
     let parsedSoapData: Partial<FormState> = {}
     if (item.raw_text) {
@@ -214,86 +220,134 @@ export default function Brainstorm() {
       }
     }
 
-    // 2. Gabungkan data parsed_data (jika ada override)
-    if (item.parsed_data) {
-      set({
-        ...parsedSoapData,
-        title: (item.parsed_data?.nama_depan?.match(/^(?:dr\.|Tn\.|Ny\.|Sdr\.|Sdri\.|An\.|By\.)/i)?.[0] as any) || parsedSoapData.title || form.title,
-        nama_depan: item.parsed_data.nama_depan || parsedSoapData.nama_depan || form.nama_depan,
-        usia: item.parsed_data.usia || parsedSoapData.usia || form.usia,
-        no_rm: item.parsed_data.no_rm || parsedSoapData.no_rm || form.no_rm,
-        jaminan: (item.parsed_data.jaminan as any) || parsedSoapData.jaminan || form.jaminan,
-        S: item.parsed_data.S || parsedSoapData.S || form.S,
-        O_pemfis: item.parsed_data.O_pemfis || parsedSoapData.O_pemfis || form.O_pemfis,
-        O_penunjang: item.parsed_data.O_penunjang || parsedSoapData.O_penunjang || form.O_penunjang,
-        A: item.parsed_data.A && item.parsed_data.A.length > 0 ? item.parsed_data.A : (parsedSoapData.A || form.A),
-        P: item.parsed_data.P && item.parsed_data.P.length > 0 ? item.parsed_data.P : (parsedSoapData.P || form.P),
-      })
-    } else if (Object.keys(parsedSoapData).length > 0) {
-      set(parsedSoapData)
+    // 2. Analisis AI Vision untuk lampiran (Klasifikasi 4 Badge, PDx, & Temuan Abnormal Lab ↑ / ↓)
+    let processedAttachments: { id: string; name: string; type: string; dataUrl: string; kategori: Kategori; tag?: AttachmentTag }[] = []
+    let visionPdx: TerapiItem[] = []
+    let visionPenunjangText = ''
+
+    if (item.attachments && item.attachments.length > 0) {
+      notify('🔍 Mengidentifikasi lampiran & mengekstrak temuan abnormal...')
+      try {
+        const visionRes = await analyzeAndClassifyAttachments(
+          item.attachments as any,
+          item.raw_text || ''
+        )
+        if (visionRes.classifiedAttachments?.length > 0) {
+          processedAttachments = visionRes.classifiedAttachments.map((ca, idx) => ({
+            id: ca.id || `att-${Date.now()}-${idx}`,
+            name: ca.name || 'Lampiran',
+            type: ca.type || 'image/jpeg',
+            dataUrl: ca.dataUrl,
+            kategori: (ca.kategori as Kategori) || 'penunjang',
+            tag: ca.tag,
+          }))
+        }
+        if (visionRes.pdxSuggestions?.length > 0) {
+          visionPdx = visionRes.pdxSuggestions.map((p) => ({
+            ...lineToTerapi(p.nama_item, today()),
+            kategori: 'Diagnostik',
+          }))
+        }
+        if (visionRes.penunjangTextSummary) {
+          visionPenunjangText = visionRes.penunjangTextSummary
+        }
+      } catch (err) {
+        console.warn('Vision analysis error:', err)
+        processedAttachments = item.attachments.map((att, idx) => ({
+          id: att.id || `att-${Date.now()}-${idx}`,
+          name: att.name || 'Lampiran',
+          type: att.type || 'image/jpeg',
+          dataUrl: att.dataUrl,
+          kategori: (att.kategori as Kategori) || 'penunjang',
+          tag: att.tag,
+        }))
+      }
     }
+
+    // 3. Gabungkan data parsed_data & vision ke form
+    const currentP = (item.parsed_data?.P && item.parsed_data.P.length > 0)
+      ? item.parsed_data.P
+      : (parsedSoapData.P || form.P)
+
+    // Tambahkan usulan PDx dari vision jika belum ada
+    const existingPNames = new Set(currentP.map((p) => p.nama_item.trim().toLowerCase()))
+    const newPdx = visionPdx.filter((vp) => !existingPNames.has(vp.nama_item.trim().toLowerCase()))
+    const finalP = [...currentP, ...newPdx]
+
+    // Gabungkan teks penunjang dengan ringkasan temuan abnormal lab/EKG/radiologi
+    const currentO_penunjang = item.parsed_data?.O_penunjang || parsedSoapData.O_penunjang || form.O_penunjang
+    const finalO_penunjang = visionPenunjangText
+      ? (currentO_penunjang.trim() ? `${currentO_penunjang.trim()}\n\n${visionPenunjangText}` : visionPenunjangText)
+      : currentO_penunjang
+
+    const formPatch: Partial<FormState> = {
+      ...parsedSoapData,
+      title: (item.parsed_data?.nama_depan?.match(/^(?:dr\.|Tn\.|Ny\.|Sdr\.|Sdri\.|An\.|By\.)/i)?.[0] as any) || parsedSoapData.title || form.title,
+      nama_depan: item.parsed_data?.nama_depan || parsedSoapData.nama_depan || form.nama_depan,
+      usia: item.parsed_data?.usia || parsedSoapData.usia || form.usia,
+      no_rm: item.parsed_data?.no_rm || parsedSoapData.no_rm || form.no_rm,
+      jaminan: (item.parsed_data?.jaminan as any) || parsedSoapData.jaminan || form.jaminan,
+      S: item.parsed_data?.S || parsedSoapData.S || form.S,
+      O_pemfis: item.parsed_data?.O_pemfis || parsedSoapData.O_pemfis || form.O_pemfis,
+      O_penunjang: finalO_penunjang,
+      A: item.parsed_data?.A && item.parsed_data.A.length > 0 ? item.parsed_data.A : (parsedSoapData.A || form.A),
+      P: finalP,
+    }
+
+    set(formPatch)
 
     // Bersihkan prompt box bawah agar tidak menduplikasi teks yang sudah masuk ke form
     setRaw('')
 
-    if (item.attachments && item.attachments.length > 0) {
-      setAttachments((prev) => [...prev, ...(item.attachments! as any)])
+    if (processedAttachments.length > 0) {
+      setAttachments((prev) => {
+        const existingUrls = new Set(prev.map((a) => a.dataUrl))
+        const unique = processedAttachments.filter((pa) => !existingUrls.has(pa.dataUrl))
+        return [...prev, ...unique]
+      })
     }
-    if (item.id) {
-      db.inboxQueue.update(item.id, { status: 'imported' })
-      clearDeliveredNotifications(item.id)
-    }
+
+    await markInboxItemImported(item.id || item.created_at)
     setShowInboxModal(false)
-    notify('Data konsul WhatsApp berhasil dimuat ke formulir ✓')
+    notify('Data konsul WhatsApp & temuan lampiran berhasil dimuat ke formulir ✓')
   }
 
-  const handleImportAllInboxItems = async () => {
-    const rawTexts: string[] = []
-    const allAttachments: any[] = []
-
-    for (const item of pendingInboxItems) {
-      if (item.raw_text?.trim()) {
-        rawTexts.push(item.raw_text.trim())
+  const handleRescanAttachments = async () => {
+    if (attachments.length === 0) return
+    notify('🔍 Menganalisis lampiran medis & mengekstrak lab...')
+    try {
+      const visionRes = await analyzeAndClassifyAttachments(attachments as any, `${form.S}\n${form.O_pemfis}`)
+      if (visionRes.classifiedAttachments?.length > 0) {
+        setAttachments(visionRes.classifiedAttachments as any)
       }
-      if (item.attachments && item.attachments.length > 0) {
-        allAttachments.push(...item.attachments)
-      }
-      if (item.id) {
-        await db.inboxQueue.update(item.id, { status: 'imported' })
-      }
-    }
-    clearAllDeliveredNotifications()
-
-    if (rawTexts.length > 0) {
-      const combined = rawTexts.join('\n\n')
-      try {
-        const { data, success } = localParse(combined, regexRules)
-        if (success) {
-          set({
-            nama_depan: data.nama_depan || form.nama_depan,
-            usia: data.usia || form.usia,
-            no_rm: data.no_rm || form.no_rm,
-            jaminan: (data.jaminan as any) || form.jaminan,
-            S: data.S || form.S,
-            O_pemfis: data.O_pemfis || form.O_pemfis,
-            O_penunjang: data.O_penunjang || form.O_penunjang,
-            A: data.A && data.A.length > 0 ? data.A : form.A,
-            P: data.P && data.P.length > 0 ? data.P : form.P,
-          })
-        } else if (!form.S) {
-          set({ S: combined })
+      if (visionRes.pdxSuggestions?.length > 0) {
+        const existingPNames = new Set(form.P.map((p) => p.nama_item.trim().toLowerCase()))
+        const newPdx = visionRes.pdxSuggestions
+          .filter((vp) => !existingPNames.has(vp.nama_item.trim().toLowerCase()))
+          .map((p) => ({
+            ...lineToTerapi(p.nama_item, today()),
+            kategori: 'Diagnostik' as const,
+          }))
+        if (newPdx.length > 0) {
+          set({ P: [...form.P, ...newPdx] })
         }
-      } catch {
-        if (!form.S) set({ S: combined })
       }
-      setRaw('')
+      if (visionRes.penunjangTextSummary) {
+        const cur = form.O_penunjang.trim()
+        if (!cur.includes(visionRes.penunjangTextSummary)) {
+          set({ O_penunjang: cur ? `${cur}\n\n${visionRes.penunjangTextSummary}` : visionRes.penunjangTextSummary })
+        }
+      }
+      notify('Analisis lampiran selesai ✓')
+    } catch {
+      notify('Gagal menganalisis lampiran.')
     }
-    if (allAttachments.length > 0) {
-      setAttachments((prev) => [...prev, ...(allAttachments as any)])
-    }
+  }
 
+  const handleDismissAllInbox = async () => {
+    await dismissAllInboxItems()
     setShowInboxModal(false)
-    notify(`${pendingInboxItems.length} pesan & berkas WhatsApp berhasil digabungkan ke formulir ✓`)
+    notify('Seluruh antrean konsul berhasil dibersihkan ✓')
   }
 
   const [showFaskesMenu, setShowFaskesMenu] = useState(false)
@@ -1760,15 +1814,28 @@ export default function Brainstorm() {
             <label className="text-xs font-bold text-slate-700">
               Penunjang
             </label>
-            <button
-              type="button"
-              onClick={() => penunjangAttachRef.current?.click()}
-              title="Lampirkan CT/Lab/EKG"
-              aria-label="Lampirkan CT/Lab/EKG"
-              className="p-1.5 rounded-xl text-slate-500 hover:text-primary hover:bg-primary/10 transition-colors cursor-pointer"
-            >
-              <Paperclip size={16} />
-            </button>
+            <div className="flex items-center gap-1.5">
+              {attachments.filter((a) => a.kategori === 'penunjang').length > 0 && (
+                <button
+                  type="button"
+                  onClick={handleRescanAttachments}
+                  title="Pindai Ulang Lampiran & Ekstrak Lab"
+                  className="px-2 py-1 rounded-xl text-slate-600 hover:text-primary hover:bg-primary/10 transition-colors cursor-pointer text-[11px] font-semibold flex items-center gap-1 border border-slate-200 shadow-2xs"
+                >
+                  <ScanEye size={13} className="text-primary" />
+                  <span>Pindai Lampiran</span>
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => penunjangAttachRef.current?.click()}
+                title="Lampirkan CT/Lab/EKG"
+                aria-label="Lampirkan CT/Lab/EKG"
+                className="p-1.5 rounded-xl text-slate-500 hover:text-primary hover:bg-primary/10 transition-colors cursor-pointer"
+              >
+                <Paperclip size={16} />
+              </button>
+            </div>
           </div>
           <ResizableTextarea
             value={form.O_penunjang}
@@ -2238,49 +2305,6 @@ export default function Brainstorm() {
 
             {/* Kotak Input Putih Bersih — dengan Fade Shadow Lembut ke Atas agar Terpisah Tegas dari Objek Belakang */}
             <div className="flex flex-col rounded-t-3xl rounded-b-none bg-white border-t border-x border-slate-300/80 border-b-0 p-2.5 transition-shadow w-full relative z-20 shadow-[0_-12px_36px_-6px_rgba(15,23,42,0.18),0_-4px_14px_-2px_rgba(15,23,42,0.08)]">
-              {/* Preview Lampiran Gambar yang Ditempel / Diunggah */}
-              {attachments.length > 0 && (
-                <div className="flex items-center gap-2 mb-2 pb-2 border-b border-slate-100 overflow-x-auto w-full hide-scrollbar">
-                  <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider shrink-0 flex items-center gap-1 bg-slate-100 px-2 py-1 rounded-lg">
-                    <FileText size={11} className="text-primary" /> {attachments.length} Lampiran:
-                  </span>
-                  {attachments.map((a) => (
-                    <div key={a.id} className="relative size-11 rounded-xl bg-slate-50 border border-slate-200 overflow-hidden shrink-0 group shadow-xs">
-                      {a.type.startsWith('image/') ? (
-                        <img
-                          src={a.dataUrl}
-                          className="size-full object-cover cursor-pointer hover:scale-105 transition-transform"
-                          alt={a.name}
-                          onClick={() => {
-                            const imgAtts = attachments
-                              .filter((x) => x.type.startsWith('image/'))
-                              .map((x) => ({ url: x.dataUrl, name: x.name, type: x.type }))
-                            const idx = imgAtts.findIndex((x) => x.url === a.dataUrl)
-                            setViewerState({
-                              isOpen: true,
-                              images: imgAtts,
-                              initialIndex: Math.max(0, idx),
-                            })
-                          }}
-                        />
-                      ) : (
-                        <div className="flex size-full items-center justify-center text-[9px] font-bold text-slate-500 uppercase">
-                          {a.name.split('.').pop() || 'FILE'}
-                        </div>
-                      )}
-                      <button
-                        type="button"
-                        onClick={() => setAttachments((prev) => prev.filter((x) => x.id !== a.id))}
-                        className="absolute top-0.5 right-0.5 size-4 bg-slate-900/80 text-white rounded-full flex items-center justify-center hover:bg-rose-500 transition-colors cursor-pointer"
-                        title="Hapus lampiran"
-                      >
-                        <X size={9} />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-
               <div className="flex items-end gap-2 w-full">
                 {/* Radial Fan Attachment Menu (Kamera, Galeri, Dikte ala Lomeal) */}
                 <AttachmentMenu
@@ -2461,39 +2485,27 @@ export default function Brainstorm() {
           >
             {/* Header Modal */}
             <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
-              <div>
-                <p className="text-sm font-bold text-slate-900">
-                  Konsultasi Masuk ({pendingInboxItems.length})
-                </p>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  Pesan rujukan dari WhatsApp untuk dicatat ke rekam medis
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowInboxModal(false)}
-                aria-label="Tutup"
-                className="cursor-pointer rounded-full p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
-              >
-                <X size={20} />
-              </button>
-            </div>
-
-            {/* Opsi Gabung Semua jika > 1 */}
-            {pendingInboxItems.length > 1 && (
-              <div className="flex items-center justify-between px-5 py-2.5 bg-slate-50 border-b border-slate-100">
-                <span className="text-xs text-slate-600 font-medium">
-                  {pendingInboxItems.length} pesan belum diolah
-                </span>
+              <h3 className="text-sm font-bold text-slate-900">Inbox</h3>
+              <div className="flex items-center gap-3">
+                {pendingInboxItems.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={handleDismissAllInbox}
+                    className="text-xs font-semibold text-slate-400 hover:text-red-600 transition-colors cursor-pointer"
+                  >
+                    Hapus Semua
+                  </button>
+                )}
                 <button
                   type="button"
-                  onClick={handleImportAllInboxItems}
-                  className="px-3 py-1.5 rounded-xl bg-primary text-white text-xs font-semibold hover:bg-primary-deep active:scale-95 transition-all cursor-pointer shadow-xs"
+                  onClick={() => setShowInboxModal(false)}
+                  aria-label="Tutup"
+                  className="cursor-pointer rounded-full p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
                 >
-                  Gabung Semua ke Formulir
+                  <X size={20} />
                 </button>
               </div>
-            )}
+            </div>
 
             {/* Daftar Konsulan */}
             <div className="flex-1 overflow-y-auto p-5 divide-y divide-slate-100 space-y-5">
@@ -2518,11 +2530,6 @@ export default function Brainstorm() {
                             ({item.parsed_data.usia})
                           </span>
                         )}
-                        {item.sender_phone && (
-                          <span className="ml-2 text-xs text-slate-400">
-                            • {item.sender_phone}
-                          </span>
-                        )}
                       </div>
                       {item.created_at && (
                         <span className="text-[11px] text-slate-400 shrink-0">
@@ -2540,55 +2547,50 @@ export default function Brainstorm() {
 
                     {/* Lampiran Gambar/Dokumen */}
                     {item.attachments && item.attachments.length > 0 && (
-                      <div className="space-y-1.5">
-                        <span className="text-[11px] font-semibold text-slate-500">
-                          {item.attachments.length} Berkas Lampiran:
-                        </span>
-                        <div className="grid grid-cols-3 gap-2">
-                          {item.attachments.map((att: any, idx: number) => {
-                            const isImg = att.type?.startsWith('image/') || att.dataUrl?.startsWith('data:image/')
-                            return (
-                              <div
-                                key={att.id || idx}
-                                onClick={() => {
-                                  if (isImg && (att.dataUrl || att.url)) {
-                                    const imgAtts = (item.attachments || [])
-                                      .filter((x: any) => x.type?.startsWith('image/') || x.dataUrl?.startsWith('data:image/') || x.url)
-                                      .map((x: any) => ({ url: x.dataUrl || x.url, name: x.name, type: x.type }))
-                                    const cIdx = imgAtts.findIndex((x: any) => (x.url === (att.dataUrl || att.url)))
-                                    setViewerState({
-                                      isOpen: true,
-                                      images: imgAtts,
-                                      initialIndex: Math.max(0, cIdx),
-                                    })
-                                  }
-                                }}
-                                className={`relative rounded-xl overflow-hidden border border-slate-200 bg-slate-100 aspect-video flex items-center justify-center text-[11px] text-slate-500 p-1 ${
-                                  isImg ? 'cursor-pointer hover:border-primary group transition-colors' : ''
-                                }`}
-                              >
-                                {isImg && (att.dataUrl || att.url) ? (
-                                  <>
-                                    <img
-                                      src={att.dataUrl || att.url}
-                                      alt={att.name || 'Lampiran'}
-                                      className="w-full h-full object-cover group-hover:scale-105 transition-transform"
-                                    />
-                                    <div className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                                      <span className="text-[10px] font-bold text-white bg-slate-900/70 px-2 py-0.5 rounded-md">
-                                        Zoom
-                                      </span>
-                                    </div>
-                                  </>
-                                ) : (
-                                  <span className="truncate px-1 text-center font-medium">
-                                    {att.name || 'Dokumen'}
-                                  </span>
-                                )}
-                              </div>
-                            )
-                          })}
-                        </div>
+                      <div className="grid grid-cols-3 gap-2">
+                        {item.attachments.map((att: any, idx: number) => {
+                          const isImg = att.type?.startsWith('image/') || att.dataUrl?.startsWith('data:image/')
+                          return (
+                            <div
+                              key={att.id || idx}
+                              onClick={() => {
+                                if (isImg && (att.dataUrl || att.url)) {
+                                  const imgAtts = (item.attachments || [])
+                                    .filter((x: any) => x.type?.startsWith('image/') || x.dataUrl?.startsWith('data:image/') || x.url)
+                                    .map((x: any) => ({ url: x.dataUrl || x.url, name: x.name, type: x.type }))
+                                  const cIdx = imgAtts.findIndex((x: any) => (x.url === (att.dataUrl || att.url)))
+                                  setViewerState({
+                                    isOpen: true,
+                                    images: imgAtts,
+                                    initialIndex: Math.max(0, cIdx),
+                                  })
+                                }
+                              }}
+                              className={`relative rounded-xl overflow-hidden border border-slate-200 bg-slate-100 aspect-video flex items-center justify-center text-[11px] text-slate-500 p-1 ${
+                                isImg ? 'cursor-pointer hover:border-primary group transition-colors' : ''
+                              }`}
+                            >
+                              {isImg && (att.dataUrl || att.url) ? (
+                                <>
+                                  <img
+                                    src={att.dataUrl || att.url}
+                                    alt={att.name || 'Lampiran'}
+                                    className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                                  />
+                                  <div className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                                    <span className="text-[10px] font-bold text-white bg-slate-900/70 px-2 py-0.5 rounded-md">
+                                      Zoom
+                                    </span>
+                                  </div>
+                                </>
+                              ) : (
+                                <span className="truncate px-1 text-center font-medium">
+                                  {att.name || 'Dokumen'}
+                                </span>
+                              )}
+                            </div>
+                          )
+                        })}
                       </div>
                     )}
 
@@ -2597,21 +2599,18 @@ export default function Brainstorm() {
                       <button
                         type="button"
                         onClick={() => {
-                          if (item.id) {
-                            db.inboxQueue.update(item.id, { status: 'dismissed' })
-                            clearDeliveredNotifications(item.id)
-                          }
+                          dismissInboxItem(item.id || item.created_at)
                         }}
-                        className="px-3 py-1.5 text-xs font-semibold text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer"
+                        className="px-3 py-1.5 text-xs font-semibold text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-xl transition-colors cursor-pointer"
                       >
-                        Abaikan
+                        Hapus
                       </button>
                       <button
                         type="button"
                         onClick={() => handleImportInboxItem(item)}
                         className="px-4 py-1.5 bg-primary hover:bg-primary-deep text-white text-xs font-bold rounded-xl active:scale-95 transition-all cursor-pointer shadow-xs"
                       >
-                        Gunakan di Rekam Medis
+                        Catat Pasien
                       </button>
                     </div>
                   </div>

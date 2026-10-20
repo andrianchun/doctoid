@@ -1,10 +1,12 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useRef, useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
 import {
   ResponsiveContainer,
   AreaChart,
   Area,
+  BarChart,
+  Bar,
   XAxis,
   YAxis,
   Tooltip,
@@ -17,14 +19,17 @@ import {
   Eye,
   EyeOff,
   ChevronRight,
-  Plus,
+  ChevronDown,
+  Check,
   Settings,
+  LineChart as LineChartIcon,
+  BarChart3 as BarChart3Icon,
 } from 'lucide-react'
-import { db, type Patient, type Hospital, type ProgressNote, type PoliLog, type TerapiItem } from '../db'
+import { db, type Patient, type Hospital, type ProgressNote, type PoliLog, type PenunjangItem } from '../db'
+import Masked from '../components/Masked'
 import { useUi } from '../store'
 import { verifyBiometric } from '../webauthn'
 import { formatDate, hariKe, getLocalDateString } from '../utils/dateFormat'
-import PoliEntryModal from '../components/PoliEntryModal'
 
 // Regex untuk deteksi otomatis obat yang butuh tapering atau durasi terbatas jika belum diset eksplisit
 const RE_TAPER_MANITOL = /manitol|mannitol/i
@@ -32,17 +37,30 @@ const RE_TAPER_DEXA = /dexa|dexamethasone/i
 const RE_DURASI_CEFTRIAXONE = /ceftriaxone|ceftri/i
 const RE_DURASI_NIMODIPINE = /nimodipine|nimotop/i
 const RE_DURASI_DAPT = /clopidogrel.*(?:aspirin|asetosal)|(?:aspirin|asetosal).*clopidogrel|dapt/i
+const RE_LOADING = /\b(loading|bolus)\b/i
+const RE_LASA = /\b(lasa|look-alike|sound-alike|high[\s-]alert)\b/i
+const RE_PDX = /\b(ct\s*scan|mri|rontgen|foto\s*thorax|bacaan|radiologi|laboratorium|darah\s*lengkap|elektrolit|lumbal\s*pungsi|eeg|emg|usg|doppler|penunjang|pdx|evaluasi\s*lab|pa|patologi|ekg|biopsi)\b/i
+const RE_KONSUL = /\b(konsul|rujuk|alih\s*rawat|jawaban\s*ts|ts\s*sp|evaluasi\s*ts|koordinasi\s*ts|ts\b)/i
+const RE_URGENT = /\b(cito|segera|urgent|hari\s*ini|evaluasi\s*segera)\b/i
 
-interface DrugAlertItem {
+interface PlanCheckItem {
+  id: string
+  kategori: 'penunjang' | 'terapi'
+  judul: string
+  badgeLabel?: string
+  badgeClass?: string
+  penunjangId?: number
+  noteId?: number
+  itemNama?: string
+  isUrgent?: boolean
+}
+
+interface PatientPlansGroup {
   patient: Patient
-  terapi: TerapiItem
-  tipe: 'tapering' | 'durasi'
-  namaObat: string
-  dosis: string
-  hari: number
-  targetHari?: number
-  isUrgent: boolean
-  pesan: string
+  penunjang: PlanCheckItem[]
+  terapi: PlanCheckItem[]
+  totalCount: number
+  hasUrgent: boolean
 }
 
 export default function Dasbor() {
@@ -58,9 +76,30 @@ export default function Dasbor() {
       return 0
     }
   })
-  const [timeRange, setTimeRange] = useState<'7d' | '14d' | '30d'>('7d')
-  const [showPoliModal, setShowPoliModal] = useState(false)
-  const [selectedPoliForEdit, setSelectedPoliForEdit] = useState<PoliLog | undefined>(undefined)
+  const [timeRange, setTimeRange] = useState<'minggu' | 'bulan' | 'tahun'>('minggu')
+  const [chartType, setChartType] = useState<'area' | 'bar'>('area')
+
+  // Multi-select Faskes untuk Grafik Tren (default [] artinya semua faskes)
+  const [selectedHospitalIds, setSelectedHospitalIds] = useState<number[]>(() => {
+    try {
+      const s = sessionStorage.getItem('doctoid_dasbor_filter_rs_multi')
+      return s ? JSON.parse(s) : []
+    } catch {
+      return []
+    }
+  })
+  const [faskesDropdownOpen, setFaskesDropdownOpen] = useState(false)
+  const faskesDropdownRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (faskesDropdownRef.current && !faskesDropdownRef.current.contains(e.target as Node)) {
+        setFaskesDropdownOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
 
   const handleFilterClick = (id: number) => {
     setFilterHospitalId(id)
@@ -82,6 +121,7 @@ export default function Dasbor() {
   const allPatients = useLiveQuery(() => db.patients.toArray(), [], [] as Patient[])
   const allNotes = useLiveQuery(() => db.progressNotes.toArray(), [], [] as ProgressNote[])
   const poliLogs = useLiveQuery(() => db.poliLogs.toArray(), [], [] as PoliLog[])
+  const allPenunjang = useLiveQuery(() => db.penunjang.toArray(), [], [] as PenunjangItem[])
 
   const todayStr = getLocalDateString()
 
@@ -100,6 +140,54 @@ export default function Dasbor() {
     if (!filterHospitalId) return poliLogs
     return poliLogs.filter(p => p.hospital_id === filterHospitalId)
   }, [poliLogs, filterHospitalId])
+
+  // Filter khusus untuk Grafik Tren Pasien (Multi-Select Faskes)
+  const toggleHospital = (id: number) => {
+    setSelectedHospitalIds(prev => {
+      let next: number[]
+      if (prev.length === 0) {
+        // Sebelumnya pilih semua, sekarang uncheck faskes ini
+        next = hospitals.map(h => h.id!).filter(hid => hid !== id)
+      } else if (prev.includes(id)) {
+        next = prev.filter(hid => hid !== id)
+      } else {
+        next = [...prev, id]
+        if (next.length === hospitals.length) next = []
+      }
+      try {
+        sessionStorage.setItem('doctoid_dasbor_filter_rs_multi', JSON.stringify(next))
+      } catch {}
+      return next
+    })
+  }
+
+  const selectAllHospitals = () => {
+    setSelectedHospitalIds([])
+    try {
+      sessionStorage.setItem('doctoid_dasbor_filter_rs_multi', JSON.stringify([]))
+    } catch {}
+  }
+
+  const selectedFaskesLabel = useMemo(() => {
+    if (selectedHospitalIds.length === 0 || selectedHospitalIds.length === hospitals.length) {
+      return 'Semua Faskes'
+    }
+    if (selectedHospitalIds.length === 1) {
+      const found = hospitals.find(h => h.id === selectedHospitalIds[0])
+      return found?.nama || '1 Faskes'
+    }
+    return `${selectedHospitalIds.length} Faskes Terpilih`
+  }, [selectedHospitalIds, hospitals])
+
+  const chartFilteredPatients = useMemo(() => {
+    if (selectedHospitalIds.length === 0) return allPatients
+    return allPatients.filter(p => selectedHospitalIds.includes(p.hospital_id))
+  }, [allPatients, selectedHospitalIds])
+
+  const chartFilteredPoliLogs = useMemo(() => {
+    if (selectedHospitalIds.length === 0) return poliLogs
+    return poliLogs.filter(p => selectedHospitalIds.includes(p.hospital_id))
+  }, [poliLogs, selectedHospitalIds])
 
   // Total SELURUH pasien yang pernah ditangani (Kumulatif Ranap + Poli All-Time)
   const totalPasienAllTime = useMemo(() => {
@@ -163,187 +251,618 @@ export default function Dasbor() {
   // Total pasien dikelola hari ini (Inap Aktif + Poli Hari Ini)
   const totalPasienToday = filteredActivePatients.length + poliTodayCount
 
-  // ==================== ALERTS: TAPERING & DURASI OBAT ====================
-  const drugAlerts = useMemo<DrugAlertItem[]>(() => {
-    const alerts: DrugAlertItem[] = []
+  // ==================== DAFTAR PLANNING (PENUNJANG & TERAPI) ====================
+  const [planTab, setPlanTab] = useState<'semua' | 'penunjang' | 'terapi'>('semua')
+  const [completedPlanIds, setCompletedPlanIds] = useState<Set<string>>(() => {
+    try {
+      const raw = localStorage.getItem(`doctoid_completed_plans_${todayStr}`)
+      return raw ? new Set(JSON.parse(raw)) : new Set()
+    } catch {
+      return new Set()
+    }
+  })
+  const [undoItem, setUndoItem] = useState<PlanCheckItem | null>(null)
+  const [undoTimer, setUndoTimer] = useState<any>(null)
+
+  const handleCompletePlan = async (item: PlanCheckItem) => {
+    // 1. Tambahkan ke state dan localStorage untuk auto-dismiss instan tanpa latency
+    setCompletedPlanIds(prev => {
+      const next = new Set(prev)
+      next.add(item.id)
+      try {
+        localStorage.setItem(`doctoid_completed_plans_${todayStr}`, JSON.stringify(Array.from(next)))
+      } catch {}
+      return next
+    })
+
+    // 2. Set timer undo (4 detik)
+    if (undoTimer) clearTimeout(undoTimer)
+    setUndoItem(item)
+    const timer = setTimeout(() => {
+      setUndoItem(null)
+    }, 4000)
+    setUndoTimer(timer)
+
+    // 3. Update status pemeriksaan di db.penunjang bila berasal dari tabel penunjang
+    if (item.penunjangId) {
+      try {
+        await db.penunjang.update(item.penunjangId, { status: 'selesai' })
+      } catch (err) {
+        console.error('Failed to update penunjang status:', err)
+      }
+    }
+
+    // 4. Update status item di db.progressNotes bila berasal dari P note aktif
+    if (item.noteId && item.itemNama) {
+      try {
+        const note = await db.progressNotes.get(item.noteId)
+        if (note && note.P) {
+          const updatedP = note.P.map(pItem => {
+            if (pItem.nama_item === item.itemNama) {
+              return { ...pItem, status: 'stop' as const }
+            }
+            return pItem
+          })
+          await db.progressNotes.update(item.noteId, { P: updatedP })
+        }
+      } catch (err) {
+        console.error('Failed to update progressNote P item:', err)
+      }
+    }
+  }
+
+  const handleUndoComplete = async () => {
+    if (!undoItem) return
+    if (undoTimer) clearTimeout(undoTimer)
+
+    // Kembalikan ke state aktif
+    setCompletedPlanIds(prev => {
+      const next = new Set(prev)
+      next.delete(undoItem.id)
+      try {
+        localStorage.setItem(`doctoid_completed_plans_${todayStr}`, JSON.stringify(Array.from(next)))
+      } catch {}
+      return next
+    })
+
+    // Kembalikan status di db.penunjang
+    if (undoItem.penunjangId) {
+      try {
+        await db.penunjang.update(undoItem.penunjangId, { status: 'menunggu' })
+      } catch {}
+    }
+
+    // Kembalikan status di db.progressNotes
+    if (undoItem.noteId && undoItem.itemNama) {
+      try {
+        const note = await db.progressNotes.get(undoItem.noteId)
+        if (note && note.P) {
+          const updatedP = note.P.map(pItem => {
+            if (pItem.nama_item === undoItem.itemNama) {
+              return { ...pItem, status: 'aktif' as const }
+            }
+            return pItem
+          })
+          await db.progressNotes.update(undoItem.noteId, { P: updatedP })
+        }
+      } catch {}
+    }
+
+    setUndoItem(null)
+  }
+
+  const patientPlansList = useMemo<PatientPlansGroup[]>(() => {
+    const groups: PatientPlansGroup[] = []
 
     for (const p of filteredActivePatients) {
-      const note = patientLatestNoteMap.get(p.id!)
-      if (!note || !note.P) continue
+      if (!p.id) continue
+      const note = patientLatestNoteMap.get(p.id)
+      const seenTestNames = new Set<string>()
 
-      const activeTherapies = note.P.filter(item => item.status === 'aktif' && item.kategori === 'Farmakologi')
+      const penunjang: PlanCheckItem[] = []
+      const terapi: PlanCheckItem[] = []
 
-      for (const t of activeTherapies) {
-        const tglMulai = t.tracking?.tgl_mulai || t.tgl_mulai || p.tgl_mrs || todayStr
-        const dayCount = hariKe(tglMulai)
+      // 1. Pending Penunjang dari db.penunjang (status: 'menunggu')
+      const pendingPenunjang = allPenunjang.filter(it => it.patient_id === p.id && it.status === 'menunggu')
+      for (const item of pendingPenunjang) {
+        const norm = item.nama_pemeriksaan.trim().toLowerCase()
+        seenTestNames.add(norm)
+        const isUrgent = RE_URGENT.test(item.nama_pemeriksaan) || /ct\s*scan|mri/i.test(item.nama_pemeriksaan)
+        const itemId = `penunjang-${item.id || norm}`
+        if (!completedPlanIds.has(itemId)) {
+          penunjang.push({
+            id: itemId,
+            kategori: 'penunjang',
+            judul: item.nama_pemeriksaan,
+            badgeLabel: isUrgent ? 'Cito' : undefined,
+            badgeClass: isUrgent ? 'bg-rose-50 text-rose-700 border border-rose-200' : 'bg-teal-50 text-teal-700 border border-teal-200',
+            penunjangId: item.id,
+            isUrgent,
+          })
+        }
+      }
 
-        // 1. Cek explicit tracking
-        if (t.tracking) {
-          if (t.tracking.tipe === 'tapering') {
-            const isUrgent = dayCount >= 3
-            alerts.push({
-              patient: p,
-              terapi: t,
-              tipe: 'tapering',
-              namaObat: t.nama_item,
-              dosis: t.dosis_keterangan,
-              hari: dayCount,
-              isUrgent,
-              pesan: isUrgent
-                ? `H-${dayCount}: Waktunya evaluasi klinis untuk tap down dosis / weaning.`
-                : `H-${dayCount}: Dalam pemantauan tapering (${t.tracking.tahap_taper || t.dosis_keterangan}).`,
-            })
+      // 2. Pasien Peran Rawat Konsul (yang belum divisite hari ini - digabung ke Terapi)
+      if (p.peran_rawat === 'Konsul' && !visitedTodayPatientIds.has(p.id)) {
+        const itemId = `konsul-role-${p.id}`
+        if (!completedPlanIds.has(itemId)) {
+          terapi.push({
+            id: itemId,
+            kategori: 'terapi',
+            judul: p.dpjp_utama && p.dpjp_utama !== 'Neuro' ? `Konsul dari ${p.dpjp_utama}` : 'Pasien Konsulan Baru',
+            isUrgent: true,
+          })
+        }
+      }
+
+      // 3. Dari P (Plan) pada Note Terakhir Pasien
+      if (note && note.P && Array.isArray(note.P)) {
+        const activeItems = note.P.filter(item => item.status === 'aktif')
+
+        for (const t of activeItems) {
+          const combined = `${t.nama_item} ${t.dosis_keterangan || ''}`.trim()
+          const tglMulai = t.tracking?.tgl_mulai || t.tgl_mulai || p.tgl_mrs || todayStr
+          const dayCount = hariKe(tglMulai)
+
+          // 3a. Konsul / Rujukan TS (digabung ke Terapi, tanpa badge konsul redundant)
+          if ((t.kategori as string) === 'Konsul' || RE_KONSUL.test(combined)) {
+            const isUrgent = RE_URGENT.test(combined)
+            const itemId = `konsul-${p.id}-${t.nama_item}`
+            if (!completedPlanIds.has(itemId)) {
+              terapi.push({
+                id: itemId,
+                kategori: 'terapi',
+                judul: t.nama_item + (t.dosis_keterangan ? ` (${t.dosis_keterangan})` : ''),
+                badgeLabel: isUrgent ? 'Cito' : undefined,
+                badgeClass: isUrgent ? 'bg-rose-50 text-rose-700 border border-rose-200' : undefined,
+                noteId: note.id,
+                itemNama: t.nama_item,
+                isUrgent,
+              })
+            }
             continue
-          } else if (t.tracking.tipe === 'durasi') {
-            const target = t.tracking.target_hari || 7
-            const isUrgent = dayCount >= target
-            alerts.push({
-              patient: p,
-              terapi: t,
-              tipe: 'durasi',
-              namaObat: t.nama_item,
-              dosis: t.dosis_keterangan,
-              hari: dayCount,
-              targetHari: target,
-              isUrgent,
-              pesan: dayCount >= target
-                ? `H-${dayCount}/${target}: Target durasi telah tercapai! Evaluasi stop atau switch.`
-                : `H-${dayCount}/${target}: Berjalan menuju target hari ke-${target}.`,
-            })
+          }
+
+          // 3b. PDx / Penunjang (CT scan, Lab, Ro, MRI, EEG, PA, dsb)
+          if (t.kategori === 'Diagnostik' || RE_PDX.test(combined)) {
+            const norm = t.nama_item.trim().toLowerCase()
+            if (!seenTestNames.has(norm)) {
+              seenTestNames.add(norm)
+              const isFollowUp = /bacaan|follow\s*up|evaluasi|menunggu|pending|ulang/i.test(combined)
+              const isUrgent = isFollowUp || RE_URGENT.test(combined)
+              const itemId = `pdx-${p.id}-${t.nama_item}`
+              if (!completedPlanIds.has(itemId)) {
+                penunjang.push({
+                  id: itemId,
+                  kategori: 'penunjang',
+                  judul: t.nama_item + (t.dosis_keterangan ? ` (${t.dosis_keterangan})` : ''),
+                  badgeLabel: isUrgent ? 'Cito' : undefined,
+                  badgeClass: isUrgent
+                    ? 'bg-rose-50 text-rose-700 border border-rose-200'
+                    : 'bg-teal-50 text-teal-700 border border-teal-200',
+                  noteId: note.id,
+                  itemNama: t.nama_item,
+                  isUrgent,
+                })
+              }
+            }
+            continue
+          }
+
+          // 3c. Explicit Tracking (Tapering / Durasi)
+          if (t.tracking) {
+            if (t.tracking.tipe === 'tapering') {
+              const isUrgent = dayCount >= 3
+              const itemId = `track-taper-${p.id}-${t.nama_item}`
+              if (!completedPlanIds.has(itemId)) {
+                terapi.push({
+                  id: itemId,
+                  kategori: 'terapi',
+                  judul: t.nama_item + (t.dosis_keterangan ? ` (${t.dosis_keterangan})` : ''),
+                  badgeLabel: `Tapering H-${dayCount}`,
+                  badgeClass: isUrgent
+                    ? 'bg-rose-50 text-rose-700 border border-rose-200'
+                    : 'bg-amber-50 text-amber-800 border border-amber-200',
+                  noteId: note.id,
+                  itemNama: t.nama_item,
+                  isUrgent,
+                })
+              }
+              continue
+            } else if (t.tracking.tipe === 'durasi') {
+              const target = t.tracking.target_hari || 7
+              const isUrgent = dayCount >= target
+              const itemId = `track-dur-${p.id}-${t.nama_item}`
+              if (!completedPlanIds.has(itemId)) {
+                terapi.push({
+                  id: itemId,
+                  kategori: 'terapi',
+                  judul: t.nama_item + (t.dosis_keterangan ? ` (${t.dosis_keterangan})` : ''),
+                  badgeLabel: `Durasi H-${dayCount}/${target}`,
+                  badgeClass: isUrgent
+                    ? 'bg-rose-50 text-rose-700 border border-rose-200'
+                    : 'bg-blue-50 text-blue-700 border border-blue-200',
+                  noteId: note.id,
+                  itemNama: t.nama_item,
+                  isUrgent,
+                })
+              }
+              continue
+            }
+          }
+
+          // 3d. Loading Dose
+          if (RE_LOADING.test(combined)) {
+            const isUrgent = RE_URGENT.test(combined)
+            const itemId = `loading-${p.id}-${t.nama_item}`
+            if (!completedPlanIds.has(itemId)) {
+              terapi.push({
+                id: itemId,
+                kategori: 'terapi',
+                judul: t.nama_item + (t.dosis_keterangan ? ` (${t.dosis_keterangan})` : ''),
+                badgeLabel: isUrgent ? 'Cito' : undefined,
+                badgeClass: isUrgent ? 'bg-rose-50 text-rose-700 border border-rose-200' : undefined,
+                noteId: note.id,
+                itemNama: t.nama_item,
+                isUrgent: true,
+              })
+            }
+            continue
+          }
+
+          // 3e. LASA / High-Alert
+          if (RE_LASA.test(combined)) {
+            const itemId = `lasa-${p.id}-${t.nama_item}`
+            if (!completedPlanIds.has(itemId)) {
+              terapi.push({
+                id: itemId,
+                kategori: 'terapi',
+                judul: t.nama_item + (t.dosis_keterangan ? ` (${t.dosis_keterangan})` : ''),
+                badgeLabel: 'LASA',
+                badgeClass: 'bg-amber-50 text-amber-800 border border-amber-200',
+                noteId: note.id,
+                itemNama: t.nama_item,
+                isUrgent: false,
+              })
+            }
+            continue
+          }
+
+          // 3f. Deteksi Heuristik Otomatis Obat (Manitol, Dexa, Ceftriaxone, Nimodipine, DAPT)
+          if (RE_TAPER_MANITOL.test(combined)) {
+            const isUrgent = dayCount >= 3
+            const itemId = `manitol-${p.id}-${t.nama_item}`
+            if (!completedPlanIds.has(itemId)) {
+              terapi.push({
+                id: itemId,
+                kategori: 'terapi',
+                judul: t.nama_item + (t.dosis_keterangan ? ` (${t.dosis_keterangan})` : ''),
+                badgeLabel: `Tapering H-${dayCount}`,
+                badgeClass: isUrgent
+                  ? 'bg-rose-50 text-rose-700 border border-rose-200'
+                  : 'bg-amber-50 text-amber-800 border border-amber-200',
+                noteId: note.id,
+                itemNama: t.nama_item,
+                isUrgent,
+              })
+            }
+            continue
+          }
+
+          if (RE_TAPER_DEXA.test(combined)) {
+            const isUrgent = dayCount >= 4
+            const itemId = `dexa-${p.id}-${t.nama_item}`
+            if (!completedPlanIds.has(itemId)) {
+              terapi.push({
+                id: itemId,
+                kategori: 'terapi',
+                judul: t.nama_item + (t.dosis_keterangan ? ` (${t.dosis_keterangan})` : ''),
+                badgeLabel: `Tapering H-${dayCount}`,
+                badgeClass: isUrgent
+                  ? 'bg-rose-50 text-rose-700 border border-rose-200'
+                  : 'bg-amber-50 text-amber-800 border border-amber-200',
+                noteId: note.id,
+                itemNama: t.nama_item,
+                isUrgent,
+              })
+            }
+            continue
+          }
+
+          if (RE_DURASI_CEFTRIAXONE.test(combined)) {
+            const target = 7
+            const isUrgent = dayCount >= 6
+            const itemId = `ceftri-${p.id}-${t.nama_item}`
+            if (!completedPlanIds.has(itemId)) {
+              terapi.push({
+                id: itemId,
+                kategori: 'terapi',
+                judul: t.nama_item + (t.dosis_keterangan ? ` (${t.dosis_keterangan})` : ''),
+                badgeLabel: `Durasi H-${dayCount}/${target}`,
+                badgeClass: isUrgent
+                  ? 'bg-rose-50 text-rose-700 border border-rose-200'
+                  : 'bg-blue-50 text-blue-700 border border-blue-200',
+                noteId: note.id,
+                itemNama: t.nama_item,
+                isUrgent,
+              })
+            }
+            continue
+          }
+
+          if (RE_DURASI_NIMODIPINE.test(combined)) {
+            const target = 21
+            const isUrgent = dayCount >= 19
+            const itemId = `nimo-${p.id}-${t.nama_item}`
+            if (!completedPlanIds.has(itemId)) {
+              terapi.push({
+                id: itemId,
+                kategori: 'terapi',
+                judul: t.nama_item + (t.dosis_keterangan ? ` (${t.dosis_keterangan})` : ''),
+                badgeLabel: `Durasi H-${dayCount}/${target}`,
+                badgeClass: isUrgent
+                  ? 'bg-rose-50 text-rose-700 border border-rose-200'
+                  : 'bg-blue-50 text-blue-700 border border-blue-200',
+                noteId: note.id,
+                itemNama: t.nama_item,
+                isUrgent,
+              })
+            }
+            continue
+          }
+
+          if (RE_DURASI_DAPT.test(combined)) {
+            const target = 21
+            const isUrgent = dayCount >= 20
+            const itemId = `dapt-${p.id}-${t.nama_item}`
+            if (!completedPlanIds.has(itemId)) {
+              terapi.push({
+                id: itemId,
+                kategori: 'terapi',
+                judul: t.nama_item + (t.dosis_keterangan ? ` (${t.dosis_keterangan})` : ''),
+                badgeLabel: `Durasi H-${dayCount}/${target}`,
+                badgeClass: isUrgent
+                  ? 'bg-rose-50 text-rose-700 border border-rose-200'
+                  : 'bg-blue-50 text-blue-700 border border-blue-200',
+                noteId: note.id,
+                itemNama: t.nama_item,
+                isUrgent,
+              })
+            }
+            continue
+          }
+
+          // 3g. Monitoring / Tindakan Non-Farmakologi
+          if (t.kategori === 'Monitoring' || (t.kategori === 'Non-Farmakologi' && /fisioterapi|rehab|kateter|ngt|aff|rawat\s*luka|mobilisasi/i.test(combined))) {
+            const itemId = `tindakan-${p.id}-${t.nama_item}`
+            if (!completedPlanIds.has(itemId)) {
+              terapi.push({
+                id: itemId,
+                kategori: 'terapi',
+                judul: t.nama_item + (t.dosis_keterangan ? ` (${t.dosis_keterangan})` : ''),
+                badgeLabel: t.kategori === 'Monitoring' ? 'Monitoring' : 'Tindakan',
+                badgeClass: 'bg-slate-100 text-slate-700 border border-slate-200',
+                noteId: note.id,
+                itemNama: t.nama_item,
+                isUrgent: false,
+              })
+            }
             continue
           }
         }
+      }
 
-        // 2. Deteksi Heuristik Otomatis (Manitol, Dexa, Ceftriaxone, Nimodipine, DAPT)
-        const combined = `${t.nama_item} ${t.dosis_keterangan}`
+      // 4. Catatan Bebas CPPT (note.catatan) jika ada rencana belum selesai
+      if (note && note.catatan) {
+        const lines = note.catatan.split('\n').map(l => l.trim()).filter(Boolean)
+        for (let i = 0; i < lines.length; i++) {
+          const line = lines[i]
+          if (/^(?:[-*•]\s*)?(rencana|plan|konsul|follow\s*up|evaluasi|usul|jadwal|target krs)/i.test(line)) {
+            const clean = line.replace(/^[-*•]\s*/, '')
+            const isKonsul = RE_KONSUL.test(clean)
+            const isPDx = RE_PDX.test(clean)
+            const isUrgent = RE_URGENT.test(clean)
+            const itemId = `catatan-${p.id}-${i}`
 
-        if (RE_TAPER_MANITOL.test(combined)) {
-          const isUrgent = dayCount >= 3
-          alerts.push({
-            patient: p,
-            terapi: t,
-            tipe: 'tapering',
-            namaObat: t.nama_item,
-            dosis: t.dosis_keterangan,
-            hari: dayCount,
-            isUrgent,
-            pesan: isUrgent
-              ? `H-${dayCount}: Manitol sudah ${dayCount} hari. Waktunya evaluasi tap-down per hari / stop bila klinis membaik!`
-              : `H-${dayCount}: Manitol dalam pemantauan ICP/klinis.`,
-          })
-        } else if (RE_TAPER_DEXA.test(combined)) {
-          const isUrgent = dayCount >= 4
-          alerts.push({
-            patient: p,
-            terapi: t,
-            tipe: 'tapering',
-            namaObat: t.nama_item,
-            dosis: t.dosis_keterangan,
-            hari: dayCount,
-            isUrgent,
-            pesan: isUrgent
-              ? `H-${dayCount}: Dexamethasone telah ${dayCount} hari. Pertimbangkan penurunan dosis bertahap.`
-              : `H-${dayCount}: Dexamethasone aktif.`,
-          })
-        } else if (RE_DURASI_CEFTRIAXONE.test(combined)) {
-          const target = 7
-          const isUrgent = dayCount >= 6
-          alerts.push({
-            patient: p,
-            terapi: t,
-            tipe: 'durasi',
-            namaObat: t.nama_item,
-            dosis: t.dosis_keterangan,
-            hari: dayCount,
-            targetHari: target,
-            isUrgent,
-            pesan: dayCount >= target
-              ? `H-${dayCount}/${target}: Ceftriaxone telah mencapai batas 7 hari standar. Evaluasi stop/ganti.`
-              : `H-${dayCount}/${target}: Menuju target 7 hari antibiotik empiris.`,
-          })
-        } else if (RE_DURASI_NIMODIPINE.test(combined)) {
-          const target = 21
-          const isUrgent = dayCount >= 19
-          alerts.push({
-            patient: p,
-            terapi: t,
-            tipe: 'durasi',
-            namaObat: t.nama_item,
-            dosis: t.dosis_keterangan,
-            hari: dayCount,
-            targetHari: target,
-            isUrgent,
-            pesan: dayCount >= target
-              ? `H-${dayCount}/${target}: Profilaksis vasospasme PSA Nimodipine selesai (21 hari).`
-              : `H-${dayCount}/${target}: Nimodipine target 21 hari pasca-PSA.`,
-          })
-        } else if (RE_DURASI_DAPT.test(combined)) {
-          const target = 21
-          const isUrgent = dayCount >= 20
-          alerts.push({
-            patient: p,
-            terapi: t,
-            tipe: 'durasi',
-            namaObat: t.nama_item,
-            dosis: t.dosis_keterangan,
-            hari: dayCount,
-            targetHari: target,
-            isUrgent,
-            pesan: dayCount >= target
-              ? `H-${dayCount}/${target}: DAPT (Aspirin+Clopidogrel) mencapai 21 hari (CHANCE/POINT protocol). Evaluasi de-eskalasi ke monoterapi.`
-              : `H-${dayCount}/${target}: Protokol DAPT 21 hari stroke minor / TIA risiko tinggi.`,
-          })
+            if (!completedPlanIds.has(itemId)) {
+              if (isKonsul) {
+                terapi.push({
+                  id: itemId,
+                  kategori: 'terapi',
+                  judul: clean,
+                  badgeLabel: isUrgent ? 'Cito' : undefined,
+                  badgeClass: isUrgent
+                    ? 'bg-rose-50 text-rose-700 border border-rose-200'
+                    : undefined,
+                  isUrgent,
+                })
+              } else if (isPDx) {
+                penunjang.push({
+                  id: itemId,
+                  kategori: 'penunjang',
+                  judul: clean,
+                  badgeLabel: isUrgent ? 'Cito' : undefined,
+                  badgeClass: isUrgent
+                    ? 'bg-rose-50 text-rose-700 border border-rose-200'
+                    : 'bg-teal-50 text-teal-700 border border-teal-200',
+                  isUrgent,
+                })
+              } else {
+                terapi.push({
+                  id: itemId,
+                  kategori: 'terapi',
+                  judul: clean,
+                  badgeLabel: 'Rencana',
+                  badgeClass: 'bg-slate-100 text-slate-700 border border-slate-200',
+                  isUrgent: false,
+                })
+              }
+            }
+          }
         }
+      }
+
+      const totalCount = penunjang.length + terapi.length
+      const hasUrgent = penunjang.some(it => it.isUrgent) || terapi.some(it => it.isUrgent)
+
+      if (totalCount > 0) {
+        groups.push({
+          patient: p,
+          penunjang,
+          terapi,
+          totalCount,
+          hasUrgent,
+        })
       }
     }
 
-    return alerts.sort((a, b) => (b.isUrgent ? 1 : 0) - (a.isUrgent ? 1 : 0))
-  }, [filteredActivePatients, patientLatestNoteMap, todayStr])
+    // Urutkan pasien: yang memiliki item urgent di paling atas
+    return groups.sort((a, b) => (b.hasUrgent ? 1 : 0) - (a.hasUrgent ? 1 : 0))
+  }, [filteredActivePatients, patientLatestNoteMap, allPenunjang, visitedTodayPatientIds, todayStr, completedPlanIds])
 
-  // ==================== GRAFIK TREN BEBAN PASIEN (DARKA-STYLE) ====================
+  // Filter kelompok pasien sesuai tab yang dipilih
+  const filteredPatientPlans = useMemo(() => {
+    if (planTab === 'penunjang') {
+      return patientPlansList.filter(g => g.penunjang.length > 0)
+    }
+    if (planTab === 'terapi') {
+      return patientPlansList.filter(g => g.terapi.length > 0)
+    }
+    return patientPlansList
+  }, [patientPlansList, planTab])
+
+  // ==================== GRAFIK TREN PASIEN (RANAP & POLI) ====================
   const chartData = useMemo(() => {
-    const days = timeRange === '7d' ? 7 : timeRange === '14d' ? 14 : 30
     const result = []
 
-    const now = new Date()
-    for (let i = days - 1; i >= 0; i--) {
-      const d = new Date(now)
-      d.setDate(d.getDate() - i)
-      const year = d.getFullYear()
-      const month = String(d.getMonth() + 1).padStart(2, '0')
-      const day = String(d.getDate()).padStart(2, '0')
-      const dateKey = `${year}-${month}-${day}`
+    if (timeRange === 'minggu' || timeRange === 'bulan') {
+      const days = timeRange === 'minggu' ? 7 : 30
+      const now = new Date()
 
-      // Hitung pasien rawat inap yang divisite pada hari itu
-      const visitedInapOnDate = new Set<number>()
-      for (const n of allNotes) {
-        if (n.tanggal && n.tanggal.startsWith(dateKey)) {
-          visitedInapOnDate.add(n.patient_id)
+      for (let i = days - 1; i >= 0; i--) {
+        const d = new Date(now)
+        d.setDate(d.getDate() - i)
+        const year = d.getFullYear()
+        const month = String(d.getMonth() + 1).padStart(2, '0')
+        const day = String(d.getDate()).padStart(2, '0')
+        const dateKey = `${year}-${month}-${day}`
+
+        // Hitung seluruh pasien rawat inap yang dirawat pada tanggal tersebut (sesuai faskes terpilih)
+        let inapCount = 0
+        for (const p of chartFilteredPatients) {
+          const tglMrs = p.tgl_mrs ? p.tgl_mrs.slice(0, 10) : ''
+          const tglKrs = p.tgl_krs ? p.tgl_krs.slice(0, 10) : ''
+
+          let isInap = false
+          // Cek episode rawat saat ini
+          if (tglMrs && tglMrs <= dateKey) {
+            if (p.status_rawat === 'aktif') {
+              if (dateKey <= todayStr) isInap = true
+            } else if (!tglKrs || tglKrs >= dateKey) {
+              isInap = true
+            }
+          }
+
+          // Cek riwayat episode rawat inap sebelumnya
+          if (!isInap && p.riwayat_rawat && p.riwayat_rawat.length > 0) {
+            for (const ep of p.riwayat_rawat) {
+              if (selectedHospitalIds.length > 0 && !selectedHospitalIds.includes(ep.hospital_id)) continue
+              const epMrs = ep.tgl_mrs ? ep.tgl_mrs.slice(0, 10) : ''
+              const epKrs = ep.tgl_krs ? ep.tgl_krs.slice(0, 10) : ''
+              if (epMrs && epMrs <= dateKey && (!epKrs || epKrs >= dateKey)) {
+                isInap = true
+                break
+              }
+            }
+          }
+
+          if (isInap) inapCount++
         }
-      }
 
-      // Hitung pasien poli pada hari itu
-      let poliCountOnDate = 0
-      for (const pl of filteredPoliLogs) {
-        if (pl.tanggal === dateKey) {
-          poliCountOnDate += (pl.jumlah_pasien || 0)
+        // Hitung pasien rawat jalan (poli) pada tanggal tersebut (sesuai faskes terpilih)
+        let poliCount = 0
+        for (const pl of chartFilteredPoliLogs) {
+          if (pl.tanggal === dateKey) {
+            poliCount += (pl.jumlah_pasien || 0)
+          }
         }
+
+        const dayName = d.toLocaleDateString('id-ID', { weekday: 'short' })
+        const dateLabel = timeRange === 'minggu' ? `${dayName}, ${d.getDate()}` : `${d.getDate()}/${d.getMonth() + 1}`
+
+        result.push({
+          date: dateKey,
+          label: dateLabel,
+          inap: inapCount,
+          poli: poliCount,
+          total: inapCount + poliCount,
+        })
       }
+    } else {
+      // timeRange === 'tahun' (12 Bulan Terakhir)
+      const now = new Date()
+      for (let i = 11; i >= 0; i--) {
+        const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
+        const year = d.getFullYear()
+        const monthNum = d.getMonth() + 1
+        const monthPrefix = `${year}-${String(monthNum).padStart(2, '0')}`
+        const lastDayOfMonth = new Date(year, monthNum, 0).getDate()
+        const startOfMonth = `${monthPrefix}-01`
+        const endOfMonth = `${monthPrefix}-${String(lastDayOfMonth).padStart(2, '0')}`
 
-      const dayName = d.toLocaleDateString('id-ID', { weekday: 'short' })
-      const dateLabel = `${dayName}, ${d.getDate()}`
+        // Hitung pasien rawat inap yang dirawat pada bulan tersebut (sesuai faskes terpilih)
+        let inapCount = 0
+        for (const p of chartFilteredPatients) {
+          const tglMrs = p.tgl_mrs ? p.tgl_mrs.slice(0, 10) : ''
+          const tglKrs = p.tgl_krs ? p.tgl_krs.slice(0, 10) : ''
 
-      result.push({
-        date: dateKey,
-        label: dateLabel,
-        inap: visitedInapOnDate.size,
-        poli: poliCountOnDate,
-        total: visitedInapOnDate.size + poliCountOnDate,
-      })
+          let isInap = false
+          if (tglMrs && tglMrs <= endOfMonth) {
+            if (p.status_rawat === 'aktif') {
+              isInap = true
+            } else if (!tglKrs || tglKrs >= startOfMonth) {
+              isInap = true
+            }
+          }
+
+          if (!isInap && p.riwayat_rawat && p.riwayat_rawat.length > 0) {
+            for (const ep of p.riwayat_rawat) {
+              if (selectedHospitalIds.length > 0 && !selectedHospitalIds.includes(ep.hospital_id)) continue
+              const epMrs = ep.tgl_mrs ? ep.tgl_mrs.slice(0, 10) : ''
+              const epKrs = ep.tgl_krs ? ep.tgl_krs.slice(0, 10) : ''
+              if (epMrs && epMrs <= endOfMonth && (!epKrs || epKrs >= startOfMonth)) {
+                isInap = true
+                break
+              }
+            }
+          }
+
+          if (isInap) inapCount++
+        }
+
+        // Hitung pasien poli pada bulan tersebut (sesuai faskes terpilih)
+        let poliCount = 0
+        for (const pl of chartFilteredPoliLogs) {
+          if (pl.tanggal && pl.tanggal.startsWith(monthPrefix)) {
+            poliCount += (pl.jumlah_pasien || 0)
+          }
+        }
+
+        const monthName = d.toLocaleDateString('id-ID', { month: 'short' })
+        const label = `${monthName} ${String(year).slice(2)}`
+
+        result.push({
+          date: monthPrefix,
+          label,
+          inap: inapCount,
+          poli: poliCount,
+          total: inapCount + poliCount,
+        })
+      }
     }
 
     return result
-  }, [timeRange, allNotes, filteredPoliLogs])
+  }, [timeRange, chartFilteredPatients, chartFilteredPoliLogs, selectedHospitalIds, todayStr])
 
   // ==================== PROYEKSI FINANSIAL / JASA MEDIS ====================
   const financialProjection = useMemo(() => {
@@ -433,16 +952,16 @@ export default function Dasbor() {
   return (
     <main className="space-y-5 p-3.5 sm:p-5 pb-8">
       
-      {/* Hero Banner: Foto Besar Mengisi Sisi Kiri dengan Lengkungan Kanan Bawah */}
+      {/* Hero Banner: Foto Profil Dokter & Metrik Pasien */}
       <div className="glass-blue-hero rounded-3xl text-white shadow-xl overflow-hidden relative">
         <div className="flex items-stretch min-h-[148px]">
-          {/* Sisi Kiri: Foto Profil Dokter (Top & Left habis ke tepi frame, Kanan Bawah melengkung rounded-br-3xl) */}
+          {/* Sisi Kiri: Foto Profil Dokter (Full Height terisi rapi menyatu dengan frame) */}
           <button
             type="button"
             onClick={() => navigate('/profil')}
             title="Buka Profil Dokter"
             aria-label="Buka Profil Dokter"
-            className="relative w-32 sm:w-36 shrink-0 cursor-pointer group active:scale-98 transition-all overflow-hidden bg-primary-deep/40 rounded-br-3xl shadow-md border-r border-b border-white/20"
+            className="relative w-28 sm:w-36 shrink-0 cursor-pointer group active:scale-98 transition-all overflow-hidden bg-primary-deep/40 border-r border-white/15"
           >
             {user?.photoURL ? (
               <img
@@ -459,9 +978,9 @@ export default function Dasbor() {
             <div className="absolute inset-0 bg-gradient-to-t from-black/30 via-transparent to-transparent pointer-events-none" />
           </button>
 
-          {/* Sisi Kanan: Identitas Dokter + Tombol Aksi + Metrik Pasien Dirawat */}
-          <div className="flex-1 p-4 sm:p-5 flex flex-col justify-between min-w-0">
-            {/* Atas: Nama Dokter & Spesialisasi (Full Width — tidak terpotong) */}
+          {/* Sisi Kanan: Identitas Dokter + Metrik + Tombol Aksi */}
+          <div className="flex-1 p-3.5 sm:p-5 flex flex-col justify-between min-w-0">
+            {/* Atas: Nama Dokter & Spesialisasi */}
             <div className="min-w-0 w-full">
               <h2 className="text-sm sm:text-base font-black text-white leading-tight break-words">
                 {user?.displayName || 'Dokter'}
@@ -471,15 +990,15 @@ export default function Dasbor() {
               </p>
             </div>
 
-            {/* Bawah: Total Seluruh Pasien Ditangani di Kiri & Tombol Aksi Cepat (Mata + Gir) di Kanan */}
-            <div className="flex items-end justify-between pt-3 border-t border-white/15 gap-2">
-              <div>
-                <h1 className="h1 text-2xl sm:text-3xl font-black text-white leading-none">
+            {/* Bawah: Total Seluruh Pasien Ditangani di Kiri & Tombol Aksi Cepat di Kanan */}
+            <div className="flex items-end justify-between gap-2 pt-2">
+              <div className="min-w-0">
+                <span className="h1 text-2xl sm:text-3xl font-black text-white leading-none tracking-tight block">
                   {totalPasienAllTime}
-                </h1>
-                <p className="text-xs font-bold text-white/95 mt-1 tracking-wide">
+                </span>
+                <span className="text-xs font-bold text-white/95 mt-1 tracking-wide block">
                   Total Pasien Ditangani
-                </p>
+                </span>
               </div>
 
               {/* Tombol Aksi Cepat (Eye & Settings) */}
@@ -488,7 +1007,7 @@ export default function Dasbor() {
                   type="button"
                   onClick={handleToggleMask}
                   aria-label={unmasked ? 'Sensor Identitas Pasien' : 'Tampilkan Identitas Pasien (Biometrik)'}
-                  className="flex size-8 sm:size-9 cursor-pointer items-center justify-center rounded-2xl bg-white/15 backdrop-blur-md text-white hover:bg-white/25 active:scale-95 transition-all"
+                  className="flex size-8 sm:size-9 cursor-pointer items-center justify-center rounded-2xl bg-white/15 backdrop-blur-md text-white hover:bg-white/25 active:scale-95 transition-all border border-white/20"
                   title={unmasked ? 'Sensor Identitas' : 'Buka Sensor Identitas (Biometrik)'}
                 >
                   {unmasked ? <Eye size={15} /> : <EyeOff size={15} />}
@@ -499,7 +1018,7 @@ export default function Dasbor() {
                   onClick={() => navigate('/pengaturan')}
                   aria-label="Pengaturan"
                   title="Pengaturan"
-                  className="flex size-8 sm:size-9 cursor-pointer items-center justify-center rounded-2xl bg-white/15 backdrop-blur-md text-white hover:bg-white/25 active:scale-95 transition-all"
+                  className="flex size-8 sm:size-9 cursor-pointer items-center justify-center rounded-2xl bg-white/15 backdrop-blur-md text-white hover:bg-white/25 active:scale-95 transition-all border border-white/20"
                 >
                   <Settings size={15} />
                 </button>
@@ -582,6 +1101,282 @@ export default function Dasbor() {
           </div>
         </div>
       )}
+
+      {/* SECTION: GRAFIK TREN PASIEN (RANAP & POLI) */}
+      <div className="rounded-3xl bg-white border border-slate-200/90 shadow-xs p-4 sm:p-5">
+        <div className="pb-3 border-b border-slate-100 space-y-2">
+          {/* Baris 1: Dropdown RS di Atas Rata Kanan */}
+          <div className="flex items-center justify-end">
+            {/* Dropdown Faskes Multi-Select (Di atas rata kanan) */}
+            <div className="relative" ref={faskesDropdownRef}>
+              <button
+                type="button"
+                onClick={() => setFaskesDropdownOpen(prev => !prev)}
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-slate-100 hover:bg-slate-200/80 text-xs font-semibold text-slate-700 transition-colors cursor-pointer"
+              >
+                <span className="truncate max-w-[140px] sm:max-w-[200px]">
+                  {selectedFaskesLabel}
+                </span>
+                <ChevronDown size={12} className={`text-slate-400 transition-transform ${faskesDropdownOpen ? 'rotate-180' : ''}`} />
+              </button>
+
+              {faskesDropdownOpen && (
+                <div className="absolute right-0 top-full mt-1.5 w-60 rounded-2xl bg-white border border-slate-200 shadow-xl z-50 p-1.5 space-y-0.5 animate-in fade-in zoom-in-95 duration-150">
+                  <button
+                    type="button"
+                    onClick={selectAllHospitals}
+                    className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-xl hover:bg-slate-50 text-xs font-semibold text-slate-700 cursor-pointer text-left"
+                  >
+                    <span>Semua Faskes</span>
+                    {(selectedHospitalIds.length === 0 || selectedHospitalIds.length === hospitals.length) && (
+                      <Check size={14} className="text-primary font-bold" />
+                    )}
+                  </button>
+                  <div className="border-t border-slate-100 my-1" />
+                  {hospitals.map(h => {
+                    const isChecked = selectedHospitalIds.length === 0 || selectedHospitalIds.includes(h.id!)
+                    return (
+                      <button
+                        key={h.id}
+                        type="button"
+                        onClick={() => toggleHospital(h.id!)}
+                        className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-xl hover:bg-slate-50 text-xs font-medium text-slate-700 cursor-pointer text-left"
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span
+                            className="size-2 rounded-full shrink-0"
+                            style={{ backgroundColor: h.kode_warna || '#3B82F6' }}
+                          />
+                          <span className="truncate">{h.nama}</span>
+                        </div>
+                        <div className={`size-3.5 rounded-md border flex items-center justify-center transition-colors shrink-0 ml-2 ${
+                          isChecked ? 'bg-primary border-primary text-white' : 'border-slate-300 bg-white'
+                        }`}>
+                          {isChecked && <Check size={10} strokeWidth={3} />}
+                        </div>
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Baris 2: Sejajar di Bawahnya (Rentang Waktu & Ikon Mode Visual Rata Kanan) */}
+          <div className="flex items-center justify-end gap-2">
+            {/* Rentang Waktu: Minggu, Bulan, Tahun */}
+            <div className="flex items-center gap-0.5 bg-slate-100 p-0.5 rounded-full border border-slate-200/60">
+              {(['minggu', 'bulan', 'tahun'] as const).map(tr => (
+                <button
+                  key={tr}
+                  type="button"
+                  onClick={() => setTimeRange(tr)}
+                  className={`px-2.5 py-1 rounded-full text-xs font-bold transition-all cursor-pointer ${
+                    timeRange === tr
+                      ? 'bg-white text-slate-800 shadow-xs'
+                      : 'text-slate-500 hover:text-slate-800'
+                  }`}
+                >
+                  {tr === 'minggu' ? 'Minggu' : tr === 'bulan' ? 'Bulan' : 'Tahun'}
+                </button>
+              ))}
+            </div>
+
+            {/* Visual Mode: Ikon Garis Area vs Ikon Batang (Ala Darka) */}
+            <div className="flex items-center gap-0.5 bg-slate-100 p-0.5 rounded-full border border-slate-200/60">
+              <button
+                type="button"
+                onClick={() => setChartType('area')}
+                className={`p-1.5 rounded-full transition-colors cursor-pointer ${
+                  chartType === 'area'
+                    ? 'bg-white text-primary shadow-xs'
+                    : 'text-slate-400 hover:text-slate-600'
+                }`}
+                title="Grafik Garis Area"
+              >
+                <LineChartIcon size={14} />
+              </button>
+              <button
+                type="button"
+                onClick={() => setChartType('bar')}
+                className={`p-1.5 rounded-full transition-colors cursor-pointer ${
+                  chartType === 'bar'
+                    ? 'bg-white text-primary shadow-xs'
+                    : 'text-slate-400 hover:text-slate-600'
+                }`}
+                title="Grafik Batang"
+              >
+                <BarChart3Icon size={14} />
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Chart Container */}
+        <div className="h-60 sm:h-72 w-full pt-4">
+          <ResponsiveContainer width="100%" height="100%">
+            {chartType === 'area' ? (
+              <AreaChart data={chartData} margin={{ top: 10, right: 6, left: -24, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="colorRanap" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#3B82F6" stopOpacity={0.35} />
+                    <stop offset="95%" stopColor="#3B82F6" stopOpacity={0.0} />
+                  </linearGradient>
+                  <linearGradient id="colorPoli" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#14B8A6" stopOpacity={0.3} />
+                    <stop offset="95%" stopColor="#14B8A6" stopOpacity={0.0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F1F5F9" />
+                <XAxis
+                  dataKey="label"
+                  tick={{ fontSize: 10, fill: '#94A3B8' }}
+                  axisLine={false}
+                  tickLine={false}
+                  interval={timeRange === 'bulan' ? 3 : 0}
+                  dy={4}
+                />
+                <YAxis
+                  allowDecimals={false}
+                  tick={{ fontSize: 10, fill: '#94A3B8' }}
+                  axisLine={false}
+                  tickLine={false}
+                />
+                <Tooltip
+                  content={({ active, payload }) => {
+                    if (active && payload && payload.length) {
+                      const data = payload[0].payload
+                      return (
+                        <div className="rounded-2xl bg-slate-900/90 backdrop-blur-md p-3 text-white shadow-xl text-xs space-y-1.5 border border-slate-700 min-w-[150px]">
+                          <div className="font-bold text-slate-300 border-b border-slate-700/60 pb-1">{data.label}</div>
+                          <div className="flex items-center justify-between gap-4">
+                            <span className="flex items-center gap-1.5 text-blue-300">
+                              <span className="size-2 rounded-full bg-blue-500" />
+                              Rawat Inap
+                            </span>
+                            <span className="font-bold">{data.inap} px</span>
+                          </div>
+                          <div className="flex items-center justify-between gap-4">
+                            <span className="flex items-center gap-1.5 text-teal-300">
+                              <span className="size-2 rounded-full bg-teal-500" />
+                              Rawat Jalan
+                            </span>
+                            <span className="font-bold">{data.poli} px</span>
+                          </div>
+                          <div className="border-t border-slate-700/80 pt-1 flex items-center justify-between gap-4 font-black">
+                            <span className="text-slate-200">Total:</span>
+                            <span className="text-amber-400">{data.total} px</span>
+                          </div>
+                        </div>
+                      )
+                    }
+                    return null
+                  }}
+                />
+                <Area
+                  type="monotone"
+                  dataKey="inap"
+                  stroke="#3B82F6"
+                  strokeWidth={2.5}
+                  fillOpacity={1}
+                  fill="url(#colorRanap)"
+                  name="Rawat Inap"
+                />
+                <Area
+                  type="monotone"
+                  dataKey="poli"
+                  stroke="#14B8A6"
+                  strokeWidth={2}
+                  fillOpacity={1}
+                  fill="url(#colorPoli)"
+                  name="Rawat Jalan"
+                />
+              </AreaChart>
+            ) : (
+              <BarChart
+                data={chartData}
+                margin={{ top: 10, right: 6, left: -24, bottom: 0 }}
+                barCategoryGap={timeRange === 'minggu' ? '20%' : timeRange === 'bulan' ? '12%' : '18%'}
+              >
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F1F5F9" />
+                <XAxis
+                  dataKey="label"
+                  tick={{ fontSize: 10, fill: '#94A3B8' }}
+                  axisLine={false}
+                  tickLine={false}
+                  interval={timeRange === 'bulan' ? 3 : 0}
+                  dy={4}
+                />
+                <YAxis
+                  allowDecimals={false}
+                  tick={{ fontSize: 10, fill: '#94A3B8' }}
+                  axisLine={false}
+                  tickLine={false}
+                />
+                <Tooltip
+                  content={({ active, payload }) => {
+                    if (active && payload && payload.length) {
+                      const data = payload[0].payload
+                      return (
+                        <div className="rounded-2xl bg-slate-900/90 backdrop-blur-md p-3 text-white shadow-xl text-xs space-y-1.5 border border-slate-700 min-w-[150px]">
+                          <div className="font-bold text-slate-300 border-b border-slate-700/60 pb-1">{data.label}</div>
+                          <div className="flex items-center justify-between gap-4">
+                            <span className="flex items-center gap-1.5 text-blue-300">
+                              <span className="size-2 rounded-full bg-blue-500" />
+                              Rawat Inap
+                            </span>
+                            <span className="font-bold">{data.inap} px</span>
+                          </div>
+                          <div className="flex items-center justify-between gap-4">
+                            <span className="flex items-center gap-1.5 text-teal-300">
+                              <span className="size-2 rounded-full bg-teal-500" />
+                              Rawat Jalan
+                            </span>
+                            <span className="font-bold">{data.poli} px</span>
+                          </div>
+                          <div className="border-t border-slate-700/80 pt-1 flex items-center justify-between gap-4 font-black">
+                            <span className="text-slate-200">Total:</span>
+                            <span className="text-amber-400">{data.total} px</span>
+                          </div>
+                        </div>
+                      )
+                    }
+                    return null
+                  }}
+                />
+                <Bar
+                  dataKey="inap"
+                  name="Rawat Inap"
+                  fill="#3B82F6"
+                  stackId="pasienStack"
+                  radius={[3, 3, 0, 0]}
+                  maxBarSize={timeRange === 'minggu' ? 24 : timeRange === 'bulan' ? 10 : 16}
+                />
+                <Bar
+                  dataKey="poli"
+                  name="Rawat Jalan"
+                  fill="#14B8A6"
+                  stackId="pasienStack"
+                  radius={[3, 3, 0, 0]}
+                  maxBarSize={timeRange === 'minggu' ? 24 : timeRange === 'bulan' ? 10 : 16}
+                />
+              </BarChart>
+            )}
+          </ResponsiveContainer>
+        </div>
+
+        {/* 1 Baris Legenda Bersih & Rapi di Bawah Grafik */}
+        <div className="flex items-center justify-center gap-6 pt-3 text-xs text-slate-500 font-semibold">
+          <div className="flex items-center gap-1.5 shrink-0">
+            <span className="size-2.5 rounded-full bg-blue-500" />
+            <span>Rawat Inap</span>
+          </div>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <span className="size-2.5 rounded-full bg-teal-500" />
+            <span>Rawat Jalan</span>
+          </div>
+        </div>
+      </div>
 
       {/* 4 Kartu KPI Ringkasan Beban & Pendapatan */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
@@ -666,62 +1461,157 @@ export default function Dasbor() {
 
       </div>
 
-      {/* SECTION: ALERT TAPERING & DURASI OBAT */}
-      <div className="rounded-3xl bg-white border border-slate-200/90 shadow-xs p-5">
-        <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-          <h2 className="text-sm sm:text-base font-bold text-slate-800 flex items-center gap-2">
-            <span>Alert Obat (Tapering & Durasi)</span>
-            {drugAlerts.length > 0 && (
-              <span className="px-2 py-0.5 rounded-full bg-amber-500 text-white text-[11px] font-black">
-                {drugAlerts.length}
-              </span>
-            )}
-          </h2>
+      {/* SECTION: DAFTAR PLANNING */}
+      <div className="rounded-3xl bg-white border border-slate-200/90 shadow-xs p-4 sm:p-5">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
+          <div className="flex items-center gap-2">
+            <h2 className="text-sm sm:text-base font-bold text-slate-800">
+              Daftar Planning
+            </h2>
+          </div>
+
+          {/* Kategori Tabs: Semua, Penunjang, Terapi */}
+          <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl self-start sm:self-auto">
+            <button
+              type="button"
+              onClick={() => setPlanTab('semua')}
+              className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer shrink-0 ${
+                planTab === 'semua'
+                  ? 'bg-white text-slate-800 shadow-xs'
+                  : 'text-slate-500 hover:text-slate-800'
+              }`}
+            >
+              Semua
+            </button>
+            <button
+              type="button"
+              onClick={() => setPlanTab('penunjang')}
+              className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer shrink-0 ${
+                planTab === 'penunjang'
+                  ? 'bg-white text-teal-800 shadow-xs'
+                  : 'text-slate-500 hover:text-teal-800'
+              }`}
+            >
+              Penunjang
+            </button>
+            <button
+              type="button"
+              onClick={() => setPlanTab('terapi')}
+              className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer shrink-0 ${
+                planTab === 'terapi'
+                  ? 'bg-white text-amber-800 shadow-xs'
+                  : 'text-slate-500 hover:text-amber-800'
+              }`}
+            >
+              Terapi
+            </button>
+          </div>
         </div>
 
-        {drugAlerts.length === 0 ? (
+        {filteredPatientPlans.length === 0 ? (
           <div className="py-6 text-center text-slate-400">
-            <p className="text-xs font-semibold text-slate-500">Semua terapi obat dalam batas aman</p>
+            <p className="text-xs font-semibold text-slate-500">
+              Tidak ada planning aktif yang menunggu tindak lanjut
+            </p>
           </div>
         ) : (
-          <div className="divide-y divide-slate-100 mt-1">
-            {drugAlerts.map((alert, idx) => (
-              <div
-                key={idx}
-                onClick={() => navigate(`/pasien/${alert.patient.id}`)}
-                className="py-3 px-2 -mx-2 rounded-2xl hover:bg-slate-50 flex items-center justify-between gap-3 cursor-pointer transition-colors group"
-              >
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-xs font-bold text-slate-800">
-                      {alert.patient.nama_depan || 'Pasien'}
+          <div className="divide-y divide-slate-100">
+            {filteredPatientPlans.map((group) => (
+              <div key={group.patient.id} className="py-3.5 space-y-2">
+                {/* Header Pasien: Nama dan Diagnosis Utama (Tanpa Clutter) */}
+                <div className="flex items-center justify-between gap-2">
+                  <button
+                    type="button"
+                    onClick={() => navigate(`/pasien/${group.patient.id}`)}
+                    className="text-left group/p cursor-pointer min-w-0 flex items-center gap-1.5 flex-wrap"
+                  >
+                    <span className="text-xs sm:text-sm font-bold text-slate-800 group-hover/p:text-primary transition-colors">
+                      <Masked value={group.patient.nama_depan || 'Pasien'} type="name" />
                     </span>
-                    {alert.patient.no_rm && (
-                      <span className="text-[11px] font-mono text-slate-400">
-                        ({alert.patient.no_rm})
+                    {group.patient.diagnosis_utama && (
+                      <span className="text-xs text-slate-500 font-medium">
+                        · {group.patient.diagnosis_utama}
                       </span>
                     )}
-                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${
-                      alert.isUrgent
-                        ? 'bg-rose-500 text-white'
-                        : 'bg-amber-100 text-amber-900 border border-amber-200'
-                    }`}>
-                      {alert.tipe === 'tapering' ? `⚡ Tapering H-${alert.hari}` : `⏱ Durasi H-${alert.hari}${alert.targetHari ? `/${alert.targetHari}` : ''}`}
-                    </span>
-                  </div>
+                  </button>
 
-                  <div className="text-xs font-semibold text-slate-700 mt-1">
-                    {alert.namaObat} {alert.dosis ? `(${alert.dosis})` : ''}
-                  </div>
-
-                  <p className="text-[11px] text-slate-500 mt-0.5 leading-snug">
-                    {alert.pesan}
-                  </p>
+                  <button
+                    type="button"
+                    onClick={() => navigate(`/pasien/${group.patient.id}`)}
+                    className="text-[11px] font-semibold text-primary hover:text-primary-deep flex items-center gap-0.5 shrink-0 cursor-pointer"
+                  >
+                    <span>Buka</span>
+                    <ChevronRight size={13} />
+                  </button>
                 </div>
 
-                <div className="flex items-center gap-1 shrink-0 text-xs font-bold text-primary group-hover:translate-x-0.5 transition-transform">
-                  <span>CPPT</span>
-                  <ChevronRight size={14} />
+                {/* Daftar Item Checklist per Kategori */}
+                <div className="space-y-2 pl-0.5">
+                  {/* Penunjang: Lab, Radiologi, EEG, PA, dsb */}
+                  {(planTab === 'semua' || planTab === 'penunjang') && group.penunjang.length > 0 && (
+                    <div className="space-y-1">
+                      {planTab === 'semua' && (
+                        <span className="text-[10px] font-bold text-teal-700 uppercase tracking-wider block">
+                          Penunjang
+                        </span>
+                      )}
+                      <div className="space-y-1">
+                        {group.penunjang.map(item => (
+                          <div key={item.id} className="flex items-center justify-between gap-3 py-1 group/row">
+                            <div className="flex items-center gap-2.5 min-w-0">
+                              <button
+                                type="button"
+                                onClick={() => handleCompletePlan(item)}
+                                className="size-4.5 rounded-full border-2 border-slate-300 hover:border-emerald-500 hover:bg-emerald-50 active:scale-90 transition-all shrink-0 cursor-pointer flex items-center justify-center"
+                                title="Tandai selesai"
+                              />
+                              <span className="text-xs font-medium text-slate-800 truncate">
+                                {item.judul}
+                              </span>
+                            </div>
+                            {item.badgeLabel && (
+                              <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold shrink-0 ${item.badgeClass}`}>
+                                {item.badgeLabel}
+                              </span>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Terapi: Loading, Tapering, Durasi, Konsul TS, dsb */}
+                  {(planTab === 'semua' || planTab === 'terapi') && group.terapi.length > 0 && (
+                    <div className="space-y-1">
+                      {planTab === 'semua' && (
+                        <span className="text-[10px] font-bold text-amber-700 uppercase tracking-wider block">
+                          Terapi
+                        </span>
+                      )}
+                      <div className="space-y-1">
+                        {group.terapi.map(item => (
+                          <div key={item.id} className="flex items-center justify-between gap-3 py-1 group/row">
+                            <div className="flex items-center gap-2.5 min-w-0">
+                              <button
+                                type="button"
+                                onClick={() => handleCompletePlan(item)}
+                                className="size-4.5 rounded-full border-2 border-slate-300 hover:border-emerald-500 hover:bg-emerald-50 active:scale-90 transition-all shrink-0 cursor-pointer flex items-center justify-center"
+                                title="Tandai selesai"
+                              />
+                              <span className="text-xs font-medium text-slate-800 truncate">
+                                {item.judul}
+                              </span>
+                            </div>
+                            {item.badgeLabel && (
+                              <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold shrink-0 ${item.badgeClass}`}>
+                                {item.badgeLabel}
+                              </span>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             ))}
@@ -729,211 +1619,8 @@ export default function Dasbor() {
         )}
       </div>
 
-      {/* SECTION: GRAFIK TREN PASIEN */}
-      <div className="rounded-3xl bg-white border border-slate-200/90 shadow-xs p-5">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
-          <h2 className="text-sm sm:text-base font-bold text-slate-800">
-            Tren Pasien
-          </h2>
-
-          {/* Time range selector pills */}
-          <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl self-start sm:self-auto">
-            {(['7d', '14d', '30d'] as const).map(tr => (
-              <button
-                key={tr}
-                type="button"
-                onClick={() => setTimeRange(tr)}
-                className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                  timeRange === tr
-                    ? 'bg-white text-slate-800 shadow-xs'
-                    : 'text-slate-500 hover:text-slate-800'
-                }`}
-              >
-                {tr === '7d' ? '7 Hari' : tr === '14d' ? '14 Hari' : '30 Hari'}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Area Chart Container */}
-        <div className="h-64 sm:h-72 w-full pt-4">
-          <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-              <defs>
-                <linearGradient id="colorTotal" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#3B82F6" stopOpacity={0.4} />
-                  <stop offset="95%" stopColor="#3B82F6" stopOpacity={0.0} />
-                </linearGradient>
-                <linearGradient id="colorPoli" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#14B8A6" stopOpacity={0.3} />
-                  <stop offset="95%" stopColor="#14B8A6" stopOpacity={0.0} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E2E8F0" />
-              <XAxis
-                dataKey="label"
-                tick={{ fontSize: 11, fill: '#64748B' }}
-                axisLine={false}
-                tickLine={false}
-              />
-              <YAxis
-                allowDecimals={false}
-                tick={{ fontSize: 11, fill: '#64748B' }}
-                axisLine={false}
-                tickLine={false}
-              />
-              <Tooltip
-                content={({ active, payload }) => {
-                  if (active && payload && payload.length) {
-                    const data = payload[0].payload
-                    return (
-                      <div className="rounded-2xl bg-slate-900/90 backdrop-blur-md p-3 text-white shadow-xl text-xs space-y-1 border border-slate-700">
-                        <div className="font-bold text-slate-300">{data.label}</div>
-                        <div className="flex items-center justify-between gap-4">
-                          <span className="text-blue-300">Rawat Inap (Visite):</span>
-                          <span className="font-bold">{data.inap} px</span>
-                        </div>
-                        <div className="flex items-center justify-between gap-4">
-                          <span className="text-teal-300">Rawat Jalan (Poli):</span>
-                          <span className="font-bold">{data.poli} px</span>
-                        </div>
-                        <div className="border-t border-slate-700 pt-1 flex items-center justify-between gap-4 font-black">
-                          <span>Total Pasien:</span>
-                          <span className="text-amber-400">{data.total} px</span>
-                        </div>
-                      </div>
-                    )
-                  }
-                  return null
-                }}
-              />
-              <Area
-                type="monotone"
-                dataKey="total"
-                stroke="#3B82F6"
-                strokeWidth={2.5}
-                fillOpacity={1}
-                fill="url(#colorTotal)"
-                name="Total Pasien"
-              />
-              <Area
-                type="monotone"
-                dataKey="poli"
-                stroke="#14B8A6"
-                strokeWidth={2}
-                fillOpacity={1}
-                fill="url(#colorPoli)"
-                name="Poli"
-              />
-            </AreaChart>
-          </ResponsiveContainer>
-        </div>
-
-        <div className="flex items-center justify-center gap-6 pt-3 text-xs text-slate-500 font-semibold">
-          <div className="flex items-center gap-2">
-            <span className="size-3 rounded-full bg-blue-500" />
-            <span>Total Pasien Dilayani</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="size-3 rounded-full bg-teal-500" />
-            <span>Pasien Rawat Jalan (Poli)</span>
-          </div>
-        </div>
-      </div>
-
-      {/* SECTION: REKAP PASIEN POLI HARI INI */}
-      <div className="rounded-3xl bg-white border border-slate-200/90 shadow-xs p-5">
-        <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-          <div className="flex items-center gap-2">
-            <h2 className="text-sm sm:text-base font-bold text-slate-800">
-              Rekap Poli Hari Ini
-            </h2>
-            <Link
-              to="/rawatjalan"
-              className="text-[11px] font-bold text-teal-700 hover:text-teal-900 hover:underline flex items-center gap-0.5"
-            >
-              Buka Rawat Jalan <ChevronRight size={12} />
-            </Link>
-          </div>
-          <button
-            type="button"
-            onClick={() => {
-              setSelectedPoliForEdit(undefined)
-              setShowPoliModal(true)
-            }}
-            className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-teal-50 hover:bg-teal-100 text-teal-800 font-bold text-xs transition-colors cursor-pointer"
-          >
-            <Plus size={14} />
-            <span>Tambah</span>
-          </button>
-        </div>
-
-        {poliTodayLogs.length === 0 ? (
-          <div className="py-6 text-center text-slate-400 space-y-2">
-            <p className="text-xs font-semibold text-slate-500">Belum ada sesi poli hari ini</p>
-            <button
-              type="button"
-              onClick={() => {
-                setSelectedPoliForEdit(undefined)
-                setShowPoliModal(true)
-              }}
-              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-primary text-white text-xs font-bold shadow-xs hover:bg-primary-deep transition-all cursor-pointer"
-            >
-              <Plus size={14} />
-              <span>Catat Pasien Poli</span>
-            </button>
-          </div>
-        ) : (
-          <div className="divide-y divide-slate-100 mt-2">
-            {poliTodayLogs.map((log) => {
-              const h = hospitals.find(item => item.id === log.hospital_id)
-              return (
-                <div
-                  key={log.id}
-                  onClick={() => {
-                    setSelectedPoliForEdit(log)
-                    setShowPoliModal(true)
-                  }}
-                  className="py-3 px-2 -mx-2 rounded-2xl hover:bg-slate-50 flex items-center justify-between gap-3 cursor-pointer transition-colors"
-                >
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-teal-50 text-teal-700 font-bold text-base shrink-0">
-                      {log.jumlah_pasien}
-                    </div>
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs font-bold text-slate-800 truncate">
-                          {h?.nama || 'Rumah Sakit'}
-                        </span>
-                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                          log.tipe_poli === 'eksekutif'
-                            ? 'bg-purple-100 text-purple-800'
-                            : 'bg-blue-100 text-blue-800'
-                        }`}>
-                          Poli {log.tipe_poli === 'eksekutif' ? 'Eksekutif' : 'Reguler'}
-                        </span>
-                      </div>
-                      <p className="text-[11px] text-slate-500 truncate mt-0.5">
-                        {log.catatan || (log.daftar_pasien ? `${log.daftar_pasien.length} nama pasien terdaftar` : 'Hitung cepat')}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-2 shrink-0">
-                    <span className="text-xs font-bold text-teal-700 hover:text-teal-900">
-                      Edit
-                    </span>
-                    <ChevronRight size={14} className="text-slate-400" />
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-        )}
-      </div>
-
       {/* SECTION: PROYEKSI PENGHASILAN / JASA MEDIS */}
-      <div className="rounded-3xl bg-white border border-slate-200/90 shadow-xs p-5 space-y-4">
+      <div className="rounded-3xl bg-white border border-slate-200/90 shadow-xs p-5 space-y-2">
         <div className="flex items-center justify-between pb-3 border-b border-slate-100">
           <h2 className="text-sm sm:text-base font-bold text-slate-800">
             Proyeksi Jasa Medis
@@ -941,51 +1628,66 @@ export default function Dasbor() {
           <button
             type="button"
             onClick={handleToggleMask}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 text-xs font-bold transition-colors cursor-pointer"
+            className="p-1.5 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors cursor-pointer"
             title={unmasked ? 'Sensor Identitas & Jasa Medis' : 'Buka Sensor Identitas & Jasa Medis (Biometrik)'}
           >
-            {unmasked ? <Eye size={14} /> : <EyeOff size={14} />}
-            <span>{unmasked ? 'Sensor' : 'Buka (Biometrik)'}</span>
+            {unmasked ? <Eye size={16} /> : <EyeOff size={16} />}
           </button>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-100">
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
-              Hari Ini ({formatDate(todayStr)})
-            </span>
-            <div className="text-lg font-black text-slate-800 mt-1">
-              {formatRupiah(financialProjection.todayTotal)}
+        {/* Daftar Metrik (Single Surface, Tanpa Kotak di Dalam Kotak) */}
+        <div className="divide-y divide-slate-100">
+          {/* Hari Ini */}
+          <div className="py-3 flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <span className="text-xs font-bold text-slate-700 block">
+                Hari Ini ({formatDate(todayStr)})
+              </span>
+              <span className="text-[11px] text-slate-400 mt-0.5 block truncate">
+                Visite: {formatRupiah(financialProjection.todayVisiteNominal)} · Poli: {formatRupiah(financialProjection.todayPoliNominal)}
+              </span>
             </div>
-            <div className="text-[11px] text-slate-500 mt-1 space-y-0.5">
-              <div>Visite: {formatRupiah(financialProjection.todayVisiteNominal)}</div>
-              <div>Poli: {formatRupiah(financialProjection.todayPoliNominal)}</div>
+            <div className="text-base sm:text-lg font-black text-slate-800 shrink-0 text-right">
+              {formatRupiah(financialProjection.todayTotal)}
             </div>
           </div>
 
-          <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-100">
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
-              Bulan Berjalan (H-{financialProjection.dayOfMonth})
-            </span>
-            <div className="text-lg font-black text-slate-800 mt-1">
+          {/* Bulan Ini */}
+          <div className="py-3 flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <span className="text-xs font-bold text-slate-700 block">
+                Bulan Ini (H-{financialProjection.dayOfMonth})
+              </span>
+              <span className="text-[11px] text-slate-400 mt-0.5 block">
+                Akumulasi penerimaan berjalan
+              </span>
+            </div>
+            <div className="text-base sm:text-lg font-black text-slate-800 shrink-0 text-right">
               {formatRupiah(financialProjection.mtdTotal)}
             </div>
           </div>
 
-          <div className="p-3.5 rounded-2xl bg-emerald-50/70 border border-emerald-100">
-            <span className="text-[10px] font-bold text-emerald-800 uppercase tracking-wider block">
-              Proyeksi Akhir Bulan
-            </span>
-            <div className="text-lg font-black text-emerald-900 mt-1">
+          {/* Proyeksi Akhir Bulan */}
+          <div className="py-3 flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <span className="text-xs font-bold text-emerald-700 block">
+                Proyeksi Akhir Bulan
+              </span>
+              <span className="text-[11px] text-slate-400 mt-0.5 block">
+                Estimasi capaian ({financialProjection.totalDaysInMonth} hari)
+              </span>
+            </div>
+            <div className="text-base sm:text-lg font-black text-emerald-600 shrink-0 text-right">
               {formatRupiah(financialProjection.projectedMonthEnd)}
             </div>
           </div>
         </div>
 
-        <div className="flex items-center justify-end pt-1">
+        {/* Tombol Biru Ala Docto.id */}
+        <div className="pt-2">
           <Link
-            to="/pengaturan"
-            className="text-primary text-xs font-bold hover:underline flex items-center gap-0.5"
+            to="/pengaturan?tab=manajemen"
+            className="w-full flex items-center justify-center gap-1.5 py-2.5 px-4 rounded-2xl bg-gradient-to-r from-primary to-primary-deep hover:from-primary-deep hover:to-primary text-white text-xs font-bold shadow-xs hover:shadow-md active:scale-98 transition-all cursor-pointer"
           >
             <span>Atur Tarif Faskes</span>
             <ChevronRight size={14} />
@@ -993,13 +1695,18 @@ export default function Dasbor() {
         </div>
       </div>
 
-      {/* Modal Input/Edit Rekap Poli */}
-      {showPoliModal && (
-        <PoliEntryModal
-          isOpen={showPoliModal}
-          onClose={() => setShowPoliModal(false)}
-          initialData={selectedPoliForEdit}
-        />
+      {/* Floating Undo Notification Toast */}
+      {undoItem && (
+        <div className="fixed bottom-20 left-1/2 -translate-x-1/2 z-50 bg-slate-900/90 backdrop-blur-md text-white text-xs px-4 py-2.5 rounded-full shadow-lg flex items-center gap-3 border border-slate-700 animate-in fade-in slide-in-from-bottom-2">
+          <span>Planning diselesaikan</span>
+          <button
+            type="button"
+            onClick={handleUndoComplete}
+            className="text-primary-light font-bold hover:underline cursor-pointer"
+          >
+            Urungkan
+          </button>
+        </div>
       )}
 
     </main>
