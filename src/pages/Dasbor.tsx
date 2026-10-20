@@ -59,9 +59,6 @@ export default function Dasbor() {
     }
   })
   const [timeRange, setTimeRange] = useState<'7d' | '14d' | '30d'>('7d')
-  const [hideIncome, setHideIncome] = useState<boolean>(() => {
-    return localStorage.getItem('doctoid_hide_income') === 'true'
-  })
   const [showPoliModal, setShowPoliModal] = useState(false)
   const [selectedPoliForEdit, setSelectedPoliForEdit] = useState<PoliLog | undefined>(undefined)
 
@@ -77,12 +74,6 @@ export default function Dasbor() {
       const ok = await verifyBiometric()
       if (ok) setUnmasked(true)
     }
-  }
-
-  const toggleHideIncome = () => {
-    const next = !hideIncome
-    setHideIncome(next)
-    localStorage.setItem('doctoid_hide_income', String(next))
   }
 
   // Live queries dari IndexedDB (dengan default array konstan agar referensi dependensi stabil)
@@ -435,7 +426,7 @@ export default function Dasbor() {
   }, [hospitals, filteredActivePatients, visitedTodayPatientIds, poliTodayLogs, allNotes, filteredPoliLogs, activePatients])
 
   const formatRupiah = (num: number) => {
-    if (hideIncome) return 'Rp ••••••••'
+    if (!unmasked) return 'Rp ••••••••'
     return 'Rp ' + num.toLocaleString('id-ID')
   }
 
@@ -658,11 +649,11 @@ export default function Dasbor() {
             </span>
             <button
               type="button"
-              onClick={toggleHideIncome}
+              onClick={handleToggleMask}
               className="p-1 -mr-1 rounded-lg text-slate-400 hover:text-slate-600 transition-colors cursor-pointer"
-              title={hideIncome ? 'Tampilkan nominal' : 'Sembunyikan nominal'}
+              title={unmasked ? 'Sensor Identitas & Jasa Medis' : 'Buka Sensor Identitas & Jasa Medis (Biometrik)'}
             >
-              {hideIncome ? <EyeOff size={15} /> : <Eye size={15} />}
+              {unmasked ? <Eye size={15} /> : <EyeOff size={15} />}
             </button>
           </div>
           <div className="text-xl sm:text-2xl font-black text-slate-800 tracking-tight mt-1 truncate">
@@ -949,11 +940,12 @@ export default function Dasbor() {
           </h2>
           <button
             type="button"
-            onClick={toggleHideIncome}
+            onClick={handleToggleMask}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 text-xs font-bold transition-colors cursor-pointer"
+            title={unmasked ? 'Sensor Identitas & Jasa Medis' : 'Buka Sensor Identitas & Jasa Medis (Biometrik)'}
           >
-            {hideIncome ? <EyeOff size={14} /> : <Eye size={14} />}
-            <span>{hideIncome ? 'Buka' : 'Samarkan'}</span>
+            {unmasked ? <Eye size={14} /> : <EyeOff size={14} />}
+            <span>{unmasked ? 'Sensor' : 'Buka (Biometrik)'}</span>
           </button>
         </div>
 

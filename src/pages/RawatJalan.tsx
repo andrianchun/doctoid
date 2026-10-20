@@ -43,22 +43,11 @@ export default function RawatJalan() {
   // Expanded card sesi untuk melihat rincian nama pasien
   const [expandedSesiIds, setExpandedSesiIds] = useState<Set<number>>(new Set())
 
-  // Hide/Show Income
-  const [hideIncome, setHideIncome] = useState(() => {
-    return localStorage.getItem('doctoid_hide_income') === 'true'
-  })
-
   // Toast
   const [toast, setToast] = useState('')
   const notify = (msg: string) => {
     setToast(msg)
     setTimeout(() => setToast(''), 3500)
-  }
-
-  const toggleHideIncome = () => {
-    const next = !hideIncome
-    setHideIncome(next)
-    localStorage.setItem('doctoid_hide_income', String(next))
   }
 
   const handleToggleMask = async () => {
@@ -199,7 +188,7 @@ export default function RawatJalan() {
   }, [filteredLogs, hospitals])
 
   const formatRupiah = (num: number) => {
-    if (hideIncome) return 'Rp •••••••'
+    if (!unmasked) return 'Rp •••••••'
     return new Intl.NumberFormat('id-ID', {
       style: 'currency',
       currency: 'IDR',
@@ -448,11 +437,11 @@ export default function RawatJalan() {
             </span>
             <button
               type="button"
-              onClick={toggleHideIncome}
+              onClick={handleToggleMask}
               className="text-slate-400 hover:text-slate-600 cursor-pointer"
-              title="Sensor Nominal"
+              title={unmasked ? 'Sensor Identitas & Jasa Medis' : 'Buka Sensor Identitas & Jasa Medis (Biometrik)'}
             >
-              {hideIncome ? <EyeOff size={13} /> : <Eye size={13} />}
+              {unmasked ? <Eye size={13} /> : <EyeOff size={13} />}
             </button>
           </div>
           <div className="text-base sm:text-lg font-black text-emerald-700 tracking-tight mt-1 truncate">
