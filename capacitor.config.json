@@ -14,6 +14,10 @@
     "PushNotifications": {
       "presentationOptions": ["badge", "sound", "alert"]
     },
+    "LocalNotifications": {
+      "smallIcon": "ic_stat_doctoid",
+      "iconColor": "#0D9488"
+    },
     "CapacitorUpdater": {
       "autoUpdate": false
     }

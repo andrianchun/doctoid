@@ -243,7 +243,8 @@ export async function sendLocalNotification(item: any) {
             body: snippet,
             channelId: 'wa_inbox_channel',
             sound: 'default',
-            smallIcon: 'ic_launcher_round',
+            smallIcon: 'ic_stat_doctoid',
+            iconColor: '#0D9488',
             extra: {
               inboxId: item.id,
             },

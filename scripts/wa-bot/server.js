@@ -726,6 +726,8 @@ async function sendFcmPushNotification(item) {
             android: {
               priority: 'HIGH',
               notification: {
+                icon: 'ic_stat_doctoid',
+                color: '#0D9488',
                 channel_id: 'wa_inbox_channel',
                 sound: 'default',
                 default_vibrate_timings: true,
