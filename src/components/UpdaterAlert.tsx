@@ -41,13 +41,16 @@ function DownloadProgress({ progress, isApk }: { progress: number; isApk?: boole
           <div className="absolute inset-0 bg-white/30 animate-pulse rounded-full" />
         )}
       </div>
-      <p className="caption text-ink-muted text-center">
-        {isInstalling
-          ? isApk
-            ? 'Konfirmasi dialog "Update/Install" Android di layar Anda.'
-            : 'Doctoid akan otomatis dimuat ulang setelah selesai.'
-          : 'Jangan tutup aplikasi saat proses berlangsung.'}
-      </p>
+      {!isInstalling && (
+        <p className="caption text-ink-muted text-center text-xs">
+          Jangan tutup aplikasi saat proses berlangsung.
+        </p>
+      )}
+      {isInstalling && !isApk && (
+        <p className="caption text-ink-muted text-center text-xs">
+          Doctoid akan otomatis dimuat ulang setelah selesai.
+        </p>
+      )}
     </div>
   )
 }
@@ -58,7 +61,7 @@ export default function UpdaterAlert() {
   const [downloadProgress, setDownloadProgress] = useState<number | null>(null)
   const [errorMsg, setErrorMsg] = useState('')
 
-  useBodyScrollLock(Boolean(updateAvailable && manifest?.is_forced))
+  useBodyScrollLock(Boolean(updateAvailable))
 
   // Versi bundle JS yang sedang aktif berjalan di aplikasi
   const currentVersion = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '0.1.0'
@@ -335,17 +338,24 @@ export default function UpdaterAlert() {
     )
   }
 
-  // Mode 2: NON-FORCED UPDATE (Floating Glass Banner yang elegan di bagian bawah)
+  // Mode 2: NON-FORCED UPDATE (Modal elegan dengan backdrop hitam transparan & shadow tegas)
   return (
-    <aside aria-label="Notifikasi Pembaruan" className="fixed bottom-24 inset-x-4 z-[9999] mx-auto max-w-md animate-in slide-in-from-bottom-6 fade-in duration-300">
-      <div className="flex flex-col gap-3 rounded-3xl border border-white/30 bg-card/95 p-4 shadow-2xl shadow-primary/10 backdrop-blur-xl relative overflow-hidden">
+    <div
+      aria-label="Notifikasi Pembaruan"
+      className="fixed inset-0 z-[9999] flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-4 sm:p-6 animate-in fade-in duration-200 overscroll-contain select-none"
+      onClick={!isDownloading ? handleDismiss : undefined}
+    >
+      <div
+        className="w-full max-w-sm rounded-3xl border border-white/20 bg-card p-5 shadow-2xl shadow-black/40 flex flex-col gap-3.5 relative overflow-hidden animate-in zoom-in-95 duration-200 select-auto touch-auto mb-6 sm:mb-0"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2.5 min-w-0 flex-1">
+          <div className="flex items-center gap-3 min-w-0 flex-1">
             {/* Ikon D Khas Doctoid */}
             <img
               src="/icon.png"
               alt="Doctoid"
-              className="size-11 rounded-2xl shadow-md shadow-primary/20 border border-white/20 p-1 bg-gradient-to-br from-white/10 to-white/5 object-contain shrink-0"
+              className="size-12 rounded-2xl shadow-md shadow-primary/25 border border-white/20 p-1 bg-gradient-to-br from-white/10 to-white/5 object-contain shrink-0"
             />
             <div className="min-w-0 flex-1">
               <h3 className="text-sm font-bold text-ink leading-tight truncate">Update Tersedia</h3>
@@ -359,7 +369,7 @@ export default function UpdaterAlert() {
             <button
               onClick={handleDismiss}
               aria-label="Tutup notifikasi update"
-              className="flex size-11 cursor-pointer items-center justify-center rounded-xl text-ink-muted hover:bg-surface hover:text-ink transition-colors"
+              className="flex size-9 cursor-pointer items-center justify-center rounded-full text-ink-muted hover:bg-surface hover:text-ink transition-colors"
             >
               <X size={18} />
             </button>
@@ -367,13 +377,13 @@ export default function UpdaterAlert() {
         </div>
 
         {manifest.release_notes && !isDownloading && (
-          <p className="text-xs text-ink-muted leading-relaxed whitespace-pre-wrap bg-surface/60 p-2.5 rounded-xl border border-surface">
+          <p className="text-xs text-ink-muted leading-relaxed whitespace-pre-wrap bg-surface/70 p-3 rounded-2xl border border-surface">
             {manifest.release_notes}
           </p>
         )}
 
         {errorMsg && (
-          <p className="text-xs font-semibold text-rose-500 bg-rose-50 p-2 rounded-xl border border-rose-200">{errorMsg}</p>
+          <p className="text-xs font-semibold text-rose-500 bg-rose-50 p-2.5 rounded-xl border border-rose-200">{errorMsg}</p>
         )}
 
         {isDownloading ? (
@@ -381,13 +391,13 @@ export default function UpdaterAlert() {
         ) : (
           <button
             onClick={handleUpdate}
-            className="flex w-full cursor-pointer items-center justify-center gap-1.5 rounded-2xl bg-gradient-to-br from-primary to-primary-deep py-2.5 text-xs font-bold text-white shadow-md shadow-primary/20 hover:brightness-110 active:scale-95 transition-all"
+            className="flex w-full cursor-pointer items-center justify-center gap-2 rounded-2xl bg-gradient-to-br from-primary to-primary-deep py-3 text-xs font-bold text-white shadow-lg shadow-primary/25 hover:brightness-110 active:scale-95 transition-all"
           >
             <DownloadCloud size={16} />
             <span>Update Sekarang</span>
           </button>
         )}
       </div>
-    </aside>
+    </div>
   )
 }
