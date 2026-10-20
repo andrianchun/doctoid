@@ -170,9 +170,6 @@ async function setupDoctoGroupBranding(groupId, currentSubject = '', customIconB
     console.warn('⚠️ Gagal memasang deskripsi grup:', err.message)
   }
 }
-    console.warn('⚠️ Gagal memasang deskripsi grup:', err.message)
-  }
-}
 
 async function initBaileys() {
   if (!botState.active) {
@@ -426,7 +423,7 @@ async function initBaileys() {
           id: Date.now(),
           source: 'whatsapp',
           sender_name: senderName,
-          sender_phone: isDoctoGroup && participantPhone ? participantPhone : (myPhone || remotePhone),
+          sender_phone: participantPhone || myPhone || remotePhone,
           raw_text: textContent,
           parsed_data: parsedData,
           attachments: mediaDataUrl
@@ -723,16 +720,18 @@ async function sendFcmPushNotification(item) {
             data: {
               inboxId: String(item.id || Date.now()),
               action: 'open_wa_inbox',
+              title: title,
+              body: snippet,
             },
             android: {
-              priority: 'high',
+              priority: 'HIGH',
               notification: {
                 channel_id: 'wa_inbox_channel',
                 sound: 'default',
                 default_vibrate_timings: true,
                 default_sound: true,
-                priority: 'high',
-                visibility: 'public',
+                notification_priority: 'PRIORITY_HIGH',
+                visibility: 'PUBLIC',
               },
             },
           },
@@ -754,7 +753,7 @@ async function sendFcmPushNotification(item) {
         } else {
           const errData = await res.json().catch(() => ({}))
           console.warn(`⚠️ FCM gagal ke token ${token.slice(0, 12)}...:`, errData.error?.message || res.statusText)
-          if (errData.error?.status !== 'NOT_FOUND' && errData.error?.details?.[0]?.errorCode !== 'UNREGISTERED') {
+          if (errData.error?.status !== 'NOT_FOUND' && errData.error?.details?.[0]?.errorCode !== 'UNREGISTERED' && errData.error?.details?.[0]?.errorCode !== 'INVALID_ARGUMENT') {
             validTokens.push(token)
           }
         }

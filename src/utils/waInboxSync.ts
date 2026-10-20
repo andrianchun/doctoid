@@ -5,7 +5,7 @@ import { PushNotifications } from '@capacitor/push-notifications'
 import { db } from '../db'
 
 let notifPermissionRequested = false
-let pushRegistered = false
+let pushInitialized = false
 
 // Inisialisasi Channel Notifikasi Android (High Priority agar muncul pop-up heads-up)
 export async function setupNotificationChannel() {
@@ -28,10 +28,35 @@ export async function setupNotificationChannel() {
 
 // Inisialisasi Real-time Firebase Cloud Messaging (Push Notifications)
 export async function setupPushNotifications() {
-  if (!Capacitor.isNativePlatform() || pushRegistered) return
-  pushRegistered = true
+  if (!Capacitor.isNativePlatform()) return
 
   try {
+    if (!pushInitialized) {
+      pushInitialized = true
+
+      PushNotifications.addListener('registration', async (token) => {
+        console.log('📱 FCM Device Token terdaftar:', token.value)
+        await registerFcmTokenToServer(token.value)
+      })
+
+      PushNotifications.addListener('registrationError', (error) => {
+        console.warn('⚠️ FCM Registration Error:', error)
+      })
+
+      PushNotifications.addListener('pushNotificationReceived', (notification) => {
+        console.log('📩 Push notification masuk saat app terbuka:', notification)
+        syncWaInboxToDexie()
+      })
+
+      PushNotifications.addListener('pushNotificationActionPerformed', async (notification) => {
+        console.log('👆 Push notification ditekan di status bar / lockscreen:', notification)
+        window.location.hash = '#/catat'
+        syncWaInboxToDexie()
+        window.dispatchEvent(new CustomEvent('doctoid_open_wa_inbox'))
+        await clearAllDeliveredNotifications()
+      })
+    }
+
     await PushNotifications.createChannel({
       id: 'wa_inbox_channel',
       name: 'Konsultasi WhatsApp',
@@ -49,6 +74,12 @@ export async function setupPushNotifications() {
 
     if (perm.receive === 'granted') {
       await PushNotifications.register()
+    }
+
+    // Jika sudah ada token tersimpan di cache lokal HP, pastikan tersinkron ke Firestore
+    const cachedToken = localStorage.getItem('doctoid_fcm_token')
+    if (cachedToken) {
+      registerFcmTokenToServer(cachedToken).catch(() => {})
     }
   } catch (err) {
     console.warn('setupPushNotifications error:', err)
@@ -113,6 +144,58 @@ export async function registerFcmTokenToServer(token: string) {
   } catch {}
 }
 
+// Hitung ID integer konsisten (deterministik) untuk notifikasi agar dapat dibatalkan spesifik per item
+export function getNotificationIdForItem(item: any): number {
+  const str = String(item?.id || item?.timestamp || item?.created_at || 'inbox')
+  let hash = 0
+  for (let i = 0; i < str.length; i++) {
+    hash = (hash << 5) - hash + str.charCodeAt(i)
+    hash |= 0
+  }
+  return Math.abs(hash) % 2147483647
+}
+
+// Bersihkan notifikasi konsulan dari tray status bar HP Android
+export async function clearDeliveredNotifications(itemId?: number | string) {
+  if (!Capacitor.isNativePlatform()) return
+
+  try {
+    if (itemId !== undefined) {
+      const id = typeof itemId === 'number' && itemId < 2147483647 ? itemId : getNotificationIdForItem({ id: itemId })
+      await LocalNotifications.cancel({ notifications: [{ id }] }).catch(() => {})
+      const delivered = await LocalNotifications.getDeliveredNotifications().catch(() => ({ notifications: [] }))
+      const matching = (delivered.notifications || []).filter((n) => n.id === id)
+      if (matching.length > 0) {
+        await LocalNotifications.removeDeliveredNotifications({
+          notifications: matching,
+        }).catch(() => {})
+      }
+    }
+  } catch {}
+
+  try {
+    const pendingCount = await db.inboxQueue.where('status').equals('pending').count()
+    if (pendingCount <= 1) {
+      await LocalNotifications.removeAllDeliveredNotifications().catch(() => {})
+      await PushNotifications.removeAllDeliveredNotifications().catch(() => {})
+    }
+  } catch {
+    await LocalNotifications.removeAllDeliveredNotifications().catch(() => {})
+    await PushNotifications.removeAllDeliveredNotifications().catch(() => {})
+  }
+}
+
+// Bersihkan seluruh notifikasi konsulan WhatsApp dari status bar
+export async function clearAllDeliveredNotifications() {
+  if (!Capacitor.isNativePlatform()) return
+  try {
+    await LocalNotifications.removeAllDeliveredNotifications().catch(() => {})
+  } catch {}
+  try {
+    await PushNotifications.removeAllDeliveredNotifications().catch(() => {})
+  } catch {}
+}
+
 // Daftarkan listener klik notifikasi agar saat notifikasi di status bar ditekan, langsung membuka modal inbox
 if (typeof window !== 'undefined') {
   try {
@@ -120,30 +203,15 @@ if (typeof window !== 'undefined') {
       setupNotificationChannel()
       setupPushNotifications()
 
-      LocalNotifications.addListener('localNotificationActionPerformed', () => {
+      LocalNotifications.addListener('localNotificationActionPerformed', async (notification) => {
         window.location.hash = '#/catat'
         window.dispatchEvent(new CustomEvent('doctoid_open_wa_inbox'))
-      })
-
-      PushNotifications.addListener('registration', async (token) => {
-        console.log('📱 FCM Device Token terdaftar:', token.value)
-        await registerFcmTokenToServer(token.value)
-      })
-
-      PushNotifications.addListener('registrationError', (error) => {
-        console.warn('⚠️ FCM Registration Error:', error)
-      })
-
-      PushNotifications.addListener('pushNotificationReceived', (notification) => {
-        console.log('📩 Push notification masuk saat app terbuka:', notification)
-        syncWaInboxToDexie()
-      })
-
-      PushNotifications.addListener('pushNotificationActionPerformed', (notification) => {
-        console.log('👆 Push notification ditekan di status bar / lockscreen:', notification)
-        window.location.hash = '#/catat'
-        syncWaInboxToDexie()
-        window.dispatchEvent(new CustomEvent('doctoid_open_wa_inbox'))
+        if (notification.notification) {
+          await LocalNotifications.removeDeliveredNotifications({
+            notifications: [notification.notification],
+          }).catch(() => {})
+        }
+        await clearDeliveredNotifications()
       })
     }
   } catch {}
@@ -170,7 +238,7 @@ export async function sendLocalNotification(item: any) {
       await LocalNotifications.schedule({
         notifications: [
           {
-            id: Math.floor(Math.random() * 2147483647),
+            id: getNotificationIdForItem(item),
             title: `Konsul WhatsApp: ${patientName}${age}`,
             body: snippet,
             channelId: 'wa_inbox_channel',

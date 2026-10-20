@@ -39,6 +39,7 @@ import { formatDate, hariKe, getLocalDateString } from '../utils/dateFormat'
 import DateInput from '../components/DateInput'
 import { useBodyScrollLock } from '../utils/useBodyScrollLock'
 import { extractClinicalMetrics } from '../utils/clinicalExtractor'
+import { clearDeliveredNotifications, clearAllDeliveredNotifications } from '../utils/waInboxSync'
 
 const today = () => getLocalDateString()
 
@@ -173,6 +174,13 @@ export default function Brainstorm() {
     window.addEventListener('doctoid_open_wa_inbox', handler)
     return () => window.removeEventListener('doctoid_open_wa_inbox', handler)
   }, [])
+
+  // Jika tidak ada konsulan WhatsApp baru yang pending, pastikan status bar HP Android bersih dari notifikasi
+  useEffect(() => {
+    if (pendingInboxItems.length === 0) {
+      clearAllDeliveredNotifications()
+    }
+  }, [pendingInboxItems.length])
   const [patientSearchQ, setPatientSearchQ] = useState('')
   const [stagedAnalysis, setStagedAnalysis] = useState<StagedAnalysis | null>(null)
 
@@ -233,6 +241,7 @@ export default function Brainstorm() {
     }
     if (item.id) {
       db.inboxQueue.update(item.id, { status: 'imported' })
+      clearDeliveredNotifications(item.id)
     }
     setShowInboxModal(false)
     notify('Data konsul WhatsApp berhasil dimuat ke formulir ✓')
@@ -253,6 +262,7 @@ export default function Brainstorm() {
         await db.inboxQueue.update(item.id, { status: 'imported' })
       }
     }
+    clearAllDeliveredNotifications()
 
     if (rawTexts.length > 0) {
       const combined = rawTexts.join('\n\n')
@@ -2589,6 +2599,7 @@ export default function Brainstorm() {
                         onClick={() => {
                           if (item.id) {
                             db.inboxQueue.update(item.id, { status: 'dismissed' })
+                            clearDeliveredNotifications(item.id)
                           }
                         }}
                         className="px-3 py-1.5 text-xs font-semibold text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer"
