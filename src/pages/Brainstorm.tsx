@@ -1389,16 +1389,23 @@ export default function Brainstorm() {
           <h2 className="text-xs font-extrabold text-slate-800 uppercase tracking-wider">
             {selectedPatient ? 'Identitas Pasien (Readmisi)' : 'Identitas Pasien'}
           </h2>
-          <button
-            type="button"
-            onClick={() => {
-              setPatientSearchQ('')
-              setShowSearchModal(true)
-            }}
-            className="text-xs font-bold text-primary hover:underline cursor-pointer"
-          >
-            Cari Pasien Lama
-          </button>
+          <div className="w-28 shrink-0">
+            <CustomSelect
+              value={selectedPatient ? 'Lama' : 'Baru'}
+              onChange={(val) => {
+                if (val === 'Lama') {
+                  setPatientSearchQ('')
+                  setShowSearchModal(true)
+                } else {
+                  setSelectedPatient(null)
+                  notify('Beralih ke mode Pasien Baru')
+                }
+              }}
+              options={['Baru', 'Lama']}
+              placeholder="Status Pasien"
+              buttonClassName="rounded-xl border border-slate-300 bg-slate-50 hover:bg-slate-100 px-3 py-1.5 text-xs font-bold text-slate-800"
+            />
+          </div>
         </div>
 
         {/* Baris 1: Gelar, Nama, Usia */}
