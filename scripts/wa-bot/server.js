@@ -246,16 +246,18 @@ async function initBaileys() {
             const b64 = buffer.toString('base64')
 
             if (isImage) {
-              mediaType = 'image/jpeg'
-              mediaName = 'Foto_Konsul.jpg'
+              mediaType = 'image/webp'
+              mediaName = `Foto_${Date.now()}.webp`
               try {
                 const comp = await sharp(buffer)
-                  .resize(320, 320, { fit: 'inside', withoutEnlargement: true })
-                  .jpeg({ quality: 55 })
+                  .resize(1280, 1280, { fit: 'inside', withoutEnlargement: true })
+                  .webp({ quality: 75 })
                   .toBuffer()
-                mediaDataUrl = `data:image/jpeg;base64,${comp.toString('base64')}`
-                console.log(`✓ Foto berhasil dikompresi dari ${(buffer.length/1024).toFixed(0)} KB -> ${(comp.length/1024).toFixed(0)} KB`)
-              } catch {
+                mediaDataUrl = `data:image/webp;base64,${comp.toString('base64')}`
+                console.log(`✓ Foto berhasil dikompresi ke WebP resolusi tinggi dari ${(buffer.length/1024).toFixed(0)} KB -> ${(comp.length/1024).toFixed(0)} KB`)
+              } catch (e) {
+                console.warn('Kompresi webp gagal, fallback ke jpeg:', e.message)
+                mediaType = 'image/jpeg'
                 mediaDataUrl = `data:image/jpeg;base64,${buffer.toString('base64')}`
               }
             } else if (isVideo) {
@@ -319,13 +321,13 @@ async function initBaileys() {
             inboxList = JSON.parse(fs.readFileSync(INBOX_JSON_PATH, 'utf-8'))
           }
 
-          // CLUSTERING: Gabungkan jika ada pesan masuk dari grup/pengirim yang sama dalam 12 detik terakhir
+          // CLUSTERING: Gabungkan jika ada pesan/berkas masuk dari grup/pengirim yang sama dalam 90 detik terakhir
           const now = Date.now()
           const recentItem = inboxList.find(
             (it) =>
               it.sender_name === inboxItem.sender_name &&
               it.sender_phone === inboxItem.sender_phone &&
-              now - new Date(it.created_at).getTime() < 12000
+              now - new Date(it.created_at).getTime() < 90000
           )
 
           if (recentItem) {
@@ -338,8 +340,15 @@ async function initBaileys() {
             if (inboxItem.attachments && inboxItem.attachments.length > 0) {
               const curAtts = recentItem.attachments || []
               for (const newAtt of inboxItem.attachments) {
-                const isDup = curAtts.some((a) => a.dataUrl && newAtt.dataUrl && a.dataUrl.slice(0, 80) === newAtt.dataUrl.slice(0, 80))
-                if (!isDup && curAtts.length < 3) {
+                // Jangan deteksi duplikat hanya dari slice(0, 80) karena semua header WebP/JPEG identik!
+                const isDup = curAtts.some((a) => {
+                  if (a.id && newAtt.id && a.id === newAtt.id) return true
+                  if (!a.dataUrl || !newAtt.dataUrl) return false
+                  if (a.dataUrl === newAtt.dataUrl) return true
+                  // Cek kesamaan panjang dan tail base64 untuk verifikasi akurat
+                  return a.dataUrl.length === newAtt.dataUrl.length && a.dataUrl.slice(-120) === newAtt.dataUrl.slice(-120)
+                })
+                if (!isDup && curAtts.length < 15) {
                   curAtts.push(newAtt)
                 }
               }
@@ -464,7 +473,7 @@ async function syncInboxToFirestore(inboxList) {
         const clone = JSON.parse(JSON.stringify(it))
         if (clone.attachments && clone.attachments.length > 0) {
           clone.attachments = clone.attachments.map((att) => {
-            if (att.dataUrl && att.dataUrl.length > 200000) {
+            if (att.dataUrl && att.dataUrl.length > 400000) {
               return { ...att, dataUrl: '' }
             }
             return att

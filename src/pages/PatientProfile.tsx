@@ -38,6 +38,8 @@ import PredictiveInput from '../components/PredictiveInput'
 import { extractClinicalMetrics } from '../utils/clinicalExtractor'
 import CustomSelect, { type SelectOption } from '../components/CustomSelect'
 import { PemfisVisualizer } from '../components/PemfisVisualizer'
+import { ClinicalMediaCard } from '../components/ClinicalMediaCard'
+import { ImageViewerModal, type ViewerImage } from '../components/ImageViewerModal'
 
 const PARENTERAL = /\binj\b|injeksi|drip|\biv\b|infus|\bamp\b|bolus|syringe|titrasi|pump|nebul/i
 
@@ -58,6 +60,36 @@ function guessKategori(nama: string): KategoriPenunjang {
     return 'Laboratorium'
   }
   return 'Lainnya'
+}
+
+const compressImage = async (file: File): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.readAsDataURL(file)
+    reader.onload = (e) => {
+      const img = new globalThis.Image()
+      img.src = e.target?.result as string
+      img.onload = () => {
+        const canvas = document.createElement('canvas')
+        let { width, height } = img
+        const MAX = 1440
+        if (width > height && width > MAX) {
+          height *= MAX / width
+          width = MAX
+        } else if (height > MAX) {
+          width *= MAX / height
+          height = MAX
+        }
+        canvas.width = width
+        canvas.height = height
+        const ctx = canvas.getContext('2d')
+        ctx?.drawImage(img, 0, 0, width, height)
+        resolve(canvas.toDataURL('image/webp', 0.8))
+      }
+      img.onerror = reject
+    }
+    reader.onerror = reject
+  })
 }
 
 const LAB_SUGGESTIONS = [
@@ -523,7 +555,15 @@ export default function PatientProfile() {
   const [showQuickHasilModal, setShowQuickHasilModal] = useState(false)
   const [quickHasilItem, setQuickHasilItem] = useState<PenunjangItem | null>(null)
   const [quickHasilText, setQuickHasilText] = useState('')
-  const [previewImage, setPreviewImage] = useState<{ url: string; title: string } | null>(null)
+  const [viewerState, setViewerState] = useState<{
+    isOpen: boolean
+    images: ViewerImage[]
+    initialIndex: number
+  }>({
+    isOpen: false,
+    images: [],
+    initialIndex: 0,
+  })
 
   const openAddPenunjang = (defaultKategori: KategoriPenunjang = 'Laboratorium', defaultName = '') => {
     setPenunjangForm({
@@ -612,11 +652,20 @@ export default function PatientProfile() {
     setQuickHasilText('')
   }
 
-  const handleAttachPenunjangFile = (file: File) => {
+  const handleAttachPenunjangFile = async (file: File) => {
     if (!file) return
-    const reader = new FileReader()
-    reader.onload = () => {
-      const dataUrl = reader.result as string
+    try {
+      let dataUrl: string
+      if (file.type.startsWith('image/')) {
+        dataUrl = await compressImage(file)
+      } else {
+        dataUrl = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader()
+          reader.onload = () => resolve(reader.result as string)
+          reader.onerror = reject
+          reader.readAsDataURL(file)
+        })
+      }
       setPenunjangForm((prev) => ({
         ...prev,
         attachments: [
@@ -624,13 +673,14 @@ export default function PatientProfile() {
           {
             id: Math.random().toString(36).slice(2),
             name: file.name,
-            type: file.type,
+            type: file.type.startsWith('image/') ? 'image/webp' : file.type,
             dataUrl,
           },
         ],
       }))
+    } catch (e) {
+      console.error('Attach file error:', e)
     }
-    reader.readAsDataURL(file)
   }
 
   const handleRemovePenunjangAttachment = (index: number) => {
@@ -1771,7 +1821,14 @@ export default function PatientProfile() {
                       <button
                         key={attIdx}
                         type="button"
-                        onClick={() => setPreviewImage({ url: att.dataUrl, title: `${item.nama_pemeriksaan} - ${att.name}` })}
+                        onClick={() => {
+                          const imgAtts = (item.attachments || []).map((a) => ({ url: a.dataUrl, name: `${item.nama_pemeriksaan} - ${a.name}`, type: a.type }))
+                          setViewerState({
+                            isOpen: true,
+                            images: imgAtts,
+                            initialIndex: attIdx,
+                          })
+                        }}
                         className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-white border border-slate-200 text-[11px] text-ink font-medium hover:border-primary cursor-pointer transition-colors shadow-2xs"
                       >
                         <ImageIcon size={12} className="text-primary" />
@@ -1897,6 +1954,21 @@ export default function PatientProfile() {
                 <span className="text-amber-900 font-semibold break-words leading-relaxed min-w-0 flex-1">
                   {n.catatan}
                 </span>
+              </div>
+            )}
+            {n.attachments && n.attachments.length > 0 && (
+              <div className="mt-2 pt-2 border-t border-surface/80 space-y-1.5">
+                <span className="text-[10px] font-bold text-ink-muted uppercase tracking-wider block">
+                  Lampiran ({n.attachments.length}):
+                </span>
+                <div className="flex items-center gap-2 overflow-x-auto pb-1 hide-scrollbar">
+                  {n.attachments.map((att, attIdx) => (
+                    <ClinicalMediaCard
+                      key={attIdx}
+                      item={att}
+                    />
+                  ))}
+                </div>
               </div>
             )}
           </div>
@@ -3235,36 +3307,13 @@ export default function PatientProfile() {
         </div>
       )}
 
-      {/* Modal Preview Gambar Lampiran */}
-      {previewImage && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-in fade-in"
-          onClick={() => setPreviewImage(null)}
-        >
-          <div
-            className="max-w-2xl w-full max-h-[90dvh] bg-white rounded-3xl p-4 space-y-3 flex flex-col shadow-2xl overflow-hidden"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between border-b border-slate-100 pb-2">
-              <p className="text-xs font-bold text-ink truncate">{previewImage.title}</p>
-              <button
-                type="button"
-                onClick={() => setPreviewImage(null)}
-                className="p-1.5 rounded-full hover:bg-slate-100 text-ink-muted cursor-pointer"
-              >
-                <X size={18} />
-              </button>
-            </div>
-            <div className="flex-1 overflow-auto flex items-center justify-center min-h-[300px] bg-slate-50 rounded-2xl p-2">
-              <img
-                src={previewImage.url}
-                alt={previewImage.title}
-                className="max-h-[75dvh] max-w-full object-contain rounded-xl"
-              />
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Modal Zoom & Lightbox Galeri Berkas Lampiran */}
+      <ImageViewerModal
+        isOpen={viewerState.isOpen}
+        onClose={() => setViewerState((prev) => ({ ...prev, isOpen: false }))}
+        images={viewerState.images}
+        initialIndex={viewerState.initialIndex}
+      />
 
       {/* Modal Tandai Pasien KRS */}
       {showKrsModal && patient && (

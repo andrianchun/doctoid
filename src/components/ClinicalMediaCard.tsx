@@ -8,7 +8,9 @@ import {
   X,
   Volume2,
   Video as VideoIcon,
+  Maximize2,
 } from 'lucide-react'
+import { ImageViewerModal } from './ImageViewerModal'
 
 export interface ClinicalMediaItem {
   id?: string
@@ -35,6 +37,7 @@ export const ClinicalMediaCard: React.FC<ClinicalMediaCardProps> = ({
   const [isPlayingAudio, setIsPlayingAudio] = useState(false)
   const [audioRef, setAudioRef] = useState<HTMLAudioElement | null>(null)
   const [showVideoModal, setShowVideoModal] = useState(false)
+  const [showViewer, setShowViewer] = useState(false)
 
   const toggleAudio = () => {
     if (!audioRef) return
@@ -222,45 +225,75 @@ export const ClinicalMediaCard: React.FC<ClinicalMediaCardProps> = ({
 
   // Tipe Berkas: Foto / Gambar (Foto Lab, Rontgen, atau Foto Fisik Pasien)
   return (
-    <div className="relative group size-20 sm:size-24 rounded-2xl bg-slate-100 border border-slate-300 overflow-hidden shrink-0 flex flex-col items-center justify-center shadow-xs">
-      <img
-        src={item.dataUrl}
-        alt={item.name}
-        className={`size-full object-cover transition-all duration-200 ${
-          isBlurred ? 'blur-md scale-110' : ''
-        }`}
-      />
+    <>
+      <div className="relative group size-20 sm:size-24 rounded-2xl bg-slate-100 border border-slate-300 overflow-hidden shrink-0 flex flex-col items-center justify-center shadow-xs">
+        <img
+          src={item.dataUrl}
+          alt={item.name}
+          onClick={() => {
+            if (!isBlurred) setShowViewer(true)
+          }}
+          className={`size-full object-cover transition-all duration-200 ${
+            isBlurred ? 'blur-md scale-110' : 'cursor-pointer hover:scale-105'
+          }`}
+        />
 
-      {isBlurred ? (
-        <button
-          type="button"
-          onClick={() => setIsBlurred(false)}
-          className="absolute inset-0 flex flex-col items-center justify-center bg-slate-900/50 p-1 text-center cursor-pointer hover:bg-slate-900/40 transition-colors"
-        >
-          <EyeOff size={16} className="text-white mb-0.5" />
-          <span className="text-[9px] font-bold text-white">Privasi</span>
-          <span className="text-[8px] text-white/80">Ketuk Buka</span>
-        </button>
-      ) : (
-        <button
-          type="button"
-          onClick={() => setIsBlurred(true)}
-          className="absolute bottom-1 left-1 bg-black/60 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 hover:bg-black/80 transition-all cursor-pointer"
-          title="Kunci / Blur Kembali"
-        >
-          <Eye size={11} />
-        </button>
-      )}
+        {isBlurred ? (
+          <button
+            type="button"
+            onClick={() => setIsBlurred(false)}
+            className="absolute inset-0 flex flex-col items-center justify-center bg-slate-900/50 p-1 text-center cursor-pointer hover:bg-slate-900/40 transition-colors"
+          >
+            <EyeOff size={16} className="text-white mb-0.5" />
+            <span className="text-[9px] font-bold text-white">Privasi</span>
+            <span className="text-[8px] text-white/80">Ketuk Buka</span>
+          </button>
+        ) : (
+          <>
+            <button
+              type="button"
+              onClick={() => setShowViewer(true)}
+              className="absolute inset-0 flex items-center justify-center bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+              title="Buka & Zoom Galeri"
+            >
+              <Maximize2 size={16} className="text-white drop-shadow-md" />
+            </button>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation()
+                setIsBlurred(true)
+              }}
+              className="absolute bottom-1 left-1 bg-black/60 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 hover:bg-black/80 transition-all cursor-pointer z-10"
+              title="Kunci / Blur Kembali"
+            >
+              <Eye size={11} />
+            </button>
+          </>
+        )}
 
-      {onDelete && (
-        <button
-          type="button"
-          onClick={onDelete}
-          className="absolute top-1 right-1 bg-ink/80 text-white rounded-full p-0.5 hover:bg-rose-600 transition-colors cursor-pointer shadow-xs"
-        >
-          <X size={10} />
-        </button>
+        {onDelete && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation()
+              onDelete()
+            }}
+            className="absolute top-1 right-1 bg-ink/80 text-white rounded-full p-0.5 hover:bg-rose-600 transition-colors cursor-pointer shadow-xs z-10"
+            title="Hapus"
+          >
+            <X size={10} />
+          </button>
+        )}
+      </div>
+
+      {showViewer && (
+        <ImageViewerModal
+          isOpen={showViewer}
+          onClose={() => setShowViewer(false)}
+          images={[{ url: item.dataUrl, name: item.name, type: item.type }]}
+        />
       )}
-    </div>
+    </>
   )
 }

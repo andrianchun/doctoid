@@ -31,6 +31,7 @@ import AttachmentMenu from '../components/AttachmentMenu'
 import CustomSelect from '../components/CustomSelect'
 import { PemfisVisualizer } from '../components/PemfisVisualizer'
 import { ClinicalMediaCard } from '../components/ClinicalMediaCard'
+import { ImageViewerModal, type ViewerImage } from '../components/ImageViewerModal'
 import { lineToTerapi, localParse, classifyFragment, synthesizeRegexRule, isGenderToken, type LocalParseResult } from '../parser'
 import { rapikan, analisisKasus } from '../ai'
 import { buatKonteks, catatTerapi, saranTerapi, type Suggestion } from '../styleLearning'
@@ -130,6 +131,15 @@ export default function Brainstorm() {
 
   type Kategori = 'pemfis' | 'penunjang'
   const [attachments, setAttachments] = useState<{ id: string, name: string, type: string, dataUrl: string, kategori: Kategori }[]>([])
+  const [viewerState, setViewerState] = useState<{
+    isOpen: boolean
+    images: ViewerImage[]
+    initialIndex: number
+  }>({
+    isOpen: false,
+    images: [],
+    initialIndex: 0,
+  })
 
   const pemfisAttachRef = useRef<HTMLInputElement>(null)
   const penunjangAttachRef = useRef<HTMLInputElement>(null)
@@ -2227,7 +2237,22 @@ export default function Brainstorm() {
                   {attachments.map((a) => (
                     <div key={a.id} className="relative size-11 rounded-xl bg-slate-50 border border-slate-200 overflow-hidden shrink-0 group shadow-xs">
                       {a.type.startsWith('image/') ? (
-                        <img src={a.dataUrl} className="size-full object-cover" alt={a.name} />
+                        <img
+                          src={a.dataUrl}
+                          className="size-full object-cover cursor-pointer hover:scale-105 transition-transform"
+                          alt={a.name}
+                          onClick={() => {
+                            const imgAtts = attachments
+                              .filter((x) => x.type.startsWith('image/'))
+                              .map((x) => ({ url: x.dataUrl, name: x.name, type: x.type }))
+                            const idx = imgAtts.findIndex((x) => x.url === a.dataUrl)
+                            setViewerState({
+                              isOpen: true,
+                              images: imgAtts,
+                              initialIndex: Math.max(0, idx),
+                            })
+                          }}
+                        />
                       ) : (
                         <div className="flex size-full items-center justify-center text-[9px] font-bold text-slate-500 uppercase">
                           {a.name.split('.').pop() || 'FILE'}
@@ -2515,14 +2540,36 @@ export default function Brainstorm() {
                             return (
                               <div
                                 key={att.id || idx}
-                                className="relative rounded-xl overflow-hidden border border-slate-200 bg-slate-100 aspect-video flex items-center justify-center text-[11px] text-slate-500 p-1"
+                                onClick={() => {
+                                  if (isImg && (att.dataUrl || att.url)) {
+                                    const imgAtts = (item.attachments || [])
+                                      .filter((x: any) => x.type?.startsWith('image/') || x.dataUrl?.startsWith('data:image/') || x.url)
+                                      .map((x: any) => ({ url: x.dataUrl || x.url, name: x.name, type: x.type }))
+                                    const cIdx = imgAtts.findIndex((x: any) => (x.url === (att.dataUrl || att.url)))
+                                    setViewerState({
+                                      isOpen: true,
+                                      images: imgAtts,
+                                      initialIndex: Math.max(0, cIdx),
+                                    })
+                                  }
+                                }}
+                                className={`relative rounded-xl overflow-hidden border border-slate-200 bg-slate-100 aspect-video flex items-center justify-center text-[11px] text-slate-500 p-1 ${
+                                  isImg ? 'cursor-pointer hover:border-primary group transition-colors' : ''
+                                }`}
                               >
                                 {isImg && (att.dataUrl || att.url) ? (
-                                  <img
-                                    src={att.dataUrl || att.url}
-                                    alt={att.name || 'Lampiran'}
-                                    className="w-full h-full object-cover"
-                                  />
+                                  <>
+                                    <img
+                                      src={att.dataUrl || att.url}
+                                      alt={att.name || 'Lampiran'}
+                                      className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                                    />
+                                    <div className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                                      <span className="text-[10px] font-bold text-white bg-slate-900/70 px-2 py-0.5 rounded-md">
+                                        Zoom
+                                      </span>
+                                    </div>
+                                  </>
                                 ) : (
                                   <span className="truncate px-1 text-center font-medium">
                                     {att.name || 'Dokumen'}
@@ -2573,6 +2620,12 @@ export default function Brainstorm() {
           ))}
         </div>
       )}
+      <ImageViewerModal
+        isOpen={viewerState.isOpen}
+        onClose={() => setViewerState((prev) => ({ ...prev, isOpen: false }))}
+        images={viewerState.images}
+        initialIndex={viewerState.initialIndex}
+      />
     </main>
     </>
   )
