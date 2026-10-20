@@ -97,21 +97,56 @@ export async function sendLocalNotification(item: any) {
   } catch {}
 }
 
+function fromFirestoreMap(fields: Record<string, any>): any {
+  const result: any = {}
+  for (const [key, val] of Object.entries(fields)) {
+    if ('stringValue' in val) result[key] = val.stringValue
+    else if ('integerValue' in val) result[key] = Number(val.integerValue)
+    else if ('doubleValue' in val) result[key] = val.doubleValue
+    else if ('booleanValue' in val) result[key] = val.booleanValue
+    else if ('arrayValue' in val) {
+      result[key] = (val.arrayValue.values || []).map((v: any) =>
+        v.mapValue ? fromFirestoreMap(v.mapValue.fields || {}) : (v.stringValue ?? v.integerValue)
+      )
+    } else if ('mapValue' in val) {
+      result[key] = fromFirestoreMap(val.mapValue.fields || {})
+    }
+  }
+  return result
+}
+
 export async function syncWaInboxToDexie() {
   try {
     let items: any[] = []
+
+    // 1. Coba hubungi Gateway VM langsung (Port 3001) dengan timeout 3.5s
     try {
       const gatewayUrl =
         localStorage.getItem('doctoid_wa_gateway_url') || 'http://35.255.95.161:3001'
 
-      // Timeout 1.8 detik: jika di luar Wi-Fi laptop, segera beralih ke fallback tanpa lag
       const controller = new AbortController()
-      const timer = setTimeout(() => controller.abort(), 1800)
+      const timer = setTimeout(() => controller.abort(), 3500)
       const res = await fetch(`${gatewayUrl}/api/inbox?t=${Date.now()}`, { signal: controller.signal })
       clearTimeout(timer)
       if (res.ok) items = await res.json()
-    } catch {
-      // Fallback ke file JSON cloud jika di luar jangkauan Wi-Fi lokal
+    } catch {}
+
+    // 2. Fallback: Cloud Firestore REST API langsung (Port 443 HTTPS, selalu tembus operator seluler & PWA)
+    if (!items || items.length === 0) {
+      try {
+        const USER_UID = 'fOGcJmF0vGR5EKzlN2l9ZR7WPZu1'
+        const firestoreUrl = `https://firestore.googleapis.com/v1/projects/docto-id/databases/(default)/documents/doctoid/inbox_${USER_UID}?t=${Date.now()}`
+        const fRes = await fetch(firestoreUrl)
+        if (fRes.ok) {
+          const fData = await fRes.json()
+          const vals = fData.fields?.items?.arrayValue?.values || []
+          items = vals.map((v: any) => fromFirestoreMap(v.mapValue?.fields || {}))
+        }
+      } catch {}
+    }
+
+    // 3. Fallback: File JSON cloud dari Firebase Hosting
+    if (!items || items.length === 0) {
       try {
         const res = await fetch(`https://docto-id.web.app/wa-inbox.json?t=${Date.now()}`)
         if (res.ok) items = await res.json()
@@ -119,9 +154,7 @@ export async function syncWaInboxToDexie() {
         try {
           const res = await fetch(`/wa-inbox.json?t=${Date.now()}`)
           if (res.ok) items = await res.json()
-        } catch {
-          // ignore
-        }
+        } catch {}
       }
     }
 

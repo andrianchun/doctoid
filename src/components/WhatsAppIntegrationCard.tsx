@@ -56,7 +56,7 @@ export const WhatsAppIntegrationCard: React.FC<WhatsAppIntegrationCardProps> = (
     try {
       // Hubungi controller server gateway port 3001
       const controller = new AbortController()
-      const timer = setTimeout(() => controller.abort(), 1800)
+      const timer = setTimeout(() => controller.abort(), 3500)
       const res = await fetch(`${getGatewayBase()}/api/status?t=${Date.now()}`, { signal: controller.signal })
       clearTimeout(timer)
       if (res.ok) {

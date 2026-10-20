@@ -250,8 +250,8 @@ async function initBaileys() {
               mediaName = 'Foto_Konsul.jpg'
               try {
                 const comp = await sharp(buffer)
-                  .resize(1000, 1000, { fit: 'inside', withoutEnlargement: true })
-                  .jpeg({ quality: 75 })
+                  .resize(320, 320, { fit: 'inside', withoutEnlargement: true })
+                  .jpeg({ quality: 55 })
                   .toBuffer()
                 mediaDataUrl = `data:image/jpeg;base64,${comp.toString('base64')}`
                 console.log(`✓ Foto berhasil dikompresi dari ${(buffer.length/1024).toFixed(0)} KB -> ${(comp.length/1024).toFixed(0)} KB`)
@@ -336,7 +336,14 @@ async function initBaileys() {
               recentItem.raw_text += '\n\n' + inboxItem.raw_text
             }
             if (inboxItem.attachments && inboxItem.attachments.length > 0) {
-              recentItem.attachments = [...(recentItem.attachments || []), ...inboxItem.attachments]
+              const curAtts = recentItem.attachments || []
+              for (const newAtt of inboxItem.attachments) {
+                const isDup = curAtts.some((a) => a.dataUrl && newAtt.dataUrl && a.dataUrl.slice(0, 80) === newAtt.dataUrl.slice(0, 80))
+                if (!isDup && curAtts.length < 3) {
+                  curAtts.push(newAtt)
+                }
+              }
+              recentItem.attachments = curAtts
             }
             recentItem.created_at = new Date().toISOString()
             console.log(`✓ Pesan/lampiran baru berhasil digabungkan ke konsulan pasien [${recentItem.parsed_data?.nama_depan || 'Aktif'}]! Total lampiran: ${recentItem.attachments.length}`)
@@ -468,15 +475,9 @@ async function syncInboxToFirestore(inboxList) {
 
     const payload = {
       fields: {
-        tables: {
-          mapValue: {
-            fields: {
-              inboxQueue: {
-                arrayValue: {
-                  values: pendingItems.map(toFirestoreValue),
-                },
-              },
-            },
+        items: {
+          arrayValue: {
+            values: pendingItems.map(toFirestoreValue),
           },
         },
         updatedAt: {
@@ -485,7 +486,8 @@ async function syncInboxToFirestore(inboxList) {
       },
     }
 
-    const firestoreUrl = `https://firestore.googleapis.com/v1/projects/docto-id/databases/(default)/documents/users/${USER_UID}?updateMask.fieldPaths=tables.inboxQueue&updateMask.fieldPaths=updatedAt`
+    // Tulis ke dokumen terisolasi khusus inbox WhatsApp: doctoid/inbox_{USER_UID} (Jaminan tidak pernah tembus batas 1MB)
+    const firestoreUrl = `https://firestore.googleapis.com/v1/projects/docto-id/databases/(default)/documents/doctoid/inbox_${USER_UID}`
 
     const res = await fetch(firestoreUrl, {
       method: 'PATCH',
