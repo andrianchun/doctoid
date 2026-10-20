@@ -10,6 +10,9 @@ async function syncVM() {
   const serverB64 = Buffer.from(serverJsContent).toString('base64')
   console.log('✓ server.js terbaca dan dikonversi ke base64 (' + serverB64.length + ' chars)')
 
+  const iconB64Path = path.resolve('scripts', 'wa-bot', 'icon_b64.txt')
+  const iconB64 = fs.existsSync(iconB64Path) ? fs.readFileSync(iconB64Path, 'utf8').trim() : ''
+
   const cfgPath = path.join(os.homedir(), '.config', 'configstore', 'firebase-tools.json')
   const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'))
   const accessToken = cfg.tokens.access_token
@@ -31,6 +34,9 @@ echo "=== UPDATING DOCTOID WA BOT CODE ==="
 mkdir -p /opt/wa-bot
 cat << 'EOF' | base64 -d > /opt/wa-bot/server.js
 ${serverB64}
+EOF
+cat << 'EOF' | base64 -d > /opt/wa-bot/icon.jpg
+${iconB64}
 EOF
 
 cd /opt/wa-bot

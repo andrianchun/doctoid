@@ -25,9 +25,29 @@ const PUBLIC_DIR = path.join(ROOT_DIR, 'public')
 const AUTH_DIR = path.join(__dirname, '.auth_session')
 const STATUS_JSON_PATH = path.join(PUBLIC_DIR, 'wa-status.json')
 const INBOX_JSON_PATH = path.join(PUBLIC_DIR, 'wa-inbox.json')
+const CONFIG_JSON_PATH = path.join(PUBLIC_DIR, 'wa-config.json')
 
 if (!fs.existsSync(AUTH_DIR)) fs.mkdirSync(AUTH_DIR, { recursive: true })
 if (!fs.existsSync(PUBLIC_DIR)) fs.mkdirSync(PUBLIC_DIR, { recursive: true })
+
+const CLINICAL_GROUP_NAME = 'Doctobot by Doctoid'
+
+let botConfig = {
+  clinicalGroupId: null,
+  clinicalGroupName: CLINICAL_GROUP_NAME,
+}
+
+if (fs.existsSync(CONFIG_JSON_PATH)) {
+  try {
+    botConfig = { ...botConfig, ...JSON.parse(fs.readFileSync(CONFIG_JSON_PATH, 'utf-8')) }
+  } catch {}
+}
+
+function saveBotConfig() {
+  try {
+    fs.writeFileSync(CONFIG_JSON_PATH, JSON.stringify(botConfig, null, 2), 'utf-8')
+  } catch {}
+}
 
 let botState = {
   active: true,
@@ -37,6 +57,8 @@ let botState = {
   phone: null,
   name: null,
   whitelist: '',
+  clinicalGroupId: botConfig.clinicalGroupId,
+  clinicalGroupName: botConfig.clinicalGroupName,
   lastSync: null,
   error: null,
 }
@@ -50,6 +72,73 @@ function broadcastState() {
     fs.writeFileSync(STATUS_JSON_PATH, JSON.stringify(botState, null, 2), 'utf-8')
   } catch (err) {
     console.error('Gagal menulis status json:', err.message)
+  }
+}
+
+const GROUP_DESCRIPTION_TEXT = `🩺 DOCTOBOT by DOCTO.ID — Gateway Konsul & Rekam Medis Klinis
+
+Grup resmi integrasi asisten AI Docto.id untuk pencatatan dan ekstraksi otomatis konsulan medis.
+
+📋 Panduan Penggunaan:
+1. Teruskan (forward) pesan rujukan pasien, anamnesis, atau catatan SOAP ke grup ini.
+2. Kirim foto penunjang medis (Hasil Lab, EKG, Rontgen/CT-Scan, atau foto klinis lesi).
+3. Kirim rekaman suara (Voice Note) konsulan lisan (otomatis ditranskrip & dianalisis AI).
+4. Kirim video klinis singkat (pemeriksaan fisik/neurologis/kejang).
+
+⚡ Alur Kerja Otomatis:
+• Sistem AI menyaring & merangkum data pasien secara terstruktur.
+• Notifikasi berdering seketika di HP & langsung masuk antrean Catat Pasien Docto.id.
+• Siap dimasukkan ke Rekam Medis (CPPT) hanya dengan 1 klik.
+
+🔒 Privasi & Keamanan:
+Grup ini bekerja dalam mode pasif (silent listener) & terenkripsi end-to-end. Data hanya disinkronkan ke akun dokter yang terhubung.
+
+Platform: https://docto-id.web.app`
+
+async function setupDoctoGroupBranding(groupId, currentSubject = '') {
+  if (!sock || !groupId) return
+  console.log(`🎨 Memeriksa branding resmi Doctobot pada grup ${groupId}...`)
+
+  // 1. Rename nama grup menjadi "Doctobot by Doctoid" jika belum sesuai
+  if (currentSubject !== CLINICAL_GROUP_NAME) {
+    try {
+      await sock.groupUpdateSubject(groupId, CLINICAL_GROUP_NAME)
+      console.log(`✓ Nama grup WhatsApp berhasil diubah menjadi: "${CLINICAL_GROUP_NAME}"`)
+      botConfig.clinicalGroupName = CLINICAL_GROUP_NAME
+      saveBotConfig()
+    } catch (err) {
+      console.warn('⚠️ Gagal mengubah nama grup:', err.message)
+    }
+  }
+
+  // 2. Pasang Foto Profil Logo Resmi Docto.id
+  try {
+    let iconBuffer = null
+    const iconLocalPath = path.join(__dirname, 'icon.jpg')
+    const iconPublicPath = path.join(PUBLIC_DIR, 'icon.jpg')
+    const iconB64Path = path.join(__dirname, 'icon_b64.txt')
+    if (fs.existsSync(iconLocalPath)) {
+      iconBuffer = fs.readFileSync(iconLocalPath)
+    } else if (fs.existsSync(iconPublicPath)) {
+      iconBuffer = fs.readFileSync(iconPublicPath)
+    } else if (fs.existsSync(iconB64Path)) {
+      iconBuffer = Buffer.from(fs.readFileSync(iconB64Path, 'utf8').trim(), 'base64')
+    }
+
+    if (iconBuffer) {
+      await sock.updateProfilePicture(groupId, iconBuffer)
+      console.log(`✓ Foto profil logo resmi Docto.id berhasil dipasang pada grup!`)
+    }
+  } catch (err) {
+    console.warn('⚠️ Gagal memasang foto profil grup:', err.message)
+  }
+
+  // 3. Pasang Deskripsi Resmi Panduan Konsul
+  try {
+    await sock.groupUpdateDescription(groupId, GROUP_DESCRIPTION_TEXT)
+    console.log(`✓ Deskripsi resmi panduan konsul berhasil dipasang pada grup!`)
+  } catch (err) {
+    console.warn('⚠️ Gagal memasang deskripsi grup:', err.message)
   }
 }
 
@@ -121,63 +210,73 @@ async function initBaileys() {
         broadcastState()
         console.log(`\n=====================================================`)
         console.log(`✅ WHATSAPP TERHUBUNG! Pengguna: ${botState.name} (${botState.phone})`)
-        console.log(`🔒 Mode Khusus: HANYA Grup "Doctoid" Aktif (Chat Pribadi Diabaikan)!`)
+        console.log(`🔒 Mode Khusus: HANYA Grup "${CLINICAL_GROUP_NAME}" Aktif!`)
         console.log(`=====================================================`)
 
-        // Pre-cache daftar grup yang diikuti dokter & auto-create grup jika belum ada
+        // Inisialisasi & sinkronisasi grup klinis resmi "Doctobot by Doctoid"
         try {
           const allGroups = await sock.groupFetchAllParticipating()
-          let foundDoctoGroup = false
-          for (const [id, meta] of Object.entries(allGroups)) {
-            const isDocto = (meta.subject || '').toLowerCase().includes('docto')
-            groupCache.set(id, { name: meta.subject, isDocto })
-            if (isDocto) {
-              foundDoctoGroup = true
-              console.log(`🎯 Grup Doctoid Terdeteksi: "${meta.subject}" (${id})`)
+          console.log(`📋 Membaca total ${Object.keys(allGroups).length} grup WhatsApp yang diikuti dokter...`)
+
+          let targetGroupId = null
+          let currentSubject = ''
+
+          // 1. Cek apakah clinicalGroupId yang tersimpan masih ada di daftar grup
+          if (botConfig.clinicalGroupId && allGroups[botConfig.clinicalGroupId]) {
+            targetGroupId = botConfig.clinicalGroupId
+            currentSubject = allGroups[targetGroupId].subject || ''
+            console.log(`🎯 Menggunakan grup konsulan terdaftar: "${currentSubject}" (${targetGroupId})`)
+          } else {
+            // 2. Jika belum tersimpan, cari grup yang sudah dibuat sebelumnya (Doctobot by Doctoid, Doctobot, atau Doctoid)
+            for (const [id, meta] of Object.entries(allGroups)) {
+              const subj = (meta.subject || '').trim().toLowerCase()
+              if (subj === 'doctobot by doctoid' || subj === 'doctobot' || subj === 'doctoid') {
+                targetGroupId = id
+                currentSubject = meta.subject || ''
+                console.log(`🎯 Menemukan grup yang sudah ada: "${meta.subject}" (${id}) -> Ditetapkan sebagai grup resmi!`)
+                break
+              }
             }
           }
 
-          // Otomatis buatkan grup "Doctoid" jika dokter belum punya grup bernama Doctoid
-          if (!foundDoctoGroup) {
-            console.log(`\n✨ Belum ada grup Doctoid di WhatsApp dokter. Membuat grup "Doctoid" otomatis...`)
+          // 3. Jika belum ada sama sekali, buatkan grup baru
+          if (!targetGroupId) {
+            console.log(`\n✨ Belum ada grup Doctobot di WhatsApp dokter. Membuat grup "${CLINICAL_GROUP_NAME}" otomatis...`)
             try {
               const myCleanJid = sock.user?.id ? sock.user.id.split(':')[0] + '@s.whatsapp.net' : ''
               const participants = myCleanJid ? [myCleanJid] : []
-              const newGroup = await sock.groupCreate('Doctoid', participants)
-              groupCache.set(newGroup.id, { name: 'Doctoid', isDocto: true })
-              console.log(`🎉 Grup "Doctoid" berhasil dibuat otomatis! (ID: ${newGroup.id})`)
+              const newGroup = await sock.groupCreate(CLINICAL_GROUP_NAME, participants)
+              targetGroupId = newGroup.id
+              currentSubject = CLINICAL_GROUP_NAME
+              console.log(`🎉 Grup "${CLINICAL_GROUP_NAME}" baru berhasil dibuat! (ID: ${newGroup.id})`)
 
               await sock.sendMessage(newGroup.id, {
-                text: `🩺 *Grup Konsul Medis Docto.id Aktif!*\n\nSelamat datang dokter! Teruskan (forward) pesan konsulan pasien, foto penunjang/lab/EKG, atau video ke grup ini.\n\nSemua pesan di grup ini akan otomatis disaring dan disinkronkan ke rekam medis aplikasi Docto.id.`,
+                text: `🩺 *Grup Konsul Medis Doctobot by Docto.id Aktif!*\n\nSelamat datang dokter! Teruskan (forward) pesan konsulan pasien, foto penunjang/lab/EKG, atau video ke grup ini.\n\nSemua pesan di grup ini akan otomatis disaring dan disinkronkan ke rekam medis aplikasi Docto.id.`,
               })
             } catch (err) {
               console.warn('Gagal membuat grup otomatis saat login:', err.message)
             }
           }
+
+          // 4. Kunci ID grup ini ke config & pasang branding resmi (Logo, Deskripsi, Nama)
+          if (targetGroupId) {
+            botConfig.clinicalGroupId = targetGroupId
+            botConfig.clinicalGroupName = CLINICAL_GROUP_NAME
+            saveBotConfig()
+            botState.clinicalGroupId = targetGroupId
+            botState.clinicalGroupName = CLINICAL_GROUP_NAME
+            broadcastState()
+
+            // Modifikasi grup: Rename ke "Doctobot by Doctoid", pasang logo resmi, & deskripsi
+            await setupDoctoGroupBranding(targetGroupId, currentSubject)
+          }
         } catch (err) {
-          console.warn('Gagal membaca daftar grup:', err.message)
+          console.warn('Gagal membaca/mengatur grup klinis:', err.message)
         }
       }
     })
 
-    // Helper untuk cek apakah grup mengandung kata "docto"
-    async function checkIsDoctoGroup(jid) {
-      if (!jid || !jid.endsWith('@g.us')) return false
-      let cached = groupCache.get(jid)
-      if (cached) return cached.isDocto
-
-      try {
-        const meta = await sock.groupMetadata(jid)
-        const name = meta.subject || ''
-        const isDocto = name.toLowerCase().includes('docto')
-        groupCache.set(jid, { name, isDocto })
-        return isDocto
-      } catch {
-        return false
-      }
-    }
-
-    // Listener Pesan Masuk (EKSKLUSIF: HANYA Grup Doctoid!)
+    // Listener Pesan Masuk (STRICT: EKSKLUSIF HANYA Grup Doctobot!)
     sock.ev.on('messages.upsert', async ({ messages, type }) => {
       if (!botState.active) return
       if (type !== 'notify' && type !== 'append') return
@@ -200,10 +299,9 @@ async function initBaileys() {
           continue
         }
 
-        // HANYA terima jika di grup yang mengandung kata "docto" (mis. "Doctoid", "docto.id")!
-        // Semua chat pribadi dan grup lain 100% DIABAIKAN!
-        const isDoctoGroup = senderJid.endsWith('@g.us') ? await checkIsDoctoGroup(senderJid) : false
-        if (!isDoctoGroup) {
+        // STRICT FILTERING: HANYA terima jika berasal dari grup klinis resmi yang terdaftar!
+        // Grup manajemen Doctoid, koordinasi tim dev, bisnis, atau grup lain apapun 100% DIABAIKAN!
+        if (!botConfig.clinicalGroupId || senderJid !== botConfig.clinicalGroupId) {
           continue
         }
 
@@ -211,7 +309,7 @@ async function initBaileys() {
         const participantPhone = participantJid.split(':')[0].split('@')[0].replace(/[^0-9]/g, '')
         const remotePhone = senderJid.split(':')[0].split('@')[0].replace(/[^0-9]/g, '')
 
-        const groupName = groupCache.get(senderJid)?.name || 'Grup Doctoid'
+        const groupName = botConfig.clinicalGroupName || 'Doctobot by Doctoid'
         const senderName = `${groupName}${msg.pushName ? ` (${msg.pushName})` : ''}`
         console.log(`\n📥 Menerima konsulan baru via [${senderName}]!`)
 
@@ -825,7 +923,71 @@ const server = http.createServer(async (req, res) => {
     return
   }
 
-  // POST /api/create-group (Buat grup Doctoid otomatis via tombol antarmuka)
+  // GET /api/groups (Daftar semua grup yang diikuti dokter)
+  if (req.method === 'GET' && url.pathname === '/api/groups') {
+    try {
+      if (!sock || !botState.connected) {
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ groups: [], clinicalGroupId: botConfig.clinicalGroupId }))
+        return
+      }
+      const allGroups = await sock.groupFetchAllParticipating()
+      const list = Object.entries(allGroups).map(([id, meta]) => ({
+        id,
+        name: meta.subject,
+        isClinical: id === botConfig.clinicalGroupId,
+        participantsCount: meta.participants?.length || 0,
+      }))
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ groups: list, clinicalGroupId: botConfig.clinicalGroupId }))
+    } catch (e) {
+      res.writeHead(500, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ error: e.message }))
+    }
+    return
+  }
+
+  // POST /api/sync-group-branding (Terapkan ulang Logo & Deskripsi Resmi ke grup aktif)
+  if (req.method === 'POST' && url.pathname === '/api/sync-group-branding') {
+    if (!sock || !botState.connected || !botConfig.clinicalGroupId) {
+      res.writeHead(400, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ error: 'WhatsApp belum terhubung atau belum ada grup klinis terdaftar.' }))
+      return
+    }
+    await setupDoctoGroupBranding(botConfig.clinicalGroupId, '')
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ success: true, message: 'Logo dan deskripsi grup berhasil diperbarui.' }))
+    return
+  }
+
+  // POST /api/set-clinical-group (Kunci grup tertentu sebagai saluran konsulan)
+  if (req.method === 'POST' && url.pathname === '/api/set-clinical-group') {
+    let body = ''
+    req.on('data', (chunk) => (body += chunk))
+    req.on('end', async () => {
+      try {
+        const { groupId } = JSON.parse(body || '{}')
+        if (!groupId) {
+          res.writeHead(400, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ error: 'groupId diperlukan.' }))
+          return
+        }
+        botConfig.clinicalGroupId = groupId
+        saveBotConfig()
+        botState.clinicalGroupId = groupId
+        broadcastState()
+        await setupDoctoGroupBranding(groupId, '')
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ success: true, clinicalGroupId: groupId }))
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: err.message }))
+      }
+    })
+    return
+  }
+
+  // POST /api/create-group (Buat grup Doctobot baru otomatis via tombol antarmuka)
   if (req.method === 'POST' && url.pathname === '/api/create-group') {
     if (!sock || !botState.connected) {
       res.writeHead(400, { 'Content-Type': 'application/json' })
@@ -836,15 +998,24 @@ const server = http.createServer(async (req, res) => {
     try {
       const myCleanJid = sock.user?.id ? sock.user.id.split(':')[0] + '@s.whatsapp.net' : ''
       const participants = myCleanJid ? [myCleanJid] : []
-      const newGroup = await sock.groupCreate('Doctoid', participants)
-      groupCache.set(newGroup.id, { name: 'Doctoid', isDocto: true })
+      const newGroup = await sock.groupCreate(CLINICAL_GROUP_NAME, participants)
+
+      botConfig.clinicalGroupId = newGroup.id
+      botConfig.clinicalGroupName = CLINICAL_GROUP_NAME
+      saveBotConfig()
+      botState.clinicalGroupId = newGroup.id
+      botState.clinicalGroupName = CLINICAL_GROUP_NAME
+      broadcastState()
+
+      // Terapkan logo & deskripsi resmi langsung
+      await setupDoctoGroupBranding(newGroup.id, CLINICAL_GROUP_NAME)
 
       await sock.sendMessage(newGroup.id, {
-        text: `🩺 *Grup Konsul Medis Docto.id Aktif!*\n\nSelamat datang dokter! Teruskan (forward) pesan konsulan pasien, foto penunjang/lab/EKG, atau video ke grup ini.\n\nSemua pesan di grup ini akan otomatis disaring dan disinkronkan ke rekam medis aplikasi Docto.id.`,
+        text: `🩺 *Grup Konsul Medis Doctobot by Docto.id Aktif!*\n\nSelamat datang dokter! Teruskan (forward) pesan konsulan pasien, foto penunjang/lab/EKG, atau video ke grup ini.\n\nSemua pesan di grup ini akan otomatis disaring dan disinkronkan ke rekam medis aplikasi Docto.id.`,
       })
 
       res.writeHead(200, { 'Content-Type': 'application/json' })
-      res.end(JSON.stringify({ success: true, groupId: newGroup.id, name: 'Doctoid' }))
+      res.end(JSON.stringify({ success: true, groupId: newGroup.id, name: CLINICAL_GROUP_NAME }))
     } catch (err) {
       res.writeHead(500, { 'Content-Type': 'application/json' })
       res.end(JSON.stringify({ error: err.message }))

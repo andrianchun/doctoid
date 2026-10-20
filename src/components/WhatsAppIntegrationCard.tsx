@@ -20,6 +20,8 @@ interface BotState {
   pairingCode?: string | null
   phone: string | null
   name: string | null
+  clinicalGroupId?: string | null
+  clinicalGroupName?: string | null
   lastSync?: string | null
 }
 
@@ -37,6 +39,7 @@ export const WhatsAppIntegrationCard: React.FC<WhatsAppIntegrationCardProps> = (
   const [pairingPhone, setPairingPhone] = useState('')
   const [pairingLoading, setPairingLoading] = useState(false)
   const [isCreatingGroup, setIsCreatingGroup] = useState(false)
+  const [isSyncingBranding, setIsSyncingBranding] = useState(false)
 
   // Ambil nomor whitelist dari local storage
   useEffect(() => {
@@ -154,13 +157,33 @@ export const WhatsAppIntegrationCard: React.FC<WhatsAppIntegrationCardProps> = (
     }
   }
 
-  // Buat Grup WhatsApp "Doctoid" Otomatis
+  // Terapkan Logo & Deskripsi Resmi ke Grup Konsul
+  const handleSyncBranding = async () => {
+    setIsSyncingBranding(true)
+    try {
+      const res = await fetch(`${getGatewayBase()}/api/sync-group-branding`, { method: 'POST' })
+      if (res.ok) {
+        notify('Logo resmi & panduan konsul berhasil diterapkan ke grup WhatsApp! ✓')
+        fetchStatus()
+      } else {
+        const err = await res.json().catch(() => ({}))
+        notify(err.error || 'Gagal menerapkan branding ke grup.')
+      }
+    } catch {
+      notify('Server gateway bot tidak merespons.')
+    } finally {
+      setIsSyncingBranding(false)
+    }
+  }
+
+  // Buat Grup WhatsApp "Doctobot by Doctoid" Otomatis
   const handleCreateGroup = async () => {
     setIsCreatingGroup(true)
     try {
       const res = await fetch(`${getGatewayBase()}/api/create-group`, { method: 'POST' })
       if (res.ok) {
-        notify('Grup WhatsApp "Doctoid" berhasil dibuat otomatis di HP Anda! ✓')
+        notify('Grup WhatsApp "Doctobot by Doctoid" berhasil dibuat otomatis di HP Anda! ✓')
+        fetchStatus()
       } else {
         const err = await res.json().catch(() => ({}))
         notify(err.error || 'Gagal membuat grup otomatis.')
@@ -376,10 +399,10 @@ export const WhatsAppIntegrationCard: React.FC<WhatsAppIntegrationCardProps> = (
               <CheckCircle2 size={18} className="text-emerald-600" />
               <div>
                 <span className="font-bold text-xs block text-emerald-900">
-                  WhatsApp Terhubung (Mode Grup &quot;Doctoid&quot; Aktif)
+                  WhatsApp Terhubung — Grup &quot;{botState.clinicalGroupName || 'Doctobot by Doctoid'}&quot;
                 </span>
                 <span className="text-[11px] text-emerald-700 font-mono">
-                  Nomor: {botState.phone || 'Aktif'}
+                  Nomor Dokter: {botState.phone || 'Aktif'}
                 </span>
               </div>
             </div>
@@ -398,21 +421,30 @@ export const WhatsAppIntegrationCard: React.FC<WhatsAppIntegrationCardProps> = (
           <div className="p-3 rounded-2xl bg-white/80 border border-emerald-200 text-[11px] text-emerald-900 space-y-2">
             <span className="font-bold text-emerald-950 block">📱 Skenario Pemakaian Sehari-hari (Hanya Pakai HP):</span>
             <p className="leading-relaxed">
-              1. <b>Grup &quot;Doctoid&quot;</b> otomatis dibuat di WhatsApp Anda. Semua pesan di dalamnya akan ditarik ke aplikasi Docto.id.<br />
-              2. Di grup IGD / bangsal RS, tandai pesan / foto lab / video kejang &gt; klik <b>Forward (Panah Teruskan)</b> &gt; kirim ke grup <b>&quot;Doctoid&quot;</b>.<br />
-              3. Buka app docto.id di HP dokter &gt; menu <b>Catat Pasien</b>: data langsung tersedia dan siap dirapikan dengan AI!
+              1. <b>Grup &quot;{botState.clinicalGroupName || 'Doctobot by Doctoid'}&quot;</b> aktif dengan logo resmi dan panduan rujukan medis di WhatsApp Anda.<br />
+              2. Di grup IGD / bangsal RS, tandai pesan / foto lab / rontgen / video kejang &gt; klik <b>Forward (Panah Teruskan)</b> &gt; kirim ke grup <b>&quot;Doctobot by Doctoid&quot;</b>.<br />
+              3. <b>Keamanan Terkunci</b>: Bot hanya memproses pesan dari grup ini. Grup lain seperti manajemen atau koordinasi kerja tetap 100% aman dan tidak terserap ke rekam medis.
             </p>
 
-            <div className="pt-1.5 flex items-center justify-between border-t border-emerald-100">
-              <span className="text-[10px] text-emerald-700">Belum melihat grup di daftar chat WA?</span>
+            <div className="pt-2 flex items-center justify-between flex-wrap gap-2 border-t border-emerald-100">
+              <button
+                type="button"
+                onClick={handleSyncBranding}
+                disabled={isSyncingBranding}
+                className="px-3 py-1.5 rounded-xl bg-white border border-emerald-300 hover:bg-emerald-50 text-emerald-800 font-bold transition-all cursor-pointer flex items-center gap-1.5 text-[11px] disabled:opacity-50"
+              >
+                {isSyncingBranding ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
+                <span>Perbarui Logo &amp; Info Grup</span>
+              </button>
+
               <button
                 type="button"
                 onClick={handleCreateGroup}
                 disabled={isCreatingGroup}
-                className="px-3 py-1 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold transition-all cursor-pointer flex items-center gap-1.5 text-[11px] disabled:opacity-50"
+                className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold transition-all cursor-pointer flex items-center gap-1.5 text-[11px] disabled:opacity-50"
               >
                 {isCreatingGroup ? <Loader2 size={12} className="animate-spin" /> : null}
-                <span>Buat Grup &quot;Doctoid&quot; Otomatis</span>
+                <span>Buat Ulang Grup</span>
               </button>
             </div>
           </div>
