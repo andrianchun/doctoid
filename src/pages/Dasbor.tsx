@@ -88,6 +88,7 @@ export default function Dasbor() {
   // Live queries dari IndexedDB (dengan default array konstan agar referensi dependensi stabil)
   const hospitals = useLiveQuery(() => db.hospitals.toArray().then(arr => arr.sort((a, b) => (a.order ?? 0) - (b.order ?? 0))), [], [] as Hospital[])
   const activePatients = useLiveQuery(() => db.patients.where('status_rawat').equals('aktif').toArray(), [], [] as Patient[])
+  const allPatients = useLiveQuery(() => db.patients.toArray(), [], [] as Patient[])
   const allNotes = useLiveQuery(() => db.progressNotes.toArray(), [], [] as ProgressNote[])
   const poliLogs = useLiveQuery(() => db.poliLogs.toArray(), [], [] as PoliLog[])
 
@@ -99,20 +100,40 @@ export default function Dasbor() {
     return activePatients.filter(p => p.hospital_id === filterHospitalId)
   }, [activePatients, filterHospitalId])
 
+  const filteredAllPatients = useMemo(() => {
+    if (!filterHospitalId) return allPatients
+    return allPatients.filter(p => p.hospital_id === filterHospitalId)
+  }, [allPatients, filterHospitalId])
+
   const filteredPoliLogs = useMemo(() => {
     if (!filterHospitalId) return poliLogs
     return poliLogs.filter(p => p.hospital_id === filterHospitalId)
   }, [poliLogs, filterHospitalId])
 
-  // Beban Kasus PieChart per Faskes
+  // Total SELURUH pasien yang pernah ditangani (Kumulatif Ranap + Poli All-Time)
+  const totalPasienAllTime = useMemo(() => {
+    const ranapAllCount = filteredAllPatients.length
+    const poliAllCount = filteredPoliLogs.reduce((acc, curr) => acc + (curr.jumlah_pasien || 0), 0)
+    return ranapAllCount + poliAllCount
+  }, [filteredAllPatients, filteredPoliLogs])
+
+  // Beban Kasus PieChart per Faskes (Total Kumulatif Seluruh Pasien Ranap + Poli per Faskes)
   const hospitalStats = useMemo(() => {
-    return hospitals.map((h) => ({
-      id: h.id!,
-      name: h.nama,
-      value: activePatients.filter((p) => p.hospital_id === h.id).length,
-      fill: h.kode_warna || '#3B82F6',
-    }))
-  }, [hospitals, activePatients])
+    return hospitals.map((h) => {
+      const ranapCount = allPatients.filter((p) => p.hospital_id === h.id).length
+      const poliCount = poliLogs
+        .filter((pl) => pl.hospital_id === h.id)
+        .reduce((acc, curr) => acc + (curr.jumlah_pasien || 0), 0)
+      return {
+        id: h.id!,
+        name: h.nama,
+        value: ranapCount + poliCount,
+        ranapCount,
+        poliCount,
+        fill: h.kode_warna || '#3B82F6',
+      }
+    })
+  }, [hospitals, allPatients, poliLogs])
 
   const chartSlices = useMemo(() => hospitalStats.filter((d) => d.value > 0), [hospitalStats])
 
@@ -148,8 +169,8 @@ export default function Dasbor() {
 
   const poliTodayCount = poliTodayLogs.reduce((acc, curr) => acc + (curr.jumlah_pasien || 0), 0)
 
-  // Total pasien dilayani hari ini (Inap Visited + Poli)
-  const totalPasienToday = visitedCountToday + poliTodayCount
+  // Total pasien dikelola hari ini (Inap Aktif + Poli Hari Ini)
+  const totalPasienToday = filteredActivePatients.length + poliTodayCount
 
   // ==================== ALERTS: TAPERING & DURASI OBAT ====================
   const drugAlerts = useMemo<DrugAlertItem[]>(() => {
@@ -459,14 +480,14 @@ export default function Dasbor() {
               </p>
             </div>
 
-            {/* Bawah: Pasien Dirawat di Kiri & Tombol Aksi Cepat (Mata + Gir) di Kanan */}
+            {/* Bawah: Total Seluruh Pasien Ditangani di Kiri & Tombol Aksi Cepat (Mata + Gir) di Kanan */}
             <div className="flex items-end justify-between pt-3 border-t border-white/15 gap-2">
               <div>
                 <h1 className="h1 text-2xl sm:text-3xl font-black text-white leading-none">
-                  {filteredActivePatients.length}
+                  {totalPasienAllTime}
                 </h1>
                 <p className="text-xs font-bold text-white/95 mt-1 tracking-wide">
-                  Pasien Dirawat
+                  Total Pasien Ditangani
                 </p>
               </div>
 
@@ -524,11 +545,17 @@ export default function Dasbor() {
                     content={({ active, payload }) => {
                       if (!active || !payload || !payload.length) return null
                       const item = payload[0]
+                      const stat = hospitalStats.find((s) => s.name === item.name)
                       return (
                         <div className="rounded-xl border border-primary/20 bg-white/95 px-3 py-1.5 shadow-md pointer-events-none">
-                          <span className="text-xs font-bold text-primary">
-                            {item.name} : {item.value}
-                          </span>
+                          <p className="text-xs font-bold text-primary">
+                            {item.name} : {item.value} pasien
+                          </p>
+                          {stat && (
+                            <p className="text-[10px] text-slate-500 font-medium mt-0.5">
+                              {stat.ranapCount} Ranap · {stat.poliCount} Poli
+                            </p>
+                          )}
                         </div>
                       )
                     }}
@@ -583,8 +610,8 @@ export default function Dasbor() {
           <div className="mt-2.5 flex items-center">
             <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold ${
               visitedCountToday >= filteredActivePatients.length && filteredActivePatients.length > 0
-                ? 'bg-emerald-100 text-emerald-800'
-                : 'bg-amber-100 text-amber-800'
+                ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                : 'bg-primary/10 text-primary border border-primary/20'
             }`}>
               {visitedCountToday}/{filteredActivePatients.length} Visite
             </span>
@@ -603,13 +630,13 @@ export default function Dasbor() {
             {poliTodayCount}
             <span className="text-xs font-bold text-slate-400 ml-1">pasien</span>
           </div>
-          <div className="mt-2.5 text-[11px] text-teal-600 font-semibold truncate flex items-center justify-between">
-            <span>{poliTodayLogs.length > 0 ? `${poliTodayLogs.length} sesi tercatat` : '+ Catat Sesi Poli'}</span>
-            <ChevronRight size={13} className="text-slate-400 group-hover:translate-x-0.5 transition-transform" />
+          <div className="mt-2.5 text-[11px] text-slate-500 font-medium truncate flex items-center justify-between min-h-[18px]">
+            <span>{poliTodayLogs.length > 0 ? `${poliTodayLogs.length} sesi tercatat` : ''}</span>
+            <ChevronRight size={14} className="text-slate-400 group-hover:text-primary group-hover:translate-x-0.5 transition-all ml-auto" />
           </div>
         </Link>
 
-        {/* Card 3: Total Pasien Dilayani Hari Ini */}
+        {/* Card 3: Total Pasien Dikelola Hari Ini */}
         <div className="p-4 rounded-3xl bg-white border border-slate-200/90 shadow-xs relative overflow-hidden">
           <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
             Total Hari Ini
@@ -619,7 +646,7 @@ export default function Dasbor() {
             <span className="text-xs font-bold text-slate-400 ml-1">pasien</span>
           </div>
           <div className="mt-2.5 text-[11px] text-slate-500 font-medium truncate">
-            {visitedCountToday} Inap · {poliTodayCount} Poli
+            {filteredActivePatients.length} Inap · {poliTodayCount} Poli
           </div>
         </div>
 
@@ -642,7 +669,7 @@ export default function Dasbor() {
             {formatRupiah(financialProjection.todayTotal)}
           </div>
           <div className="mt-2.5 text-[11px] font-medium text-slate-500 truncate">
-            MTD: <span className="font-bold text-slate-700">{formatRupiah(financialProjection.mtdTotal)}</span>
+            Bulan Ini: <span className="font-bold text-slate-700">{formatRupiah(financialProjection.mtdTotal)}</span>
           </div>
         </div>
 
