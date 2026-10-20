@@ -36,6 +36,7 @@ export const WhatsAppIntegrationCard: React.FC<WhatsAppIntegrationCardProps> = (
   const [pairMode, setPairMode] = useState<'qr' | 'code'>('code')
   const [pairingPhone, setPairingPhone] = useState('')
   const [pairingLoading, setPairingLoading] = useState(false)
+  const [isCreatingGroup, setIsCreatingGroup] = useState(false)
 
   // Ambil nomor whitelist dari local storage
   useEffect(() => {
@@ -47,19 +48,13 @@ export const WhatsAppIntegrationCard: React.FC<WhatsAppIntegrationCardProps> = (
   const getGatewayBase = () => {
     const custom = localStorage.getItem('doctoid_wa_gateway_url')
     if (custom) return custom
-    if (typeof window !== 'undefined') {
-      const isLocal =
-        window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
-      if (isLocal) return 'http://127.0.0.1:3001'
-      return 'http://192.168.1.45:3001'
-    }
-    return 'http://127.0.0.1:3001'
+    return 'http://35.255.95.161:3001'
   }
 
-  // Polling status bot dari endpoint gateway (fallback: wa-status.json)
+  // Polling status bot dari endpoint gateway
   const fetchStatus = async () => {
     try {
-      // 1. Coba hubungi controller server gateway port 3001
+      // Hubungi controller server gateway port 3001
       const controller = new AbortController()
       const timer = setTimeout(() => controller.abort(), 1800)
       const res = await fetch(`${getGatewayBase()}/api/status?t=${Date.now()}`, { signal: controller.signal })
@@ -71,16 +66,7 @@ export const WhatsAppIntegrationCard: React.FC<WhatsAppIntegrationCardProps> = (
         return
       }
     } catch {
-      // 2. Fallback baca static status jika disajikan via Vite public
-      try {
-        const staticRes = await fetch('/wa-status.json?t=' + Date.now())
-        if (staticRes.ok) {
-          const staticData = await staticRes.json()
-          setBotState(staticData)
-          setServerOnline(true)
-          return
-        }
-      } catch {}
+      // Gateway offline atau belum dijalankan
     }
     setServerOnline(false)
   }
@@ -168,6 +154,24 @@ export const WhatsAppIntegrationCard: React.FC<WhatsAppIntegrationCardProps> = (
     }
   }
 
+  // Buat Grup WhatsApp "Doctoid" Otomatis
+  const handleCreateGroup = async () => {
+    setIsCreatingGroup(true)
+    try {
+      const res = await fetch(`${getGatewayBase()}/api/create-group`, { method: 'POST' })
+      if (res.ok) {
+        notify('Grup WhatsApp "Doctoid" berhasil dibuat otomatis di HP Anda! ✓')
+      } else {
+        const err = await res.json().catch(() => ({}))
+        notify(err.error || 'Gagal membuat grup otomatis.')
+      }
+    } catch {
+      notify('Server gateway bot tidak merespons.')
+    } finally {
+      setIsCreatingGroup(false)
+    }
+  }
+
   // Simpan Whitelist Nomor
   const handleSaveNumber = async () => {
     const clean = waNumber.trim().replace(/[^0-9+]/g, '')
@@ -230,17 +234,17 @@ export const WhatsAppIntegrationCard: React.FC<WhatsAppIntegrationCardProps> = (
             <span
               className={`size-2.5 rounded-full ${
                 !serverOnline
-                  ? 'bg-slate-500'
+                  ? 'bg-rose-500'
                   : botState?.connected
                   ? 'bg-emerald-400 animate-pulse'
                   : botState?.active
                   ? 'bg-amber-400 animate-ping'
-                  : 'bg-rose-500'
+                  : 'bg-slate-500'
               }`}
             />
             <span className="font-semibold text-slate-300">
               {!serverOnline
-                ? 'Gateway Service Belum Berjalan'
+                ? 'Gateway Service Offline (Jalankan: npm run wa:bot)'
                 : botState?.connected
                 ? `Terhubung: ${botState.name || 'Dokter'} (${botState.phone || 'Aktif'})`
                 : botState?.active
@@ -269,7 +273,7 @@ export const WhatsAppIntegrationCard: React.FC<WhatsAppIntegrationCardProps> = (
           <div className="p-3 rounded-2xl bg-amber-100/70 border border-amber-200 text-left text-[11px] text-amber-900 space-y-1.5">
             <span className="font-bold block text-emerald-800">🔒 Aman &amp; Terisolasi 100%:</span>
             <p className="leading-relaxed">
-              Bot diprogram untuk <b>HANYA</b> membaca pesan di grup khusus bernama <b>&quot;Doctoid&quot;</b> atau chat <b>&quot;Kirim ke Diri Sendiri&quot;</b>. Seluruh chat grup RS lain, keluarga, dan pasien <b>100% diblokir &amp; diabaikan</b>, serta <b>tanpa pesan balasan apa pun</b>.
+              Bot diprogram untuk <b>HANYA</b> membaca pesan di grup WhatsApp bernama <b>&quot;Doctoid&quot;</b>. Seluruh chat pribadi, chat keluarga, status WA, dan grup rumah sakit lain <b>100% diblokir &amp; diabaikan</b>, serta <b>tanpa balasan apa pun</b>.
             </p>
           </div>
 
@@ -391,13 +395,26 @@ export const WhatsAppIntegrationCard: React.FC<WhatsAppIntegrationCardProps> = (
             </button>
           </div>
 
-          <div className="p-3 rounded-2xl bg-white/80 border border-emerald-200 text-[11px] text-emerald-900 space-y-1.5">
+          <div className="p-3 rounded-2xl bg-white/80 border border-emerald-200 text-[11px] text-emerald-900 space-y-2">
             <span className="font-bold text-emerald-950 block">📱 Skenario Pemakaian Sehari-hari (Hanya Pakai HP):</span>
             <p className="leading-relaxed">
-              1. Dokter cukup buat <b>1 grup WhatsApp bernama &quot;Doctoid&quot;</b> (anggotanya cukup dokter sendirian).<br />
+              1. <b>Grup &quot;Doctoid&quot;</b> otomatis dibuat di WhatsApp Anda. Semua pesan di dalamnya akan ditarik ke aplikasi Docto.id.<br />
               2. Di grup IGD / bangsal RS, tandai pesan / foto lab / video kejang &gt; klik <b>Forward (Panah Teruskan)</b> &gt; kirim ke grup <b>&quot;Doctoid&quot;</b>.<br />
               3. Buka app docto.id di HP dokter &gt; menu <b>Catat Pasien</b>: data langsung tersedia dan siap dirapikan dengan AI!
             </p>
+
+            <div className="pt-1.5 flex items-center justify-between border-t border-emerald-100">
+              <span className="text-[10px] text-emerald-700">Belum melihat grup di daftar chat WA?</span>
+              <button
+                type="button"
+                onClick={handleCreateGroup}
+                disabled={isCreatingGroup}
+                className="px-3 py-1 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold transition-all cursor-pointer flex items-center gap-1.5 text-[11px] disabled:opacity-50"
+              >
+                {isCreatingGroup ? <Loader2 size={12} className="animate-spin" /> : null}
+                <span>Buat Grup &quot;Doctoid&quot; Otomatis</span>
+              </button>
+            </div>
           </div>
         </div>
       )}

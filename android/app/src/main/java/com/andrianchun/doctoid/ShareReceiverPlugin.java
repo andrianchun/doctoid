@@ -111,6 +111,11 @@ public class ShareReceiverPlugin extends Plugin {
         if (instance != null) {
             instance.notifyListeners("shareReceived", shareData);
         }
+
+        // Bersihkan intent agar tidak re-trigger saat Activity di-recreate
+        intent.setAction(null);
+        intent.removeExtra(Intent.EXTRA_TEXT);
+        intent.removeExtra(Intent.EXTRA_STREAM);
     }
 
     private static JSObject readUriAsBase64(Context ctx, Uri uri, String mimeFallback) {

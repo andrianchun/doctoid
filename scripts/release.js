@@ -10,6 +10,7 @@
 //
 import { execSync } from 'child_process';
 import fs from 'fs';
+import path from 'path';
 
 const run = (cmd, env = {}) => execSync(cmd, { stdio: 'inherit', env: { ...process.env, ...env } });
 const readVersion = () => JSON.parse(fs.readFileSync('package.json', 'utf8')).version;
@@ -68,22 +69,30 @@ if (apk) {
   syncAndroidVersion(version);
   console.log('🔄 Menyinkronkan aset web terbaru ke project Android...');
   run('npx cap sync android');
+
+  // Bersihkan arsip OTA dan APK dari android assets agar tidak menggembungkan ukuran APK
+  const assetsDir = 'android/app/src/main/assets/public';
+  if (fs.existsSync(path.join(assetsDir, 'ota'))) {
+    fs.rmSync(path.join(assetsDir, 'ota'), { recursive: true, force: true });
+  }
+  if (fs.existsSync(path.join(assetsDir, 'apk'))) {
+    fs.rmSync(path.join(assetsDir, 'apk'), { recursive: true, force: true });
+  }
+
   console.log('⚙️ Mengompilasi APK rilis (gradlew assembleRelease)...');
   execSync(process.platform === 'win32' ? 'gradlew.bat assembleRelease' : './gradlew assembleRelease', {
     stdio: 'inherit',
     cwd: 'android'
   });
-  if (!fs.existsSync('public/apk')) {
-    fs.mkdirSync('public/apk', { recursive: true });
-  }
-  fs.copyFileSync('android/app/build/outputs/apk/release/app-release.apk', 'public/apk/doctoid-latest.apk');
+
   if (fs.existsSync('dist')) {
     if (!fs.existsSync('dist/apk')) {
       fs.mkdirSync('dist/apk', { recursive: true });
     }
     fs.copyFileSync('android/app/build/outputs/apk/release/app-release.apk', 'dist/apk/doctoid-latest.apk');
+    fs.copyFileSync('android/app/build/outputs/apk/release/app-release.apk', 'dist/doctoid.apk');
   }
-  console.log('✓ APK rilis baru berhasil dikompilasi dan disalin ke public/apk & dist/apk/doctoid-latest.apk\n');
+  console.log('✓ APK rilis baru berhasil dikompilasi dan disalin ke dist/apk/doctoid-latest.apk & dist/doctoid.apk\n');
 }
 
 const deployHosting = () => {

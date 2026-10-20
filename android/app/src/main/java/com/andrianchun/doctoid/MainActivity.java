@@ -13,14 +13,20 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(ShareReceiverPlugin.class);
         super.onCreate(savedInstanceState);
         applyDarkStatusBarIcons();
-        ShareReceiverPlugin.handleShareIntent(this, getIntent());
+        Intent intent = getIntent();
+        if (intent != null && (Intent.ACTION_SEND.equals(intent.getAction()) || Intent.ACTION_SEND_MULTIPLE.equals(intent.getAction()))) {
+            ShareReceiverPlugin.handleShareIntent(this, intent);
+            setIntent(new Intent());
+        }
     }
 
     @Override
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
-        setIntent(intent);
-        ShareReceiverPlugin.handleShareIntent(this, intent);
+        if (intent != null && (Intent.ACTION_SEND.equals(intent.getAction()) || Intent.ACTION_SEND_MULTIPLE.equals(intent.getAction()))) {
+            ShareReceiverPlugin.handleShareIntent(this, intent);
+            setIntent(new Intent());
+        }
     }
 
     @Override

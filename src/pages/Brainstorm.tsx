@@ -21,7 +21,7 @@ const ShareReceiver: ShareReceiverPlugin | null = Capacitor.isNativePlatform()
 import {
   Mic,
   Trash2, Loader2, X, FileText, ChevronDown, Send,
-  Search, Paperclip
+  Search, Paperclip, Bell
 } from 'lucide-react'
 import { db, type Jaminan, type TerapiItem, type DiagnosisItem, type RegexField, type Patient, type RawatEpisode, type PeranRawat, type InboxItem } from '../db'
 import { DEPT_ALIH_RAWAT } from './PatientProfile'
@@ -155,6 +155,14 @@ export default function Brainstorm() {
   const [dismissedPatientId, setDismissedPatientId] = useState<number | null>(null)
   const [showSearchModal, setShowSearchModal] = useState(false)
   useBodyScrollLock(showSearchModal)
+  const [showInboxModal, setShowInboxModal] = useState(false)
+  useBodyScrollLock(showInboxModal)
+
+  useEffect(() => {
+    const handler = () => setShowInboxModal(true)
+    window.addEventListener('doctoid_open_wa_inbox', handler)
+    return () => window.removeEventListener('doctoid_open_wa_inbox', handler)
+  }, [])
   const [patientSearchQ, setPatientSearchQ] = useState('')
   const [stagedAnalysis, setStagedAnalysis] = useState<StagedAnalysis | null>(null)
 
@@ -209,6 +217,7 @@ export default function Brainstorm() {
     if (item.id) {
       db.inboxQueue.update(item.id, { status: 'imported' })
     }
+    setShowInboxModal(false)
     notify('Data konsul WhatsApp berhasil dimuat ke formulir ✓')
   }
 
@@ -235,6 +244,7 @@ export default function Brainstorm() {
       setAttachments((prev) => [...prev, ...(allAttachments as any)])
     }
 
+    setShowInboxModal(false)
     notify(`${pendingInboxItems.length} pesan & berkas WhatsApp berhasil digabungkan ke formulir ✓`)
   }
 
@@ -1208,17 +1218,34 @@ export default function Brainstorm() {
       {/* Banner Utama — 1 Baris */}
       <div className="glass-blue-hero rounded-3xl px-5 py-4 text-white shadow-xl flex items-center justify-between">
         <h1 className="h1 text-2xl font-black text-white">Catat Pasien</h1>
-        {isFormFilled && (
+        <div className="flex items-center gap-2">
+          {/* Tombol Lonceng Konsulan WhatsApp */}
           <button
             type="button"
-            onClick={handleClearAll}
-            className="rounded-xl bg-rose-500 hover:bg-rose-600 active:scale-95 px-3 py-1.5 text-xs font-bold text-white transition-all cursor-pointer border border-rose-400/40 shadow-sm shadow-rose-950/20 flex items-center gap-1.5 animate-in fade-in zoom-in-95 duration-200"
-            title="Kosongkan seluruh isian formulir"
+            onClick={() => setShowInboxModal(true)}
+            className="relative flex items-center justify-center size-9 rounded-2xl bg-white/15 hover:bg-white/25 active:scale-95 text-white transition-all cursor-pointer border border-white/20 shadow-xs"
+            title="Pesan Konsulan Masuk"
           >
-            <Trash2 size={13} />
-            Hapus
+            <Bell size={18} />
+            {pendingInboxItems.length > 0 && (
+              <span className="absolute -top-1 -right-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-black text-white shadow-md animate-pulse">
+                {pendingInboxItems.length}
+              </span>
+            )}
           </button>
-        )}
+
+          {isFormFilled && (
+            <button
+              type="button"
+              onClick={handleClearAll}
+              className="rounded-xl bg-rose-500 hover:bg-rose-600 active:scale-95 px-3 py-1.5 text-xs font-bold text-white transition-all cursor-pointer border border-rose-400/40 shadow-sm shadow-rose-950/20 flex items-center gap-1.5 animate-in fade-in zoom-in-95 duration-200"
+              title="Kosongkan seluruh isian formulir"
+            >
+              <Trash2 size={13} />
+              Hapus
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Banner Deteksi Pasien Lama / Aktif Realtime */}
@@ -1352,78 +1379,6 @@ export default function Brainstorm() {
             >
               Lepas
             </button>
-          </div>
-        </div>
-      )}
-
-      {/* BANNER ANTREAN KONSULAN MASUK DARI WHATSAPP / BOT */}
-      {pendingInboxItems.length > 0 && (
-        <div className="rounded-3xl p-4 bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 text-white shadow-lg space-y-2.5 animate-in fade-in slide-in-from-top-2 border border-emerald-400/30">
-          <div className="flex items-center justify-between flex-wrap gap-2">
-            <div className="flex items-center gap-2">
-              <span className="size-6 rounded-lg bg-white/20 flex items-center justify-center text-xs">📥</span>
-              <span className="font-extrabold text-xs tracking-wide">
-                {pendingInboxItems.length} Konsulan Masuk dari WhatsApp
-              </span>
-            </div>
-            <div className="flex items-center gap-2">
-              {pendingInboxItems.length > 1 && (
-                <button
-                  type="button"
-                  onClick={handleImportAllInboxItems}
-                  className="px-2.5 py-1 rounded-xl bg-white text-emerald-800 font-extrabold text-[11px] hover:bg-emerald-50 active:scale-95 transition-all cursor-pointer shadow-xs flex items-center gap-1"
-                >
-                  <span>⚡ Gabung Semua ({pendingInboxItems.length})</span>
-                </button>
-              )}
-              <span className="text-[10px] bg-white/20 px-2 py-0.5 rounded-full font-bold">
-                Siap Ditinjau
-              </span>
-            </div>
-          </div>
-
-          <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
-            {pendingInboxItems.map((item) => (
-              <div
-                key={item.id}
-                className="p-2.5 rounded-2xl bg-white/10 hover:bg-white/15 border border-white/20 flex items-center justify-between gap-2 text-xs transition-colors"
-              >
-                <div className="truncate flex-1">
-                  <span className="font-bold">
-                    {item.parsed_data?.nama_depan || item.sender_name || 'Konsul WhatsApp'}
-                  </span>{' '}
-                  <span className="text-white/85 text-[11px]">
-                    {item.parsed_data?.usia ? `(${item.parsed_data.usia}) ` : ''}
-                    {item.parsed_data?.A?.[0]?.nama_diagnosis ||
-                      (item.raw_text ? `"${item.raw_text.substring(0, 45)}${item.raw_text.length > 45 ? '...' : ''}"` : '') ||
-                      item.sender_phone ||
-                      'Konsul WA'}
-                  </span>
-                  {item.attachments && item.attachments.length > 0 && (
-                    <span className="ml-1.5 px-1.5 py-0.5 rounded-full bg-white/20 text-[10px] font-semibold text-emerald-100">
-                      📎 {item.attachments.length} berkas
-                    </span>
-                  )}
-                </div>
-                <div className="flex items-center gap-1.5 shrink-0">
-                  <button
-                    type="button"
-                    onClick={() => handleImportInboxItem(item)}
-                    className="px-3 py-1 rounded-xl bg-white text-emerald-800 font-bold text-[11px] hover:bg-emerald-50 active:scale-95 transition-all cursor-pointer shadow-xs"
-                  >
-                    Tinjau & Impor
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => db.inboxQueue.update(item.id!, { status: 'dismissed' })}
-                    className="p-1 text-white/70 hover:text-white rounded-lg cursor-pointer"
-                    title="Abaikan"
-                  >
-                    <X size={14} />
-                  </button>
-                </div>
-              </div>
-            ))}
           </div>
         </div>
       )}
@@ -2373,6 +2328,156 @@ export default function Brainstorm() {
                 <div className="py-8 text-center text-xs text-ink-muted">
                   <p>Tidak ditemukan pasien yang cocok.</p>
                 </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Inbox Konsulan WhatsApp */}
+      {showInboxModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/60 backdrop-blur-sm p-0 sm:p-4 animate-in fade-in overscroll-contain touch-none select-none"
+          onClick={() => setShowInboxModal(false)}
+        >
+          <div
+            className="flex h-[85dvh] max-h-[680px] w-full max-w-lg flex-col rounded-t-3xl sm:rounded-3xl bg-white shadow-2xl border border-slate-200 overscroll-contain touch-auto select-auto overflow-hidden animate-in zoom-in-95 duration-200"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header Modal */}
+            <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
+              <div>
+                <p className="text-sm font-bold text-slate-900">
+                  Konsultasi Masuk ({pendingInboxItems.length})
+                </p>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Pesan rujukan dari WhatsApp untuk dicatat ke rekam medis
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowInboxModal(false)}
+                aria-label="Tutup"
+                className="cursor-pointer rounded-full p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* Opsi Gabung Semua jika > 1 */}
+            {pendingInboxItems.length > 1 && (
+              <div className="flex items-center justify-between px-5 py-2.5 bg-slate-50 border-b border-slate-100">
+                <span className="text-xs text-slate-600 font-medium">
+                  {pendingInboxItems.length} pesan belum diolah
+                </span>
+                <button
+                  type="button"
+                  onClick={handleImportAllInboxItems}
+                  className="px-3 py-1.5 rounded-xl bg-primary text-white text-xs font-semibold hover:bg-primary-deep active:scale-95 transition-all cursor-pointer shadow-xs"
+                >
+                  Gabung Semua ke Formulir
+                </button>
+              </div>
+            )}
+
+            {/* Daftar Konsulan */}
+            <div className="flex-1 overflow-y-auto p-5 divide-y divide-slate-100 space-y-5">
+              {pendingInboxItems.length === 0 ? (
+                <div className="py-16 text-center space-y-2">
+                  <p className="text-sm font-semibold text-slate-700">Tidak ada konsulan baru</p>
+                  <p className="text-xs text-slate-500 max-w-xs mx-auto leading-relaxed">
+                    Pesan rujukan atau kasus yang dikirim ke grup WhatsApp Doctoid akan otomatis muncul di sini.
+                  </p>
+                </div>
+              ) : (
+                pendingInboxItems.map((item) => (
+                  <div key={item.id} className="pt-5 first:pt-0 space-y-3">
+                    {/* Header item: Pengirim & Waktu */}
+                    <div className="flex items-baseline justify-between gap-2">
+                      <div className="min-w-0">
+                        <span className="text-sm font-bold text-slate-900">
+                          {item.parsed_data?.nama_depan || item.sender_name || 'Konsul Pasien'}
+                        </span>
+                        {item.parsed_data?.usia && (
+                          <span className="ml-1.5 text-xs text-slate-500 font-medium">
+                            ({item.parsed_data.usia})
+                          </span>
+                        )}
+                        {item.sender_phone && (
+                          <span className="ml-2 text-xs text-slate-400">
+                            • {item.sender_phone}
+                          </span>
+                        )}
+                      </div>
+                      {item.created_at && (
+                        <span className="text-[11px] text-slate-400 shrink-0">
+                          {new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Teks Pesan Lengkap — Luas & Mudah Dibaca */}
+                    {item.raw_text && (
+                      <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200/80 text-xs text-slate-800 leading-relaxed whitespace-pre-wrap select-text max-h-60 overflow-y-auto font-sans">
+                        {item.raw_text}
+                      </div>
+                    )}
+
+                    {/* Lampiran Gambar/Dokumen */}
+                    {item.attachments && item.attachments.length > 0 && (
+                      <div className="space-y-1.5">
+                        <span className="text-[11px] font-semibold text-slate-500">
+                          {item.attachments.length} Berkas Lampiran:
+                        </span>
+                        <div className="grid grid-cols-3 gap-2">
+                          {item.attachments.map((att: any, idx: number) => {
+                            const isImg = att.type?.startsWith('image/') || att.dataUrl?.startsWith('data:image/')
+                            return (
+                              <div
+                                key={att.id || idx}
+                                className="relative rounded-xl overflow-hidden border border-slate-200 bg-slate-100 aspect-video flex items-center justify-center text-[11px] text-slate-500 p-1"
+                              >
+                                {isImg && (att.dataUrl || att.url) ? (
+                                  <img
+                                    src={att.dataUrl || att.url}
+                                    alt={att.name || 'Lampiran'}
+                                    className="w-full h-full object-cover"
+                                  />
+                                ) : (
+                                  <span className="truncate px-1 text-center font-medium">
+                                    {att.name || 'Dokumen'}
+                                  </span>
+                                )}
+                              </div>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Tombol Aksi Simpel: Tanpa Kotak Bertumpuk */}
+                    <div className="flex items-center justify-end gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (item.id) {
+                            db.inboxQueue.update(item.id, { status: 'dismissed' })
+                          }
+                        }}
+                        className="px-3 py-1.5 text-xs font-semibold text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer"
+                      >
+                        Abaikan
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleImportInboxItem(item)}
+                        className="px-4 py-1.5 bg-primary hover:bg-primary-deep text-white text-xs font-bold rounded-xl active:scale-95 transition-all cursor-pointer shadow-xs"
+                      >
+                        Gunakan di Rekam Medis
+                      </button>
+                    </div>
+                  </div>
+                ))
               )}
             </div>
           </div>

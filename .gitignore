@@ -25,7 +25,10 @@ dist-ssr
 
 # OTA & APK releases
 .ota-archive
-public/apk/*.apk
+*.apk
+public/*.apk
+public/apk/**
+dist/apk/**
 .firebase
 
 # Keystore & Android Signing Secrets

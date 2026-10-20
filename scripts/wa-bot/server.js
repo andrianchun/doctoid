@@ -10,6 +10,7 @@ import { fileURLToPath } from 'url'
 import QRCode from 'qrcode'
 import qrcodeTerminal from 'qrcode-terminal'
 import pino from 'pino'
+import sharp from 'sharp'
 import makeWASocket, {
   useMultiFileAuthState,
   DisconnectReason,
@@ -120,20 +121,42 @@ async function initBaileys() {
         broadcastState()
         console.log(`\n=====================================================`)
         console.log(`✅ WHATSAPP TERHUBUNG! Pengguna: ${botState.name} (${botState.phone})`)
-        console.log(`🔒 Mode Khusus: Grup "Doctoid" + Chat Diri Sendiri Aktif!`)
+        console.log(`🔒 Mode Khusus: HANYA Grup "Doctoid" Aktif (Chat Pribadi Diabaikan)!`)
         console.log(`=====================================================`)
 
-        // Pre-cache daftar grup yang diikuti dokter
+        // Pre-cache daftar grup yang diikuti dokter & auto-create grup jika belum ada
         try {
           const allGroups = await sock.groupFetchAllParticipating()
+          let foundDoctoGroup = false
           for (const [id, meta] of Object.entries(allGroups)) {
             const isDocto = (meta.subject || '').toLowerCase().includes('docto')
             groupCache.set(id, { name: meta.subject, isDocto })
             if (isDocto) {
+              foundDoctoGroup = true
               console.log(`🎯 Grup Doctoid Terdeteksi: "${meta.subject}" (${id})`)
             }
           }
-        } catch {}
+
+          // Otomatis buatkan grup "Doctoid" jika dokter belum punya grup bernama Doctoid
+          if (!foundDoctoGroup) {
+            console.log(`\n✨ Belum ada grup Doctoid di WhatsApp dokter. Membuat grup "Doctoid" otomatis...`)
+            try {
+              const myCleanJid = sock.user?.id ? sock.user.id.split(':')[0] + '@s.whatsapp.net' : ''
+              const participants = myCleanJid ? [myCleanJid] : []
+              const newGroup = await sock.groupCreate('Doctoid', participants)
+              groupCache.set(newGroup.id, { name: 'Doctoid', isDocto: true })
+              console.log(`🎉 Grup "Doctoid" berhasil dibuat otomatis! (ID: ${newGroup.id})`)
+
+              await sock.sendMessage(newGroup.id, {
+                text: `🩺 *Grup Konsul Medis Docto.id Aktif!*\n\nSelamat datang dokter! Teruskan (forward) pesan konsulan pasien, foto penunjang/lab/EKG, atau video ke grup ini.\n\nSemua pesan di grup ini akan otomatis disaring dan disinkronkan ke rekam medis aplikasi Docto.id.`,
+              })
+            } catch (err) {
+              console.warn('Gagal membuat grup otomatis saat login:', err.message)
+            }
+          }
+        } catch (err) {
+          console.warn('Gagal membaca daftar grup:', err.message)
+        }
       }
     })
 
@@ -154,9 +177,10 @@ async function initBaileys() {
       }
     }
 
-    // Listener Pesan Masuk (HANYA Grup Doctoid & Chat Diri Sendiri)
+    // Listener Pesan Masuk (EKSKLUSIF: HANYA Grup Doctoid!)
     sock.ev.on('messages.upsert', async ({ messages, type }) => {
-      if (!botState.active || type !== 'notify') return
+      if (!botState.active) return
+      if (type !== 'notify' && type !== 'append') return
 
       const myJid = sock.user?.id || ''
       const myPhone = myJid.split(':')[0].split('@')[0].replace(/[^0-9]/g, '')
@@ -165,37 +189,52 @@ async function initBaileys() {
         if (!msg.message) continue
 
         const senderJid = msg.key.remoteJid || ''
-        const remotePhone = senderJid.split(':')[0].split('@')[0].replace(/[^0-9]/g, '')
-
-        // 1. Cek apakah ini chat ke diri sendiri
-        const isSelfChat =
-          Boolean(remotePhone && myPhone && remotePhone === myPhone) ||
-          Boolean(senderJid && myPhone && (senderJid.startsWith(myPhone) || myJid.startsWith(remotePhone)))
-
-        // 2. Cek apakah ini pesan di grup yang mengandung kata "docto" (mis. "Doctoid", "docto.id")
-        const isDoctoGroup = senderJid.endsWith('@g.us') ? await checkIsDoctoGroup(senderJid) : false
-
-        // HANYA terima jika di chat diri sendiri ATAU di grup Doctoid!
-        // Semua grup lain dan chat dari orang lain 100% DIABAIKAN!
-        if (!isSelfChat && !isDoctoGroup) {
+        // Abaikan status/story WA, siaran broadcast, channel newsletter, dan chat personal
+        if (
+          !senderJid ||
+          senderJid === 'status@broadcast' ||
+          senderJid.endsWith('@broadcast') ||
+          senderJid.endsWith('@newsletter') ||
+          senderJid.endsWith('@s.whatsapp.net') // Abaikan semua chat personal/diri sendiri!
+        ) {
           continue
         }
 
-        const sourceLabel = isDoctoGroup ? (groupCache.get(senderJid)?.name || 'Grup Doctoid') : 'Diri Sendiri'
-        console.log(`\n📥 Menerima konsulan baru via [${sourceLabel}]!`)
+        // HANYA terima jika di grup yang mengandung kata "docto" (mis. "Doctoid", "docto.id")!
+        // Semua chat pribadi dan grup lain 100% DIABAIKAN!
+        const isDoctoGroup = senderJid.endsWith('@g.us') ? await checkIsDoctoGroup(senderJid) : false
+        if (!isDoctoGroup) {
+          continue
+        }
+
+        const participantJid = msg.key.participant || msg.participant || ''
+        const participantPhone = participantJid.split(':')[0].split('@')[0].replace(/[^0-9]/g, '')
+        const remotePhone = senderJid.split(':')[0].split('@')[0].replace(/[^0-9]/g, '')
+
+        const groupName = groupCache.get(senderJid)?.name || 'Grup Doctoid'
+        const senderName = `${groupName}${msg.pushName ? ` (${msg.pushName})` : ''}`
+        console.log(`\n📥 Menerima konsulan baru via [${senderName}]!`)
+
+        const m = msg.message
+        const unwrap =
+          m?.ephemeralMessage?.message ||
+          m?.viewOnceMessage?.message ||
+          m?.viewOnceMessageV2?.message ||
+          m?.documentWithCaptionMessage?.message ||
+          m
 
         let textContent =
-          msg.message.conversation ||
-          msg.message.extendedTextMessage?.text ||
-          msg.message.imageMessage?.caption ||
-          msg.message.videoMessage?.caption ||
-          msg.message.documentMessage?.caption ||
+          unwrap?.conversation ||
+          unwrap?.extendedTextMessage?.text ||
+          unwrap?.imageMessage?.caption ||
+          unwrap?.videoMessage?.caption ||
+          unwrap?.documentMessage?.caption ||
           ''
 
-        const isImage = !!msg.message.imageMessage
-        const isVideo = !!msg.message.videoMessage
-        const isAudio = !!msg.message.audioMessage
-        const isDoc = !!msg.message.documentMessage
+        const isImage = !!unwrap?.imageMessage
+        const isVideo = !!unwrap?.videoMessage
+        const isAudio = !!unwrap?.audioMessage
+        const isDoc = !!unwrap?.documentMessage
 
         let mediaDataUrl = ''
         let mediaType = ''
@@ -207,20 +246,32 @@ async function initBaileys() {
             const b64 = buffer.toString('base64')
 
             if (isImage) {
-              mediaType = msg.message.imageMessage.mimetype || 'image/jpeg'
+              mediaType = 'image/jpeg'
               mediaName = 'Foto_Konsul.jpg'
+              try {
+                const comp = await sharp(buffer)
+                  .resize(1000, 1000, { fit: 'inside', withoutEnlargement: true })
+                  .jpeg({ quality: 75 })
+                  .toBuffer()
+                mediaDataUrl = `data:image/jpeg;base64,${comp.toString('base64')}`
+                console.log(`✓ Foto berhasil dikompresi dari ${(buffer.length/1024).toFixed(0)} KB -> ${(comp.length/1024).toFixed(0)} KB`)
+              } catch {
+                mediaDataUrl = `data:image/jpeg;base64,${buffer.toString('base64')}`
+              }
             } else if (isVideo) {
-              mediaType = msg.message.videoMessage.mimetype || 'video/mp4'
+              mediaType = unwrap.videoMessage.mimetype || 'video/mp4'
               mediaName = 'Video_Kejang.mp4'
+              // Video besar tidak di-base64-kan langsung ke JSON agar JSON tetap ringan (<500KB)
+              mediaDataUrl = ''
             } else if (isAudio) {
-              mediaType = msg.message.audioMessage.mimetype || 'audio/ogg'
+              mediaType = unwrap.audioMessage.mimetype || 'audio/ogg'
               mediaName = 'Voice_Note.opus'
+              mediaDataUrl = `data:${mediaType};base64,${buffer.toString('base64')}`
             } else if (isDoc) {
-              mediaType = msg.message.documentMessage.mimetype || 'application/pdf'
-              mediaName = msg.message.documentMessage.fileName || 'Dokumen_Lab.pdf'
+              mediaType = unwrap.documentMessage.mimetype || 'application/pdf'
+              mediaName = unwrap.documentMessage.fileName || 'Dokumen_Lab.pdf'
+              mediaDataUrl = `data:${mediaType};base64,${buffer.toString('base64')}`
             }
-            mediaDataUrl = `data:${mediaType};base64,${b64}`
-            console.log(`✓ Berkas ${mediaName} (${buffer.length} bytes) berhasil diunduh.`)
           }
         } catch (e) {
           console.error('Gagal mengunduh berkas:', e.message)
@@ -242,8 +293,8 @@ async function initBaileys() {
         const inboxItem = {
           id: Date.now(),
           source: 'whatsapp',
-          sender_name: sourceLabel,
-          sender_phone: myPhone || remotePhone,
+          sender_name: senderName,
+          sender_phone: isDoctoGroup && participantPhone ? participantPhone : (myPhone || remotePhone),
           raw_text: textContent,
           parsed_data: parsedData,
           attachments: mediaDataUrl
@@ -294,9 +345,19 @@ async function initBaileys() {
             console.log('✓ Konsulan WhatsApp baru berhasil dicatat ke antrean inbox!')
           }
 
-          fs.writeFileSync(INBOX_JSON_PATH, JSON.stringify(inboxList.slice(0, 50), null, 2), 'utf-8')
+          const trimmedList = inboxList.slice(0, 15)
+          fs.writeFileSync(INBOX_JSON_PATH, JSON.stringify(trimmedList, null, 2), 'utf-8')
+          const distInbox = path.join(ROOT_DIR, 'dist', 'wa-inbox.json')
+          try {
+            if (fs.existsSync(path.dirname(distInbox))) {
+              fs.writeFileSync(distInbox, JSON.stringify(trimmedList, null, 2), 'utf-8')
+            }
+          } catch {}
           botState.lastSync = new Date().toISOString()
           broadcastState()
+
+          // Sinkronisasi otomatis ke Cloud Firestore agar langsung masuk ke APK HP dokter
+          syncInboxToFirestore(trimmedList)
         } catch (err) {
           console.error('Gagal menulis inbox json:', err.message)
         }
@@ -311,8 +372,143 @@ async function initBaileys() {
   }
 }
 
+const USER_UID = 'fOGcJmF0vGR5EKzlN2l9ZR7WPZu1'
+
+async function getAccessToken() {
+  // 1. Coba ambil dari GCP Compute Metadata Server (jika jalan di GCP VM Always-Free / Cloud Run)
+  try {
+    const res = await fetch(
+      'http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token',
+      {
+        headers: { 'Metadata-Flavor': 'Google' },
+        signal: AbortSignal.timeout(1500),
+      }
+    )
+    if (res.ok) {
+      const data = await res.json()
+      if (data.access_token) return data.access_token
+    }
+  } catch {}
+
+  // 2. Fallback: Ambil dari config firebase-tools lokal (laptop developer)
+  try {
+    const os = await import('os')
+    const cfgPath = path.join(os.homedir(), '.config', 'configstore', 'firebase-tools.json')
+    if (fs.existsSync(cfgPath)) {
+      const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'))
+      const tokens = cfg.tokens || {}
+      let accessToken = tokens.access_token
+      if (tokens.expires_at && tokens.expires_at < Date.now() + 60000 && tokens.refresh_token) {
+        const refreshRes = await fetch('https://oauth2.googleapis.com/token', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams({
+            client_id: '563584335869-fgrhgmd47bqnekij5i8b5pr03ho85qd6.apps.googleusercontent.com',
+            grant_type: 'refresh_token',
+            refresh_token: tokens.refresh_token,
+          }),
+        })
+        const refreshData = await refreshRes.json()
+        if (refreshData.access_token) {
+          accessToken = refreshData.access_token
+          tokens.access_token = accessToken
+          tokens.expires_at = Date.now() + (refreshData.expires_in || 3600) * 1000
+          fs.writeFileSync(cfgPath, JSON.stringify(cfg, null, 2), 'utf8')
+        }
+      }
+      return accessToken
+    }
+  } catch {}
+
+  return null
+}
+
+async function syncInboxToFirestore(inboxList) {
+  try {
+    const accessToken = await getAccessToken()
+    if (!accessToken) return
+
+    function toFirestoreValue(val) {
+      if (val === null || val === undefined) return { nullValue: null }
+      if (typeof val === 'string') return { stringValue: val }
+      if (typeof val === 'boolean') return { booleanValue: val }
+      if (typeof val === 'number') {
+        if (Number.isInteger(val)) return { integerValue: String(val) }
+        return { doubleValue: val }
+      }
+      if (Array.isArray(val)) {
+        return { arrayValue: { values: val.map(toFirestoreValue) } }
+      }
+      if (typeof val === 'object') {
+        const fields = {}
+        for (const [k, v] of Object.entries(val)) {
+          if (v !== undefined) fields[k] = toFirestoreValue(v)
+        }
+        return { mapValue: { fields } }
+      }
+      return { stringValue: String(val) }
+    }
+
+    // Ambil maksimal 5 item pending, bersihkan lampiran video besar agar tidak tembus batas 1MB
+    const pendingItems = inboxList
+      .filter((i) => i.status === 'pending')
+      .slice(0, 5)
+      .map((it) => {
+        const clone = JSON.parse(JSON.stringify(it))
+        if (clone.attachments && clone.attachments.length > 0) {
+          clone.attachments = clone.attachments.map((att) => {
+            if (att.dataUrl && att.dataUrl.length > 200000) {
+              return { ...att, dataUrl: '' }
+            }
+            return att
+          })
+        }
+        return clone
+      })
+
+    const payload = {
+      fields: {
+        tables: {
+          mapValue: {
+            fields: {
+              inboxQueue: {
+                arrayValue: {
+                  values: pendingItems.map(toFirestoreValue),
+                },
+              },
+            },
+          },
+        },
+        updatedAt: {
+          integerValue: String(Date.now()),
+        },
+      },
+    }
+
+    const firestoreUrl = `https://firestore.googleapis.com/v1/projects/docto-id/databases/(default)/documents/users/${USER_UID}?updateMask.fieldPaths=tables.inboxQueue&updateMask.fieldPaths=updatedAt`
+
+    const res = await fetch(firestoreUrl, {
+      method: 'PATCH',
+      headers: {
+        Authorization: 'Bearer ' + accessToken,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    })
+
+    if (res.ok) {
+      console.log(`☁️ Konsulan otomatis tersinkron ke Cloud Firestore (langsung muncul di APK HP dokter!)`)
+    } else {
+      const err = await res.json().catch(() => ({}))
+      console.warn('Gagal sync ke Cloud Firestore:', err.error?.message || res.statusText)
+    }
+  } catch (err) {
+    console.warn('Gagal sync ke Cloud Firestore:', err.message)
+  }
+}
+
 // HTTP API Server (Port 3001)
-const server = http.createServer((req, res) => {
+const server = http.createServer(async (req, res) => {
   // CORS Headers
   res.setHeader('Access-Control-Allow-Origin', '*')
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
@@ -445,6 +641,33 @@ const server = http.createServer((req, res) => {
         res.end(JSON.stringify({ error: err.message }))
       }
     })
+    return
+  }
+
+  // POST /api/create-group (Buat grup Doctoid otomatis via tombol antarmuka)
+  if (req.method === 'POST' && url.pathname === '/api/create-group') {
+    if (!sock || !botState.connected) {
+      res.writeHead(400, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ error: 'WhatsApp belum terhubung.' }))
+      return
+    }
+
+    try {
+      const myCleanJid = sock.user?.id ? sock.user.id.split(':')[0] + '@s.whatsapp.net' : ''
+      const participants = myCleanJid ? [myCleanJid] : []
+      const newGroup = await sock.groupCreate('Doctoid', participants)
+      groupCache.set(newGroup.id, { name: 'Doctoid', isDocto: true })
+
+      await sock.sendMessage(newGroup.id, {
+        text: `🩺 *Grup Konsul Medis Docto.id Aktif!*\n\nSelamat datang dokter! Teruskan (forward) pesan konsulan pasien, foto penunjang/lab/EKG, atau video ke grup ini.\n\nSemua pesan di grup ini akan otomatis disaring dan disinkronkan ke rekam medis aplikasi Docto.id.`,
+      })
+
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ success: true, groupId: newGroup.id, name: 'Doctoid' }))
+    } catch (err) {
+      res.writeHead(500, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ error: err.message }))
+    }
     return
   }
 

@@ -9,7 +9,12 @@
     "headers": [
       {
         "source": "**",
-        "headers": [{ "key": "Cache-Control", "value": "no-cache" }]
+        "headers": [
+          { "key": "Cache-Control", "value": "no-cache" },
+          { "key": "Access-Control-Allow-Origin", "value": "*" },
+          { "key": "Access-Control-Allow-Methods", "value": "GET, HEAD, OPTIONS" },
+          { "key": "Access-Control-Allow-Headers", "value": "*" }
+        ]
       },
       {
         "source": "/assets/**",
