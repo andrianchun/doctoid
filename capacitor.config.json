@@ -11,6 +11,9 @@
       "skipNativeAuth": false,
       "providers": ["google.com"]
     },
+    "PushNotifications": {
+      "presentationOptions": ["badge", "sound", "alert"]
+    },
     "CapacitorUpdater": {
       "autoUpdate": false
     }

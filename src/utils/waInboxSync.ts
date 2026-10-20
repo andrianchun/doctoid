@@ -1,9 +1,11 @@
 import { useEffect } from 'react'
 import { Capacitor } from '@capacitor/core'
 import { LocalNotifications } from '@capacitor/local-notifications'
+import { PushNotifications } from '@capacitor/push-notifications'
 import { db } from '../db'
 
 let notifPermissionRequested = false
+let pushRegistered = false
 
 // Inisialisasi Channel Notifikasi Android (High Priority agar muncul pop-up heads-up)
 export async function setupNotificationChannel() {
@@ -24,13 +26,123 @@ export async function setupNotificationChannel() {
   }
 }
 
+// Inisialisasi Real-time Firebase Cloud Messaging (Push Notifications)
+export async function setupPushNotifications() {
+  if (!Capacitor.isNativePlatform() || pushRegistered) return
+  pushRegistered = true
+
+  try {
+    await PushNotifications.createChannel({
+      id: 'wa_inbox_channel',
+      name: 'Konsultasi WhatsApp',
+      description: 'Notifikasi konsulan pasien baru dari WhatsApp',
+      importance: 5,
+      visibility: 1,
+      sound: 'default',
+      vibration: true,
+    })
+
+    let perm = await PushNotifications.checkPermissions()
+    if (perm.receive !== 'granted') {
+      perm = await PushNotifications.requestPermissions()
+    }
+
+    if (perm.receive === 'granted') {
+      await PushNotifications.register()
+    }
+  } catch (err) {
+    console.warn('setupPushNotifications error:', err)
+  }
+}
+
+export async function registerFcmTokenToServer(token: string) {
+  if (!token) return
+
+  try {
+    localStorage.setItem('doctoid_fcm_token', token)
+  } catch {}
+
+  // 1. Kirim langsung ke Gateway VM Port 3001
+  try {
+    const gatewayUrl = localStorage.getItem('doctoid_wa_gateway_url') || 'http://35.255.95.161:3001'
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), 4000)
+    await fetch(`${gatewayUrl}/api/register-fcm-token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token, registered_at: new Date().toISOString() }),
+      signal: controller.signal,
+    })
+    clearTimeout(timer)
+  } catch {}
+
+  // 2. Simpan juga ke Cloud Firestore doctoid/fcm_tokens (Port 443 HTTPS, selalu tembus seluler)
+  try {
+    const firestoreUrl = `https://firestore.googleapis.com/v1/projects/docto-id/databases/(default)/documents/doctoid/fcm_tokens`
+    let existingTokens: string[] = []
+    const getRes = await fetch(`${firestoreUrl}?t=${Date.now()}`)
+    if (getRes.ok) {
+      const gData = await getRes.json()
+      const vals = gData.fields?.tokens?.arrayValue?.values || []
+      existingTokens = vals.map((v: any) => v.stringValue).filter(Boolean)
+    }
+
+    if (!existingTokens.includes(token)) {
+      existingTokens.push(token)
+      if (existingTokens.length > 25) existingTokens = existingTokens.slice(-25)
+
+      const payload = {
+        fields: {
+          tokens: {
+            arrayValue: {
+              values: existingTokens.map((t) => ({ stringValue: t })),
+            },
+          },
+          updatedAt: {
+            integerValue: String(Date.now()),
+          },
+        },
+      }
+
+      await fetch(firestoreUrl, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+    }
+  } catch {}
+}
+
 // Daftarkan listener klik notifikasi agar saat notifikasi di status bar ditekan, langsung membuka modal inbox
 if (typeof window !== 'undefined') {
   try {
     if (Capacitor.isNativePlatform()) {
       setupNotificationChannel()
+      setupPushNotifications()
+
       LocalNotifications.addListener('localNotificationActionPerformed', () => {
         window.location.hash = '#/catat'
+        window.dispatchEvent(new CustomEvent('doctoid_open_wa_inbox'))
+      })
+
+      PushNotifications.addListener('registration', async (token) => {
+        console.log('📱 FCM Device Token terdaftar:', token.value)
+        await registerFcmTokenToServer(token.value)
+      })
+
+      PushNotifications.addListener('registrationError', (error) => {
+        console.warn('⚠️ FCM Registration Error:', error)
+      })
+
+      PushNotifications.addListener('pushNotificationReceived', (notification) => {
+        console.log('📩 Push notification masuk saat app terbuka:', notification)
+        syncWaInboxToDexie()
+      })
+
+      PushNotifications.addListener('pushNotificationActionPerformed', (notification) => {
+        console.log('👆 Push notification ditekan di status bar / lockscreen:', notification)
+        window.location.hash = '#/catat'
+        syncWaInboxToDexie()
         window.dispatchEvent(new CustomEvent('doctoid_open_wa_inbox'))
       })
     }
@@ -217,6 +329,7 @@ export function useWaInboxSync(intervalMs = 4000) {
     // Minta izin notifikasi sejak dini agar konsulan berikutnya tidak terhambat popup sistem
     if (Capacitor.isNativePlatform()) {
       setupNotificationChannel()
+      setupPushNotifications()
       LocalNotifications.checkPermissions()
         .then((status) => {
           if (status.display !== 'granted') {

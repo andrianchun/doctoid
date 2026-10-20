@@ -374,6 +374,9 @@ async function initBaileys() {
 
           // Sinkronisasi otomatis ke Cloud Firestore agar langsung masuk ke APK HP dokter
           syncInboxToFirestore(trimmedList)
+
+          // Picu FCM Push Notification Real-time ke HP Dokter (Status Bar & Lockscreen)
+          triggerFcmNotificationDebounced(recentItem || inboxItem, 2500)
         } catch (err) {
           console.error('Gagal menulis inbox json:', err.message)
         }
@@ -518,6 +521,133 @@ async function syncInboxToFirestore(inboxList) {
   }
 }
 
+// ============================================================================
+// Firebase Cloud Messaging (FCM) Real-time Push Notification Handler
+// ============================================================================
+const FCM_TOKENS_PATH = path.join(PUBLIC_DIR, 'wa-fcm-tokens.json')
+
+function getLocalFcmTokens() {
+  if (fs.existsSync(FCM_TOKENS_PATH)) {
+    try {
+      return JSON.parse(fs.readFileSync(FCM_TOKENS_PATH, 'utf-8'))
+    } catch {}
+  }
+  return []
+}
+
+function saveLocalFcmTokens(tokens) {
+  try {
+    fs.writeFileSync(FCM_TOKENS_PATH, JSON.stringify(tokens, null, 2), 'utf-8')
+  } catch {}
+}
+
+async function getAllFcmTokens() {
+  const tokenSet = new Set(getLocalFcmTokens())
+  try {
+    const firestoreUrl = `https://firestore.googleapis.com/v1/projects/docto-id/databases/(default)/documents/doctoid/fcm_tokens`
+    const res = await fetch(firestoreUrl)
+    if (res.ok) {
+      const data = await res.json()
+      const vals = data.fields?.tokens?.arrayValue?.values || []
+      for (const v of vals) {
+        if (v.stringValue) tokenSet.add(v.stringValue)
+      }
+    }
+  } catch {}
+  return Array.from(tokenSet)
+}
+
+async function sendFcmPushNotification(item) {
+  try {
+    const accessToken = await getAccessToken()
+    if (!accessToken) {
+      console.warn('⚠️ FCM: Akses token tidak tersedia, lewati push notification.')
+      return
+    }
+
+    const tokens = await getAllFcmTokens()
+    if (!tokens || tokens.length === 0) {
+      console.log('ℹ️ FCM: Belum ada device token yang terdaftar.')
+      return
+    }
+
+    const patientName = item.parsed_data?.nama_depan || item.sender_name || 'Konsul Pasien Baru'
+    const age = item.parsed_data?.usia ? ` (${item.parsed_data.usia})` : ''
+    const title = `Konsul WhatsApp: ${patientName}${age}`
+    const snippet = item.raw_text
+      ? item.raw_text.replace(/\n+/g, ' ').slice(0, 140)
+      : 'Pesan konsulan baru masuk dari WhatsApp.'
+
+    console.log(`📡 Menembakkan FCM Real-time Push ke ${tokens.length} perangkat HP dokter...`)
+
+    const validTokens = []
+    for (const token of tokens) {
+      try {
+        const payload = {
+          message: {
+            token: token,
+            notification: {
+              title: title,
+              body: snippet,
+            },
+            data: {
+              inboxId: String(item.id || Date.now()),
+              action: 'open_wa_inbox',
+            },
+            android: {
+              priority: 'high',
+              notification: {
+                channel_id: 'wa_inbox_channel',
+                sound: 'default',
+                default_vibrate_timings: true,
+                default_sound: true,
+                priority: 'high',
+                visibility: 'public',
+              },
+            },
+          },
+        }
+
+        const res = await fetch('https://fcm.googleapis.com/v1/projects/docto-id/messages:send', {
+          method: 'POST',
+          headers: {
+            Authorization: 'Bearer ' + accessToken,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(payload),
+        })
+
+        if (res.ok) {
+          const resData = await res.json()
+          console.log(`✓ FCM sukses terkirim ke HP:`, resData.name)
+          validTokens.push(token)
+        } else {
+          const errData = await res.json().catch(() => ({}))
+          console.warn(`⚠️ FCM gagal ke token ${token.slice(0, 12)}...:`, errData.error?.message || res.statusText)
+          if (errData.error?.status !== 'NOT_FOUND' && errData.error?.details?.[0]?.errorCode !== 'UNREGISTERED') {
+            validTokens.push(token)
+          }
+        }
+      } catch (tokenErr) {
+        console.warn('⚠️ FCM network error:', tokenErr.message)
+        validTokens.push(token)
+      }
+    }
+
+    saveLocalFcmTokens(validTokens)
+  } catch (err) {
+    console.warn('⚠️ sendFcmPushNotification gagal:', err.message)
+  }
+}
+
+let fcmPushTimer = null
+function triggerFcmNotificationDebounced(item, delayMs = 2500) {
+  if (fcmPushTimer) clearTimeout(fcmPushTimer)
+  fcmPushTimer = setTimeout(() => {
+    sendFcmPushNotification(item)
+  }, delayMs)
+}
+
 // HTTP API Server (Port 3001)
 const server = http.createServer(async (req, res) => {
   // CORS Headers
@@ -550,6 +680,46 @@ const server = http.createServer(async (req, res) => {
     }
     res.writeHead(200, { 'Content-Type': 'application/json' })
     res.end(JSON.stringify(inboxList))
+    return
+  }
+
+  // POST /api/register-fcm-token (Pendaftaran Device Push Token dari APK Dokter)
+  if (req.method === 'POST' && url.pathname === '/api/register-fcm-token') {
+    let body = ''
+    req.on('data', (chunk) => (body += chunk))
+    req.on('end', () => {
+      try {
+        const { token } = JSON.parse(body || '{}')
+        if (token && typeof token === 'string') {
+          const currentTokens = new Set(getLocalFcmTokens())
+          currentTokens.add(token)
+          saveLocalFcmTokens(Array.from(currentTokens))
+          console.log(`📱 FCM Device Token terdaftar di gateway: ${token.slice(0, 16)}... (Total: ${currentTokens.size})`)
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: true, count: currentTokens.size }))
+          return
+        }
+        res.writeHead(400, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Token is required' }))
+      } catch (e) {
+        res.writeHead(500, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: e.message }))
+      }
+    })
+    return
+  }
+
+  // POST /api/test-push (Trigger uji coba Push Notification ke seluruh perangkat)
+  if (req.method === 'POST' && url.pathname === '/api/test-push') {
+    const dummyItem = {
+      id: Date.now(),
+      sender_name: 'Tes Dokter Jaga',
+      raw_text: 'Tes notifikasi darurat konsul real-time Docto.id',
+      parsed_data: { nama_depan: 'Pasien Uji Coba', usia: '35 th' },
+    }
+    await sendFcmPushNotification(dummyItem)
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ success: true, message: 'Push notification triggered' }))
     return
   }
 
