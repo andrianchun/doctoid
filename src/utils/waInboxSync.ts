@@ -188,11 +188,15 @@ export async function syncWaInboxToDexie() {
         // Picu notifikasi di Notification Bar HP
         sendLocalNotification(item)
       } else if (existing.status === 'pending') {
-        // Jika item masih pending dan ada penambahan teks/lampiran dari pengelompokan gateway
+        // Jika item masih pending dan ada pembaruan teks atau data lampiran yang lebih lengkap / valid
         const newAttachCount = item.attachments?.length || 0
         const oldAttachCount = existing.attachments?.length || 0
         const textChanged = Boolean(item.raw_text && item.raw_text !== existing.raw_text)
-        if (newAttachCount > oldAttachCount || textChanged) {
+        const existingDataLen = (existing.attachments?.[0]?.dataUrl || '').length
+        const incomingDataLen = (item.attachments?.[0]?.dataUrl || '').length
+        const attachUpdated = newAttachCount !== oldAttachCount || (incomingDataLen > existingDataLen)
+
+        if (newAttachCount > 0 && (attachUpdated || textChanged)) {
           await db.inboxQueue.update(existing.id!, {
             raw_text: item.raw_text || existing.raw_text,
             attachments: item.attachments || existing.attachments,
