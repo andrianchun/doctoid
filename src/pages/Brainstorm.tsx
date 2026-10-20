@@ -170,7 +170,6 @@ export default function Brainstorm() {
     // 1. Ekstrak otomatis struktur SOAP dari teks mentah jika ada
     let parsedSoapData: Partial<FormState> = {}
     if (item.raw_text) {
-      setRaw(item.raw_text)
       try {
         const { data, success } = localParse(item.raw_text, regexRules)
         if (success) {
@@ -186,9 +185,14 @@ export default function Brainstorm() {
             A: data.A && data.A.length > 0 ? data.A : form.A,
             P: data.P && data.P.length > 0 ? data.P : form.P,
           }
+        } else if (!item.parsed_data) {
+          parsedSoapData = { S: item.raw_text }
         }
       } catch (err) {
         console.warn('Auto parse inbox failed, falling back:', err)
+        if (!item.parsed_data) {
+          parsedSoapData = { S: item.raw_text }
+        }
       }
     }
 
@@ -210,6 +214,9 @@ export default function Brainstorm() {
     } else if (Object.keys(parsedSoapData).length > 0) {
       set(parsedSoapData)
     }
+
+    // Bersihkan prompt box bawah agar tidak menduplikasi teks yang sudah masuk ke form
+    setRaw('')
 
     if (item.attachments && item.attachments.length > 0) {
       setAttachments((prev) => [...prev, ...(item.attachments! as any)])
@@ -238,7 +245,28 @@ export default function Brainstorm() {
     }
 
     if (rawTexts.length > 0) {
-      setRaw((prev) => (prev ? `${prev}\n\n${rawTexts.join('\n\n')}` : rawTexts.join('\n\n')))
+      const combined = rawTexts.join('\n\n')
+      try {
+        const { data, success } = localParse(combined, regexRules)
+        if (success) {
+          set({
+            nama_depan: data.nama_depan || form.nama_depan,
+            usia: data.usia || form.usia,
+            no_rm: data.no_rm || form.no_rm,
+            jaminan: (data.jaminan as any) || form.jaminan,
+            S: data.S || form.S,
+            O_pemfis: data.O_pemfis || form.O_pemfis,
+            O_penunjang: data.O_penunjang || form.O_penunjang,
+            A: data.A && data.A.length > 0 ? data.A : form.A,
+            P: data.P && data.P.length > 0 ? data.P : form.P,
+          })
+        } else if (!form.S) {
+          set({ S: combined })
+        }
+      } catch {
+        if (!form.S) set({ S: combined })
+      }
+      setRaw('')
     }
     if (allAttachments.length > 0) {
       setAttachments((prev) => [...prev, ...(allAttachments as any)])
@@ -350,7 +378,30 @@ export default function Brainstorm() {
   const applyIncomingShare = useCallback(
     (data: ShareDataPayload) => {
       if (data.text && data.text.trim()) {
-        setRaw((prev) => (prev ? prev + '\n' + data.text!.trim() : data.text!.trim()))
+        const text = data.text.trim()
+        try {
+          const { data: parsed, success } = localParse(text, regexRules)
+          if (success) {
+            setForm((prev) => ({
+              ...prev,
+              title: (parsed.title as any) || (parsed.nama_depan?.match(/^(?:dr\.|Tn\.|Ny\.|Sdr\.|Sdri\.|An\.|By\.)/i)?.[0] as any) || prev.title,
+              nama_depan: parsed.nama_depan || prev.nama_depan,
+              usia: parsed.usia || prev.usia,
+              no_rm: parsed.no_rm || prev.no_rm,
+              jaminan: (parsed.jaminan as any) || prev.jaminan,
+              S: parsed.S || prev.S,
+              O_pemfis: parsed.O_pemfis || prev.O_pemfis,
+              O_penunjang: parsed.O_penunjang || prev.O_penunjang,
+              A: parsed.A && parsed.A.length > 0 ? parsed.A : prev.A,
+              P: parsed.P && parsed.P.length > 0 ? parsed.P : prev.P,
+            }))
+          } else {
+            setForm((prev) => ({ ...prev, S: prev.S ? `${prev.S}\n\n${text}` : text }))
+          }
+        } catch {
+          setForm((prev) => ({ ...prev, S: prev.S ? `${prev.S}\n\n${text}` : text }))
+        }
+        setRaw('')
       }
       if (data.images && data.images.length > 0) {
         setAttachments((prev) => [
@@ -372,7 +423,7 @@ export default function Brainstorm() {
       }
       notify('📥 Berkas / pesan dari WhatsApp berhasil diterima ✓')
     },
-    []
+    [regexRules]
   )
 
   useEffect(() => {
@@ -404,11 +455,34 @@ export default function Brainstorm() {
     const urlParams = new URLSearchParams(window.location.search)
     const sharedText = urlParams.get('text') || urlParams.get('title')
     if (sharedText) {
-      setRaw((prev) => (prev ? prev + '\n' + sharedText : sharedText))
+      const text = sharedText.trim()
+      try {
+        const { data: parsed, success } = localParse(text, regexRules)
+        if (success) {
+          setForm((prev) => ({
+            ...prev,
+            title: (parsed.title as any) || (parsed.nama_depan?.match(/^(?:dr\.|Tn\.|Ny\.|Sdr\.|Sdri\.|An\.|By\.)/i)?.[0] as any) || prev.title,
+            nama_depan: parsed.nama_depan || prev.nama_depan,
+            usia: parsed.usia || prev.usia,
+            no_rm: parsed.no_rm || prev.no_rm,
+            jaminan: (parsed.jaminan as any) || prev.jaminan,
+            S: parsed.S || prev.S,
+            O_pemfis: parsed.O_pemfis || prev.O_pemfis,
+            O_penunjang: parsed.O_penunjang || prev.O_penunjang,
+            A: parsed.A && parsed.A.length > 0 ? parsed.A : prev.A,
+            P: parsed.P && parsed.P.length > 0 ? parsed.P : prev.P,
+          }))
+        } else {
+          setForm((prev) => ({ ...prev, S: prev.S ? `${prev.S}\n\n${text}` : text }))
+        }
+      } catch {
+        setForm((prev) => ({ ...prev, S: prev.S ? `${prev.S}\n\n${text}` : text }))
+      }
+      setRaw('')
       notify('📥 Menerima teks konsul dari kiriman luar')
       window.history.replaceState({}, document.title, window.location.pathname + window.location.hash)
     }
-  }, [])
+  }, [regexRules])
 
   // Autosave draft (debounced) tiap ada perubahan, supaya pindah tab gak ngilangin isian
   useEffect(() => {

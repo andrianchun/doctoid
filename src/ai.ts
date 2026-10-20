@@ -13,12 +13,18 @@ class APIError extends Error {
 }
 
 function getAllKeys(): string[] {
-  const local = localStorage.getItem('doctoid_openai_key')
+  const geminiLocal = localStorage.getItem('doctoid_gemini_key')
+  const aiLocal = localStorage.getItem('doctoid_ai_key')
+  const openaiLocal = localStorage.getItem('doctoid_openai_key')
   const envKeys = import.meta.env.AI_SHARED_KEYS?.split(',') || []
-  const allKeys = []
+  const viteGemini = (import.meta.env as any).VITE_GEMINI_API_KEY
+  const allKeys: string[] = []
+  if (geminiLocal) allKeys.push(geminiLocal)
+  if (aiLocal) allKeys.push(aiLocal)
+  if (viteGemini) allKeys.push(viteGemini)
   allKeys.push(...envKeys)
-  if (local) allKeys.push(local)
-  return allKeys.filter(k => !!k.trim())
+  if (openaiLocal) allKeys.push(openaiLocal)
+  return Array.from(new Set(allKeys.map((k) => k.trim()))).filter((k) => !!k)
 }
 
 function getProvider(key: string): 'openai' | 'google' | 'anthropic' {
@@ -28,11 +34,13 @@ function getProvider(key: string): 'openai' | 'google' | 'anthropic' {
   return 'google'
 }
 
-/* Fase Hemat Token: Gemini Flash dicoba dulu (termurah), baru OpenAI gpt-4o-mini */
+/* Fase Hemat Token & Kecepatan: Google Gemini Flash selalu prioritas #1 (kuota token melimpah & latensi rendah), baru OpenAI gpt-4o-mini */
 const PROVIDER_COST_TIER: Record<string, number> = { google: 0, openai: 1, anthropic: 2 }
 function cheapestFirst(keys: string[]): string[] {
-  return [...keys].sort((a, b) => PROVIDER_COST_TIER[getProvider(a)] - PROVIDER_COST_TIER[getProvider(b)])
+  return [...keys].sort((a, b) => (PROVIDER_COST_TIER[getProvider(a)] ?? 99) - (PROVIDER_COST_TIER[getProvider(b)] ?? 99))
 }
+
+const GOOGLE_MODELS = ['gemini-3.5-flash', 'gemini-flash-latest', 'gemini-3.8-flash']
 
 function getPplxKeys(): string[] {
   const local = localStorage.getItem('doctoid_pplx_key')
@@ -128,7 +136,7 @@ export async function rapikan(text: string, attachments: { type: string; dataUrl
         })
       } else {
         // Google Gemini model fallback chain - Multimodal (Teks, Foto, Audio VN, Video Kejang, PDF Lab)
-        const googleModels = ['gemini-3.5-flash', 'gemini-1.5-flash', 'gemini-flash-latest']
+        const googleModels = GOOGLE_MODELS
         const parts: any[] = [{ text: systemPrompt + '\n\n[INPUT KASUS]\n' + (sanitizedText || 'Tolong rapikan media/data klinis ini sesuai schema JSON.') }]
         for (const att of attachments) {
           if (
@@ -151,6 +159,7 @@ export async function rapikan(text: string, attachments: { type: string; dataUrl
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               contents: [{ parts }],
+              generationConfig: { responseMimeType: 'application/json' },
             }),
           })
           const isLastModel = mIdx === googleModels.length - 1
@@ -230,7 +239,7 @@ export async function analisisKasus(formStateStr: string): Promise<AnalisisResul
           }),
         })
       } else if (provider === 'google') {
-        const googleModels = ['gemini-3.5-flash', 'gemini-1.5-flash', 'gemini-flash-latest']
+        const googleModels = GOOGLE_MODELS
         for (let mIdx = 0; mIdx < googleModels.length; mIdx++) {
           const model = googleModels[mIdx]
           res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`, {
@@ -252,10 +261,9 @@ export async function analisisKasus(formStateStr: string): Promise<AnalisisResul
 
       if (!res || !res.ok) {
         const txt = res ? await res.text() : 'No response from AI'
-        const err = new Error(txt)
-        ;(err as any).status = res?.status
-        ;(err as any).name = 'APIError'
-        throw err
+        let errMsg = txt
+        try { errMsg = JSON.parse(txt).error?.message || txt } catch {}
+        throw new APIError(res?.status || 500, formatError(res?.status || 500, errMsg, provider === 'openai' ? 'OpenAI' : 'Gemini'))
       }
 
       const data = await res.json()
@@ -318,7 +326,7 @@ export async function chatPasien(messages: ChatMsg[], konteksPasien: string): Pr
           role: m.role === 'assistant' ? 'model' : 'user',
           parts: [{ text: m.content }]
         }))
-        const googleModels = ['gemini-3.5-flash', 'gemini-1.5-flash', 'gemini-flash-latest']
+        const googleModels = GOOGLE_MODELS
         for (let mIdx = 0; mIdx < googleModels.length; mIdx++) {
           const model = googleModels[mIdx]
           res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`, {
@@ -473,7 +481,7 @@ Aturan ekstraksi:
           }),
         })
       } else {
-        const googleModels = ['gemini-2.5-flash', 'gemini-1.5-flash', 'gemini-flash-latest']
+        const googleModels = GOOGLE_MODELS
         const b64 = attachment.dataUrl.split(',')[1]
         const parts: any[] = [
           { text: promptText },
@@ -485,7 +493,10 @@ Aturan ekstraksi:
           res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ contents: [{ parts }] }),
+            body: JSON.stringify({
+              contents: [{ parts }],
+              generationConfig: { responseMimeType: 'application/json' },
+            }),
           })
           const isLastModel = mIdx === googleModels.length - 1
           if (res && (res.status === 404 || res.status === 400 || res.status === 403 || res.status === 503) && !isLastModel) {
