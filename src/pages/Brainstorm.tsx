@@ -1493,10 +1493,10 @@ export default function Brainstorm() {
         {/* Baris 3: Tgl Onset & Tgl MRS */}
         <div className="grid grid-cols-2 gap-2">
           <div>
-            <div className="flex items-center justify-between mb-1">
+            <div className="h-5 flex items-center justify-between mb-1">
               <label className="block text-xs font-bold text-slate-700">Tgl Onset</label>
               {form.tgl_onset && (
-                <span className="caption text-xs font-extrabold text-amber-900 bg-amber-100 border border-amber-300/80 px-1.5 py-0.5 rounded-md shadow-2xs">
+                <span className="text-[11px] font-semibold text-slate-500 italic">
                   OH-{hariKe(form.tgl_onset)}
                 </span>
               )}
@@ -1508,10 +1508,10 @@ export default function Brainstorm() {
             />
           </div>
           <div>
-            <div className="flex items-center justify-between mb-1">
+            <div className="h-5 flex items-center justify-between mb-1">
               <label className="block text-xs font-bold text-slate-700">Tgl MRS</label>
               {form.tgl_mrs && (
-                <span className="caption text-xs font-extrabold text-emerald-900 bg-emerald-100 border border-emerald-300/80 px-1.5 py-0.5 rounded-md shadow-2xs">
+                <span className="text-[11px] font-semibold text-slate-500 italic">
                   P-{hariKe(form.tgl_mrs)}
                 </span>
               )}
