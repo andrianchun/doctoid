@@ -2648,9 +2648,40 @@ export default function Brainstorm() {
           onClick={() => !importingInboxId && setShowInboxModal(false)}
         >
           <div
-            className="flex h-[85dvh] max-h-[680px] w-full max-w-lg flex-col rounded-t-3xl sm:rounded-3xl bg-white shadow-2xl border border-slate-200 overscroll-contain touch-auto select-auto overflow-hidden animate-in zoom-in-95 duration-200"
+            className="relative flex h-[85dvh] max-h-[680px] w-full max-w-lg flex-col rounded-t-3xl sm:rounded-3xl bg-white shadow-2xl border border-slate-200 overscroll-contain touch-auto select-auto overflow-hidden animate-in zoom-in-95 duration-200"
             onClick={(e) => e.stopPropagation()}
           >
+            {/* Centered Loading Overlay saat Import Konsulan */}
+            {importingInboxId && (
+              <div className="absolute inset-0 z-30 flex items-center justify-center bg-white/90 backdrop-blur-xs p-6 animate-in fade-in duration-200">
+                <div className="w-full max-w-xs p-6 space-y-4 text-center animate-in zoom-in-95 duration-200">
+                  <div className="w-12 h-12 mx-auto rounded-2xl bg-teal-50 border border-teal-100 flex items-center justify-center text-primary shadow-xs">
+                    <Loader2 className="w-6 h-6 animate-spin text-primary" />
+                  </div>
+
+                  <div className="space-y-1">
+                    <h4 className="text-sm font-bold text-slate-900">Memproses Rekam Medis</h4>
+                    <p className="text-xs text-slate-500 leading-relaxed px-1">
+                      {importStepText || 'Sedang memproses lampiran & data konsul...'}
+                    </p>
+                  </div>
+
+                  <div className="space-y-1.5 pt-1">
+                    <div className="flex justify-between items-center text-xs font-semibold">
+                      <span className="text-slate-400 font-normal">Progres Analisis</span>
+                      <span className="font-mono text-primary font-bold">{Math.floor(importProgress)}%</span>
+                    </div>
+                    <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-primary transition-all duration-200 ease-out rounded-full shadow-xs"
+                        style={{ width: `${Math.max(importProgress, 5)}%` }}
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Header Modal */}
             <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
               <div className="flex items-center gap-2">
@@ -2830,51 +2861,31 @@ export default function Brainstorm() {
                         </div>
                       )}
 
-                      {/* Tombol Aksi Simpel atau Progress Bar Ala Darka */}
-                      {importingInboxId === (item.id || item.created_at) ? (
-                        <div className="w-full mt-2 p-3 bg-slate-50 border border-primary/20 rounded-2xl space-y-2 animate-in fade-in duration-200">
-                          <div className="flex items-center gap-2 text-xs">
-                            <Loader2 className="w-3.5 h-3.5 text-primary animate-spin shrink-0" />
-                            <span className="font-semibold text-slate-800 truncate">
-                              {importStepText || 'Sedang memproses lampiran & data konsul...'}
-                            </span>
-                            <span className="ml-auto text-xs font-mono text-primary font-bold">
-                              {Math.floor(importProgress)}%
-                            </span>
-                          </div>
-                          <div className="w-full h-1.5 bg-slate-200/80 rounded-full overflow-hidden">
-                            <div
-                              className="h-full bg-primary transition-all duration-200 ease-out rounded-full shadow-xs"
-                              style={{ width: `${Math.max(importProgress, 4)}%` }}
-                            />
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="flex items-center justify-end gap-2 pt-1">
-                          <button
-                            type="button"
-                            disabled={Boolean(importingInboxId)}
-                            onClick={() => {
-                              dismissInboxItem(item.id || item.created_at)
-                            }}
-                            className={`px-3 py-1.5 text-xs font-semibold rounded-xl transition-colors cursor-pointer ${
-                              importingInboxId ? 'opacity-40 pointer-events-none text-slate-400' : 'text-slate-500 hover:text-red-600 hover:bg-red-50'
-                            }`}
-                          >
-                            Hapus
-                          </button>
-                          <button
-                            type="button"
-                            disabled={Boolean(importingInboxId)}
-                            onClick={() => handleImportInboxItem(item)}
-                            className={`px-4 py-1.5 bg-primary text-white text-xs font-bold rounded-xl active:scale-95 transition-all cursor-pointer shadow-xs ${
-                              importingInboxId ? 'opacity-40 pointer-events-none' : 'hover:bg-primary-deep'
-                            }`}
-                          >
-                            Catat Pasien
-                          </button>
-                        </div>
-                      )}
+                      {/* Tombol Aksi */}
+                      <div className="flex items-center justify-end gap-2 pt-1">
+                        <button
+                          type="button"
+                          disabled={Boolean(importingInboxId)}
+                          onClick={() => {
+                            dismissInboxItem(item.id || item.created_at)
+                          }}
+                          className={`px-3 py-1.5 text-xs font-semibold rounded-xl transition-colors cursor-pointer ${
+                            importingInboxId ? 'opacity-40 pointer-events-none text-slate-400' : 'text-slate-500 hover:text-red-600 hover:bg-red-50'
+                          }`}
+                        >
+                          Abaikan
+                        </button>
+                        <button
+                          type="button"
+                          disabled={Boolean(importingInboxId)}
+                          onClick={() => handleImportInboxItem(item)}
+                          className={`px-4 py-1.5 bg-primary text-white text-xs font-bold rounded-xl active:scale-95 transition-all cursor-pointer shadow-xs ${
+                            importingInboxId ? 'opacity-40 pointer-events-none' : 'hover:bg-primary-deep'
+                          }`}
+                        >
+                          Gunakan di Rekam Medis
+                        </button>
+                      </div>
                     </div>
                   )
                 })
