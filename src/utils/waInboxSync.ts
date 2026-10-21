@@ -483,53 +483,37 @@ export async function syncWaInboxToDexie() {
     let items: any[] = []
     let serverResponded = false
 
-    // 1. Coba hubungi Gateway VM langsung (Port 3001) dengan timeout 3.5s
-    try {
-      const gatewayUrl =
-        localStorage.getItem('doctoid_wa_gateway_url') || 'http://35.255.95.161:3001'
+    // Rute Cepat Paralel: Coba Firestore HTTPS (Port 443) & Gateway VM secara simultan
+    // Siapa yang pertama selesai (<200ms) langsung dipakai tanpa jeda tunggu timeout!
+    const USER_UID = 'fOGcJmF0vGR5EKzlN2l9ZR7WPZu1'
+    const firestoreUrl = `https://firestore.googleapis.com/v1/projects/docto-id/databases/(default)/documents/doctoid/inbox_${USER_UID}?t=${Date.now()}`
+    const gatewayUrl = localStorage.getItem('doctoid_wa_gateway_url') || 'http://35.255.95.161:3001'
 
-      const controller = new AbortController()
-      const timer = setTimeout(() => controller.abort(), 3500)
-      const res = await fetch(`${gatewayUrl}/api/inbox?t=${Date.now()}`, { signal: controller.signal })
-      clearTimeout(timer)
-      if (res.ok) {
-        items = await res.json()
-        serverResponded = true
-      }
-    } catch {}
-
-    // 2. Fallback: Cloud Firestore REST API langsung (Port 443 HTTPS, selalu tembus operator seluler & PWA)
-    if (!serverResponded) {
-      try {
-        const USER_UID = 'fOGcJmF0vGR5EKzlN2l9ZR7WPZu1'
-        const firestoreUrl = `https://firestore.googleapis.com/v1/projects/docto-id/databases/(default)/documents/doctoid/inbox_${USER_UID}?t=${Date.now()}`
-        const fRes = await fetch(firestoreUrl)
-        if (fRes.ok) {
-          const fData = await fRes.json()
-          const vals = fData.fields?.items?.arrayValue?.values || []
-          items = vals.map((v: any) => fromFirestoreMap(v.mapValue?.fields || {}))
-          serverResponded = true
-        }
-      } catch {}
+    const fetchFirestore = async (): Promise<any[]> => {
+      const fRes = await fetch(firestoreUrl, { signal: AbortSignal.timeout(2000) })
+      if (!fRes.ok) throw new Error('Firestore failed')
+      const fData = await fRes.json()
+      const vals = fData.fields?.items?.arrayValue?.values || []
+      return vals.map((v: any) => fromFirestoreMap(v.mapValue?.fields || {}))
     }
 
-    // 3. Fallback: File JSON cloud dari Firebase Hosting
-    if (!serverResponded) {
+    const fetchGateway = async (): Promise<any[]> => {
+      const gRes = await fetch(`${gatewayUrl}/api/inbox?t=${Date.now()}`, { signal: AbortSignal.timeout(1000) })
+      if (!gRes.ok) throw new Error('Gateway failed')
+      return await gRes.json()
+    }
+
+    try {
+      items = await Promise.any([fetchFirestore(), fetchGateway()])
+      serverResponded = true
+    } catch {
       try {
-        const res = await fetch(`https://docto-id.web.app/wa-inbox.json?t=${Date.now()}`)
+        const res = await fetch(`https://docto-id.web.app/wa-inbox.json?t=${Date.now()}`, { signal: AbortSignal.timeout(1500) })
         if (res.ok) {
           items = await res.json()
           serverResponded = true
         }
-      } catch {
-        try {
-          const res = await fetch(`/wa-inbox.json?t=${Date.now()}`)
-          if (res.ok) {
-            items = await res.json()
-            serverResponded = true
-          }
-        } catch {}
-      }
+      } catch {}
     }
 
     if (!serverResponded || !Array.isArray(items)) return
@@ -605,7 +589,7 @@ export async function syncWaInboxToDexie() {
   }
 }
 
-export function useWaInboxSync(intervalMs = 4000) {
+export function useWaInboxSync(intervalMs = 2500) {
   useEffect(() => {
     let isCancelled = false
 

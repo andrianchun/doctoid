@@ -546,10 +546,7 @@ async function initBaileys() {
           syncInboxToFirestore(trimmedList)
 
           // Picu FCM Push Notification Real-time ke HP Dokter (Status Bar & Lockscreen)
-          // Hanya picu jika pesan BUKAN dari dokter sendiri agar dokter tidak dibombardir notifikasi saat membalas/mengetes chat
-          if (!isFromDoctor) {
-            triggerFcmNotificationDebounced(recentItem || inboxItem, 2500)
-          }
+          triggerFcmNotificationDebounced(recentItem || inboxItem, 300)
         } catch (err) {
           console.error('Gagal menulis inbox json:', err.message)
         }
@@ -786,6 +783,7 @@ async function sendFcmPushNotification(item) {
             },
             android: {
               priority: 'HIGH',
+              ttl: '300s',
               notification: {
                 tag: 'wa_inbox_' + (item.id || 'active'),
                 icon: 'ic_stat_doctoid',
@@ -794,7 +792,7 @@ async function sendFcmPushNotification(item) {
                 sound: 'default',
                 default_vibrate_timings: true,
                 default_sound: true,
-                notification_priority: 'PRIORITY_HIGH',
+                notification_priority: 'PRIORITY_MAX',
                 visibility: 'PUBLIC',
               },
             },
@@ -834,7 +832,7 @@ async function sendFcmPushNotification(item) {
 }
 
 let fcmPushTimer = null
-function triggerFcmNotificationDebounced(item, delayMs = 2500) {
+function triggerFcmNotificationDebounced(item, delayMs = 300) {
   if (fcmPushTimer) clearTimeout(fcmPushTimer)
   fcmPushTimer = setTimeout(() => {
     sendFcmPushNotification(item)
