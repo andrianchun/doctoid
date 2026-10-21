@@ -789,6 +789,9 @@ function parsePlanningLines(lines: string[], today: string): TerapiItem[] {
     if (/^mohon\s*(?:arahan|advis|petunjuk|tatalaksana)/i.test(rawLine)) continue
     if (/^---\s*$/i.test(rawLine)) continue
     if (/^\*?(?:Jawaban|Advis|Balasan)\s*(?:\/?\s*Advis)?\s*(?:Dokter)?\*?[:\s]*$/i.test(rawLine)) continue
+    if (/^[/\\*_\-~#.,;:\s]+$/.test(rawLine)) continue
+    if (/\b(?:Foto_\d+|image_\d+|\d{12,}\.(?:webp|jpg|jpeg|png))\b/i.test(rawLine)) continue
+    if (/\.(?:webp|jpg|jpeg|png)$/i.test(rawLine)) continue
 
     // 1. Deteksi Sub-Header PDX (Plan Diagnostik)
     const pdxMatch = rawLine.match(/^(?:[*_~#]*\s*)?(?:Pdx|Plan\s*Diagnostik|Diagnostik|Usulan\s*Lab|Pemeriksaan\s*Penunjang)\b\s*[:\-–—]?\s*(.*)$/i)
@@ -871,7 +874,9 @@ function parsePlanningLines(lines: string[], today: string): TerapiItem[] {
 
     // 6. Parsing Item Terapi Biasa
     const cleanItem = rawLine.replace(/^[-•*•–—\d.)\]]+\s*/, '').trim()
-    if (!cleanItem) continue
+    if (!cleanItem || /^[/\\*_\-~#.,;:\s]+$/.test(cleanItem)) continue
+    if (/\b(?:Foto_\d+|image_\d+|\d{12,}\.(?:webp|jpg|jpeg|png))\b/i.test(cleanItem)) continue
+    if (/\.(?:webp|jpg|jpeg|png)$/i.test(cleanItem)) continue
 
     if (currentSubCat === 'Diagnostik') {
       const parts = cleanItem.split(/[,;]\s*/).map((p) => p.trim()).filter(Boolean)

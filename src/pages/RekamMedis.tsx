@@ -293,39 +293,32 @@ export default function RekamMedis() {
                           </span>
                         )
                       )}
-                      {p.tgl_onset && (
-                        <span className="rounded-full bg-surface px-2.5 py-0.5 text-xs font-semibold text-ink-muted">
-                          Onset OH-{hariKe(p.tgl_onset)}
-                        </span>
-                      )}
-                      {p.status_rawat === 'aktif' ? (
-                        <span className="rounded-full px-2.5 py-0.5 text-xs font-bold bg-amber-50 text-amber-700 border border-amber-200/60">
-                          Perawatan P-{hariKe(p.tgl_mrs)}
-                        </span>
-                      ) : p.keterangan_krs === 'Meninggal' ? (
-                        <span className="rounded-full px-2.5 py-0.5 text-xs font-extrabold bg-rose-100 text-rose-800 border border-rose-300">
-                          MD {p.tgl_krs ? `· ${formatDate(p.tgl_krs)}` : ''}
-                        </span>
-                      ) : p.keterangan_krs === 'APS' ? (
-                        <span className="rounded-full px-2.5 py-0.5 text-xs font-bold bg-amber-100 text-amber-800 border border-amber-300">
-                          APS {p.tgl_krs ? `· ${formatDate(p.tgl_krs)}` : ''}
-                        </span>
-                      ) : p.keterangan_krs === 'Alih Rawat' ? (
-                        <span className="rounded-full px-2.5 py-0.5 text-xs font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
-                          Alih Rawat {p.detail_krs ? `→ ${p.detail_krs}` : ''} {p.tgl_krs ? `· ${formatDate(p.tgl_krs)}` : ''}
-                        </span>
-                      ) : p.keterangan_krs === 'Rujuk' ? (
-                        <span className="rounded-full px-2.5 py-0.5 text-xs font-bold bg-sky-50 text-sky-700 border border-sky-200">
-                          Rujuk {p.detail_krs ? `→ ${p.detail_krs}` : ''} {p.tgl_krs ? `· ${formatDate(p.tgl_krs)}` : ''}
-                        </span>
-                      ) : p.keterangan_krs === 'Lepas Rawat' ? (
-                        <span className="rounded-full px-2.5 py-0.5 text-xs font-bold bg-teal-50 text-teal-700 border border-teal-200">
-                          Lepas Rawat {p.tgl_krs ? `· ${formatDate(p.tgl_krs)}` : ''}
-                        </span>
-                      ) : (
-                        <span className="rounded-full px-2.5 py-0.5 text-xs font-bold bg-slate-100 text-slate-700 border border-slate-200">
-                          KRS {p.tgl_krs ? `· ${formatDate(p.tgl_krs)}` : ''}
-                        </span>
+                      {p.status_rawat !== 'aktif' && (
+                        p.keterangan_krs === 'Meninggal' ? (
+                          <span className="rounded-full px-2.5 py-0.5 text-xs font-extrabold bg-rose-100 text-rose-800 border border-rose-300">
+                            MD {p.tgl_krs ? `· ${formatDate(p.tgl_krs)}` : ''}
+                          </span>
+                        ) : p.keterangan_krs === 'APS' ? (
+                          <span className="rounded-full px-2.5 py-0.5 text-xs font-bold bg-amber-100 text-amber-800 border border-amber-300">
+                            APS {p.tgl_krs ? `· ${formatDate(p.tgl_krs)}` : ''}
+                          </span>
+                        ) : p.keterangan_krs === 'Alih Rawat' ? (
+                          <span className="rounded-full px-2.5 py-0.5 text-xs font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                            Alih Rawat {p.detail_krs ? `→ ${p.detail_krs}` : ''} {p.tgl_krs ? `· ${formatDate(p.tgl_krs)}` : ''}
+                          </span>
+                        ) : p.keterangan_krs === 'Rujuk' ? (
+                          <span className="rounded-full px-2.5 py-0.5 text-xs font-bold bg-sky-50 text-sky-700 border border-sky-200">
+                            Rujuk {p.detail_krs ? `→ ${p.detail_krs}` : ''} {p.tgl_krs ? `· ${formatDate(p.tgl_krs)}` : ''}
+                          </span>
+                        ) : p.keterangan_krs === 'Lepas Rawat' ? (
+                          <span className="rounded-full px-2.5 py-0.5 text-xs font-bold bg-teal-50 text-teal-700 border border-teal-200">
+                            Lepas Rawat {p.tgl_krs ? `· ${formatDate(p.tgl_krs)}` : ''}
+                          </span>
+                        ) : (
+                          <span className="rounded-full px-2.5 py-0.5 text-xs font-bold bg-slate-100 text-slate-700 border border-slate-200">
+                            KRS {p.tgl_krs ? `· ${formatDate(p.tgl_krs)}` : ''}
+                          </span>
+                        )
                       )}
                       {wardInfo && (
                         <span className="rounded-full bg-surface px-2.5 py-0.5 text-xs font-semibold text-ink-muted">

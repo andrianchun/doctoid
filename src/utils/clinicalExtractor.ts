@@ -59,6 +59,13 @@ function normalizeClinicalNegations(raw: string): string {
     'sulit\\s*menelan',
     'susah\\s*menelan',
     'mulut\\s*mencong',
+    'bibir\\s*merot',
+    'bibir\\s*mencong',
+    'mata\\s*kabur',
+    'penglihatan\\s*ganda',
+    'sulit\\s*bicara',
+    'sulit\\s*jalan',
+    'tidak\\s*bisa\\s*bicara',
   ]
 
   // Daftar kata keluhan tunggal umum
@@ -67,6 +74,7 @@ function normalizeClinicalNegations(raw: string): string {
     'muntah',
     'batuk',
     'pilek',
+    'bapil',
     'demam',
     'kejang',
     'sesak',
@@ -81,6 +89,7 @@ function normalizeClinicalNegations(raw: string): string {
     'baal',
     'kesemutan',
     'ngompol',
+    'menggigil',
     'bab',
     'bak',
   ]
@@ -90,36 +99,39 @@ function normalizeClinicalNegations(raw: string): string {
   // Postfix negation marker: (-), (-/-), disangkal, tidak ada, tdk ada, nihil, negatif
   const POST_NEG = '(?:\\(\\s*-\\s*(?:/\\s*-\\s*)?\\)|\\bdisangkal\\b|\\b(?:tidak|tdk)\\s*ada\\b|\\bnihil\\b|\\bnegatif\\b)'
 
-  // 1. Postfix: Trio gejala sebelum negasi ("demam, batuk, pilek (-)")
-  const trioPostRegex = new RegExp(
-    `\\b(${ALL_SYMPTOMS_PATTERN})\\s*(?:,|/|\\bdan\\b|\\bmaupun\\b)\\s*(${ALL_SYMPTOMS_PATTERN})\\s*(?:,|/|\\bdan\\b|\\bmaupun\\b)\\s*(${ALL_SYMPTOMS_PATTERN})\\s*(${POST_NEG})`,
+  // 1. Postfix: Rentetan gejala tak terbatas sebelum negasi ("gejala1, gejala2, ..., gejalaN disangkal")
+  // Mencocokkan 2 atau lebih gejala yang dipisahkan koma/dan/atau/garis miring lalu diakhiri postfix negation
+  const multiPostRegex = new RegExp(
+    `\\b((?:(?:${ALL_SYMPTOMS_PATTERN})\\s*(?:,|/|\\bdan\\b|\\bmaupun\\b|\\batau\\b|\\s)\\s*)+(${ALL_SYMPTOMS_PATTERN}))\\s*(${POST_NEG})`,
     'gi'
   )
-  s = s.replace(trioPostRegex, (_, s1, s2, s3, neg) => `${s1} ${neg} , ${s2} ${neg} , ${s3} ${neg}`)
+  s = s.replace(multiPostRegex, (_, fullList, _lastSym, neg) => {
+    const tokens = fullList.split(/[,/]|\\bdan\\b|\\bmaupun\\b|\\batau\\b/i)
+      .map((t: string) => t.trim())
+      .filter(Boolean)
+    return tokens.map((t: string) => `${t} ${neg}`).join(' , ')
+  })
 
-  // 2. Postfix: Pasangan gejala sebelum negasi ("mual muntah (-)", "mual, muntah disangkal", "mual muntah tidak ada")
+  // 2. Fallback pair untuk variasi spasi / tanpa koma: "mual muntah (-)"
   const pairPostRegex = new RegExp(
     `\\b(${ALL_SYMPTOMS_PATTERN})\\s*(?:,|/|\\bdan\\b|\\bmaupun\\b|\\s)\\s*(${ALL_SYMPTOMS_PATTERN})\\s*(${POST_NEG})`,
     'gi'
   )
   s = s.replace(pairPostRegex, (_, s1, s2, neg) => `${s1} ${neg} , ${s2} ${neg}`)
 
-  // 3. Prefix negation: disangkal / tidak ada / tanpa di depan rentetan gejala
+  // 3. Prefix negation: disangkal / tidak ada / tanpa di depan rentetan gejala tak terbatas
   const PRE_NEG = '(?:\\b(?:tidak|tdk)\\s*(?:ada|didapatkan|dirasakan|ditemukan|mengeluh)?\\b|\\bdisangkal\\b|\\btanpa\\b)'
 
-  // Prefix trio: "tidak ada mual, muntah, sesak" / "disangkal batuk, pilek, demam"
-  const trioPreRegex = new RegExp(
-    `(${PRE_NEG})\\s+(${ALL_SYMPTOMS_PATTERN})\\s*(?:,|/|\\bdan\\b|\\bmaupun\\b)\\s*(${ALL_SYMPTOMS_PATTERN})\\s*(?:,|/|\\bdan\\b|\\bmaupun\\b)\\s*(${ALL_SYMPTOMS_PATTERN})`,
+  const multiPreRegex = new RegExp(
+    `(${PRE_NEG})\\s+((?:(?:${ALL_SYMPTOMS_PATTERN})\\s*(?:,|/|\\bdan\\b|\\bmaupun\\b|\\batau\\b|\\s)\\s*)*(?:${ALL_SYMPTOMS_PATTERN}))`,
     'gi'
   )
-  s = s.replace(trioPreRegex, (_, neg, s1, s2, s3) => `${neg} ${s1} , ${neg} ${s2} , ${neg} ${s3}`)
-
-  // Prefix pair: "tidak ada mual, muntah" / "disangkal batuk dan pilek" / "tidak ada mual muntah"
-  const pairPreRegex = new RegExp(
-    `(${PRE_NEG})\\s+(${ALL_SYMPTOMS_PATTERN})\\s*(?:,|/|\\bdan\\b|\\bmaupun\\b|\\s)\\s*(${ALL_SYMPTOMS_PATTERN})`,
-    'gi'
-  )
-  s = s.replace(pairPreRegex, (_, neg, s1, s2) => `${neg} ${s1} , ${neg} ${s2}`)
+  s = s.replace(multiPreRegex, (_, neg, fullList) => {
+    const tokens = fullList.split(/[,/]|\\bdan\\b|\\bmaupun\\b|\\batau\\b/i)
+      .map((t: string) => t.trim())
+      .filter(Boolean)
+    return tokens.map((t: string) => `${neg} ${t}`).join(' , ')
+  })
 
   return s
 }
@@ -755,13 +767,14 @@ export function extractObjectivePositives(rawPemfis?: string, rawPenunjang?: str
   }
 
   // 5. Laboratorium Abnormal Kunci
-  const gdsMatch = text.match(/\b(?:GDS|GDA|Gula\s*Darah)\s*[:-]?\s*(\d{2,3})\b/i)
+  const gdsMatch = text.match(/\b(GDS|GDA|Gula\s*Darah)\s*[:-]?\s*(\d{2,3})\b/i)
   if (gdsMatch) {
-    const val = parseInt(gdsMatch[1], 10)
+    const label = gdsMatch[1].toUpperCase().includes('GDA') ? 'GDA' : 'GDS'
+    const val = parseInt(gdsMatch[2], 10)
     if (val <= 70) {
-      add(`GDS ${val} (Hipoglikemia)`, 5)
-    } else if (val >= 180) {
-      add(`GDS ${val}`, 17)
+      add(`${label} ${val} (Hipoglikemia)`, 5)
+    } else if (val >= 140) {
+      add(`${label} ${val}`, 17)
     }
   }
 

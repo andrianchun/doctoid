@@ -401,10 +401,12 @@ export default function Brainstorm() {
             }))
           }
           if (visionRes.pdxSuggestions?.length > 0) {
-            visionPdx = visionRes.pdxSuggestions.map((p) => ({
-              ...lineToTerapi(p.nama_item, today()),
-              kategori: 'Diagnostik',
-            }))
+            visionPdx = visionRes.pdxSuggestions
+              .filter((p) => !/\b(?:Foto_\d+|image_\d+|\d{12,}\.(?:webp|jpg|jpeg|png))\b/i.test(p.nama_item) && !/\.(?:webp|jpg|jpeg|png)$/i.test(p.nama_item))
+              .map((p) => ({
+                ...lineToTerapi(p.nama_item, today()),
+                kategori: 'Diagnostik',
+              }))
           }
           if (visionRes.penunjangTextSummary) {
             visionPenunjangText = visionRes.penunjangTextSummary
@@ -502,6 +504,7 @@ export default function Brainstorm() {
       if (visionRes.pdxSuggestions?.length > 0) {
         const existingPNames = new Set(form.P.map((p) => p.nama_item.trim().toLowerCase()))
         const newPdx = visionRes.pdxSuggestions
+          .filter((vp) => !/\b(?:Foto_\d+|image_\d+|\d{12,}\.(?:webp|jpg|jpeg|png))\b/i.test(vp.nama_item) && !/\.(?:webp|jpg|jpeg|png)$/i.test(vp.nama_item))
           .filter((vp) => !existingPNames.has(vp.nama_item.trim().toLowerCase()))
           .map((p) => ({
             ...lineToTerapi(p.nama_item, today()),
@@ -906,27 +909,55 @@ export default function Brainstorm() {
         })
       }
 
-      // Simpan lampiran penunjang (EKG, Lab, Radiologi) ke tabel db.penunjang
+      // Simpan lampiran penunjang (EKG, Lab, Radiologi) terkonsolidasi per modalitas medis baku
       const penunjangAtts = attachments.filter((a) => a.kategori === 'penunjang')
-      for (const att of penunjangAtts) {
-        let kat: 'Laboratorium' | 'Radiologi' | 'Lainnya' = 'Lainnya'
-        const lower = (att.name + ' ' + form.O_penunjang).toLowerCase()
-        if (/ct|mri|rontgen|foto|thorax|xray|radiologi/i.test(lower)) {
-          kat = 'Radiologi'
-        } else if (/lab|darah|urine|urin|gda|gds|elektrolit|se/i.test(lower)) {
-          kat = 'Laboratorium'
+      if (penunjangAtts.length > 0) {
+        const groups: Record<'Radiologi' | 'Laboratorium' | 'Lainnya', typeof penunjangAtts> = {
+          Radiologi: [],
+          Laboratorium: [],
+          Lainnya: [],
         }
-        await db.penunjang.add({
-          patient_id: p.id,
-          tanggal: todayStr,
-          kategori: kat,
-          nama_pemeriksaan: att.name || (kat === 'Radiologi' ? 'Pemeriksaan Radiologi' : 'Pemeriksaan Penunjang'),
-          hasil: form.O_penunjang || 'Terlampir dokumen pemeriksaan',
-          status: 'selesai',
-          attachments: [{ name: att.name, type: att.type, dataUrl: att.dataUrl }],
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        })
+
+        for (const att of penunjangAtts) {
+          const lower = (att.name + ' ' + (att.tag || '')).toLowerCase()
+          if (/ct|mri|rontgen|foto|thorax|xray|radiologi/i.test(lower)) {
+            groups.Radiologi.push(att)
+          } else if (/lab|darah|urine|urin|gda|gds|elektrolit|se/i.test(lower)) {
+            groups.Laboratorium.push(att)
+          } else {
+            if (/ct|msct|mri|rontgen|thorax/i.test(form.O_penunjang.toLowerCase())) {
+              groups.Radiologi.push(att)
+            } else if (/lab|darah|gda|gds|leuko|hb/i.test(form.O_penunjang.toLowerCase())) {
+              groups.Laboratorium.push(att)
+            } else {
+              groups.Lainnya.push(att)
+            }
+          }
+        }
+
+        for (const [katKey, atts] of Object.entries(groups) as ['Radiologi' | 'Laboratorium' | 'Lainnya', typeof penunjangAtts][]) {
+          if (atts.length === 0) continue
+          let namaBaku = 'Pemeriksaan Penunjang'
+          if (katKey === 'Radiologi') {
+            namaBaku = /ct[\s-]?scan|msct/i.test(form.O_penunjang) ? 'CT Scan Kepala' : 'Pemeriksaan Radiologi'
+          } else if (katKey === 'Laboratorium') {
+            namaBaku = 'Pemeriksaan Laboratorium'
+          } else if (/ekg/i.test(form.O_penunjang)) {
+            namaBaku = 'EKG 12-Lead'
+          }
+
+          await db.penunjang.add({
+            patient_id: p.id,
+            tanggal: todayStr,
+            kategori: katKey,
+            nama_pemeriksaan: namaBaku,
+            hasil: form.O_penunjang || 'Dokumen hasil pemeriksaan terlampir',
+            status: 'selesai',
+            attachments: atts.map((att) => ({ name: att.name, type: att.type, dataUrl: att.dataUrl })),
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          })
+        }
       }
 
       if (form.P.length > 0) {
@@ -1453,27 +1484,55 @@ export default function Brainstorm() {
       metrics,
     })
 
-    // Simpan lampiran penunjang (EKG, Lab, Radiologi) ke tabel penunjang agar tertata rapi di tab Rekam Medis
-    const penunjangAtts = attachments.filter(a => a.kategori === 'penunjang')
-    for (const att of penunjangAtts) {
-      let kat: 'Laboratorium' | 'Radiologi' | 'Lainnya' = 'Lainnya'
-      const lower = (att.name + ' ' + form.O_penunjang).toLowerCase()
-      if (/ct|mri|rontgen|foto|thorax|xray|radiologi/i.test(lower)) {
-        kat = 'Radiologi'
-      } else if (/lab|darah|urine|urin|gda|gds|elektrolit|se/i.test(lower)) {
-        kat = 'Laboratorium'
+    // Simpan lampiran penunjang (EKG, Lab, Radiologi) terkonsolidasi per modalitas medis baku
+    const penunjangAtts = attachments.filter((a) => a.kategori === 'penunjang')
+    if (penunjangAtts.length > 0) {
+      const groups: Record<'Radiologi' | 'Laboratorium' | 'Lainnya', typeof penunjangAtts> = {
+        Radiologi: [],
+        Laboratorium: [],
+        Lainnya: [],
       }
-      await db.penunjang.add({
-        patient_id: targetPatientId,
-        tanggal: noteDate,
-        kategori: kat,
-        nama_pemeriksaan: att.name || (kat === 'Radiologi' ? 'Pemeriksaan Radiologi' : 'Pemeriksaan Penunjang'),
-        hasil: form.O_penunjang || 'Terlampir dokumen pemeriksaan',
-        status: 'selesai',
-        attachments: [{ name: att.name, type: att.type, dataUrl: att.dataUrl }],
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      })
+
+      for (const att of penunjangAtts) {
+        const lower = (att.name + ' ' + (att.tag || '')).toLowerCase()
+        if (/ct|mri|rontgen|foto|thorax|xray|radiologi/i.test(lower)) {
+          groups.Radiologi.push(att)
+        } else if (/lab|darah|urine|urin|gda|gds|elektrolit|se/i.test(lower)) {
+          groups.Laboratorium.push(att)
+        } else {
+          if (/ct|msct|mri|rontgen|thorax/i.test(form.O_penunjang.toLowerCase())) {
+            groups.Radiologi.push(att)
+          } else if (/lab|darah|gda|gds|leuko|hb/i.test(form.O_penunjang.toLowerCase())) {
+            groups.Laboratorium.push(att)
+          } else {
+            groups.Lainnya.push(att)
+          }
+        }
+      }
+
+      for (const [katKey, atts] of Object.entries(groups) as ['Radiologi' | 'Laboratorium' | 'Lainnya', typeof penunjangAtts][]) {
+        if (atts.length === 0) continue
+        let namaBaku = 'Pemeriksaan Penunjang'
+        if (katKey === 'Radiologi') {
+          namaBaku = /ct[\s-]?scan|msct/i.test(form.O_penunjang) ? 'CT Scan Kepala' : 'Pemeriksaan Radiologi'
+        } else if (katKey === 'Laboratorium') {
+          namaBaku = 'Pemeriksaan Laboratorium'
+        } else if (/ekg/i.test(form.O_penunjang)) {
+          namaBaku = 'EKG 12-Lead'
+        }
+
+        await db.penunjang.add({
+          patient_id: targetPatientId,
+          tanggal: noteDate,
+          kategori: katKey,
+          nama_pemeriksaan: namaBaku,
+          hasil: form.O_penunjang || 'Dokumen hasil pemeriksaan terlampir',
+          status: 'selesai',
+          attachments: atts.map((att) => ({ name: att.name, type: att.type, dataUrl: att.dataUrl })),
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+      }
     }
 
     await catatTerapi(

@@ -1663,24 +1663,26 @@ export default function PatientProfile() {
           <button
             type="button"
             onClick={() => setPenunjangFilter('Laboratorium')}
-            className={`px-3 py-1 rounded-xl font-bold whitespace-nowrap cursor-pointer transition-all ${
+            className={`px-3 py-1 rounded-xl font-bold whitespace-nowrap cursor-pointer transition-all flex items-center gap-1.5 ${
               penunjangFilter === 'Laboratorium'
                 ? 'bg-blue-600 text-white shadow-sm'
                 : 'bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200/50'
             }`}
           >
-            🔬 Lab ({penunjangList.filter((p) => p.kategori === 'Laboratorium').length})
+            <FlaskConical size={13} />
+            <span>Lab ({penunjangList.filter((p) => p.kategori === 'Laboratorium').length})</span>
           </button>
           <button
             type="button"
             onClick={() => setPenunjangFilter('Radiologi')}
-            className={`px-3 py-1 rounded-xl font-bold whitespace-nowrap cursor-pointer transition-all ${
+            className={`px-3 py-1 rounded-xl font-bold whitespace-nowrap cursor-pointer transition-all flex items-center gap-1.5 ${
               penunjangFilter === 'Radiologi'
                 ? 'bg-purple-600 text-white shadow-sm'
                 : 'bg-purple-50 text-purple-700 hover:bg-purple-100 border border-purple-200/50'
             }`}
           >
-            🩻 Radiologi ({penunjangList.filter((p) => p.kategori === 'Radiologi').length})
+            <ImageIcon size={13} />
+            <span>Radiologi ({penunjangList.filter((p) => p.kategori === 'Radiologi').length})</span>
           </button>
           <button
             type="button"
@@ -1691,7 +1693,7 @@ export default function PatientProfile() {
                 : 'bg-slate-100 text-slate-700 hover:bg-slate-200/80 border border-slate-200/60'
             }`}
           >
-            📑 Lainnya ({penunjangList.filter((p) => p.kategori === 'Lainnya').length})
+            Lainnya ({penunjangList.filter((p) => p.kategori === 'Lainnya').length})
           </button>
           {penunjangList.some((p) => p.status === 'menunggu') && (
             <button
@@ -1703,7 +1705,7 @@ export default function PatientProfile() {
                   : 'bg-amber-50 text-amber-700 hover:bg-amber-100 border border-amber-200/60'
               }`}
             >
-              ⏳ Menunggu ({penunjangList.filter((p) => p.status === 'menunggu').length})
+              Menunggu ({penunjangList.filter((p) => p.status === 'menunggu').length})
             </button>
           )}
         </div>
@@ -1726,7 +1728,7 @@ export default function PatientProfile() {
                   onClick={handleImportFromCppt}
                   className="px-3.5 py-1.5 rounded-xl bg-surface border border-slate-200 text-ink text-xs font-bold hover:bg-slate-100 active:scale-95 transition-all cursor-pointer"
                 >
-                  ⚡ Tarik dari CPPT Terakhir
+                  Tarik dari CPPT Terakhir
                 </button>
               )}
             </div>
@@ -1751,7 +1753,7 @@ export default function PatientProfile() {
                           : 'bg-slate-100 text-slate-700 border-slate-200/60'
                       }`}
                     >
-                      {item.kategori === 'Laboratorium' ? '🔬 Lab' : item.kategori === 'Radiologi' ? '🩻 Radiologi' : '📑 ' + item.kategori}
+                      {item.kategori === 'Laboratorium' ? 'Lab' : item.kategori === 'Radiologi' ? 'Radiologi' : item.kategori}
                     </span>
                     <span className="text-[11px] font-medium text-ink-muted">
                       {formatDate(item.tanggal)}
@@ -1763,7 +1765,7 @@ export default function PatientProfile() {
                           : 'bg-amber-50 text-amber-700 border-amber-200/60'
                       }`}
                     >
-                      {item.status === 'selesai' ? '✓ Ada Hasil' : '⏳ Menunggu'}
+                      {item.status === 'selesai' ? 'Ada Hasil' : 'Menunggu'}
                     </span>
                   </div>
 
@@ -3079,7 +3081,7 @@ export default function PatientProfile() {
                           : 'bg-white text-ink border-slate-200 hover:bg-slate-50'
                       }`}
                     >
-                      {kat === 'Laboratorium' ? '🔬 Lab' : kat === 'Radiologi' ? '🩻 Radiologi' : '📑 Lainnya'}
+                      {kat === 'Laboratorium' ? 'Laboratorium' : kat === 'Radiologi' ? 'Radiologi' : 'Lainnya'}
                     </button>
                   ))}
                 </div>

@@ -184,9 +184,42 @@ function PatientCardContent({
   const sSummary = clinical.sList.length > 0 ? clinical.sList.join(' · ') : keluhan
   const hasS = !!(sSummary || sFull)
 
-  // O: Fisik & Penunjang dipisahkan
+  // O: Fisik & Penunjang dipisahkan (filter nama berkas teknis)
+  const isTechnicalFilename = (str?: string) => {
+    if (!str) return false
+    const t = str.trim()
+    return (
+      /\b(?:Foto_\d+|image_\d+|img_\d+|\d{12,}\.(?:webp|jpg|jpeg|png))\b/i.test(t) ||
+      /\.(?:webp|jpg|jpeg|png)$/i.test(t)
+    )
+  }
+
+  const isGarbageToken = (s?: string) => {
+    if (!s) return true
+    const t = s.trim()
+    if (!t) return true
+    if (/^[/\\*_\-~#.,;:\s]+$/.test(t)) return true
+    return false
+  }
+
+  const isLikelyDiagnosis = (s?: string) => {
+    if (!s) return false
+    return (
+      /\b(?:fraktur|infark|cva\b|stroke|hemipares|spondil|hnp\b|gbs\b|meningitis|encephalitis|sol\b|tumor|vertigo|bppv|seizure|epilep|febris|syok|edema\s*paru|kardiomegali|hipertensi|dm\b|diabetes|lapsus)\b/i.test(s) &&
+      !/\b(?:inj|inf|ivfd|po|drip|tab|kapsul|mg|amp|vial)\b/i.test(s)
+    )
+  }
+
   const oPemfis = currentNote?.O_pemfis?.trim() || ''
-  const oPenunjang = currentNote?.O_penunjang?.trim() || ''
+  const rawOPenunjang = currentNote?.O_penunjang?.trim() || ''
+  const oPenunjang = useMemo(() => {
+    if (!rawOPenunjang) return ''
+    return rawOPenunjang
+      .split('\n')
+      .filter((l) => !isTechnicalFilename(l))
+      .join('\n')
+      .trim()
+  }, [rawOPenunjang])
 
   const pemfisHighlights = useMemo(() => extractObjectivePositives(oPemfis, ''), [oPemfis])
   const penunjangHighlights = useMemo(() => extractObjectivePositives('', oPenunjang), [oPenunjang])
@@ -233,14 +266,17 @@ function PatientCardContent({
       })
   }, [allTherapies, patient.tgl_mrs])
 
-  // PDx: Plan Diagnostik & Hasil Pemeriksaan Terkait
+  // PDx: Plan Diagnostik (Hanya yang berstatus 'menunggu' atau rencana konsul/evaluasi)
   const rawPenunjang = useLiveQuery(
     () => (patient.id ? db.penunjang.where('patient_id').equals(patient.id).toArray() : []),
     [patient.id]
   )
   const penunjangList = useMemo(() => rawPenunjang || [], [rawPenunjang])
 
-  const pdxRawItems = useMemo(() => allTherapies.filter((p) => p.kategori === 'Diagnostik'), [allTherapies])
+  const pdxRawItems = useMemo(
+    () => allTherapies.filter((p) => p.kategori === 'Diagnostik' || /^konsul\b/i.test(p.nama_item)),
+    [allTherapies]
+  )
 
   const diagnosticItems = useMemo(() => {
     const list: {
@@ -252,35 +288,40 @@ function PatientCardContent({
     }[] = []
     const seenNames = new Set<string>()
 
-    // 1. Data terstruktur dari db.penunjang (rekam medis)
+    // 1. Data dari db.penunjang (HANYA yang statusnya masih 'menunggu', bukan hasil selesai)
     for (const p of penunjangList) {
+      if (p.status !== 'menunggu') continue
+      if (isTechnicalFilename(p.nama_pemeriksaan)) continue
       const lower = p.nama_pemeriksaan.trim().toLowerCase()
-      seenNames.add(lower)
-      list.push({
-        nama: p.nama_pemeriksaan,
-        hasil: p.status === 'selesai' ? p.hasil : undefined,
-        status: p.status,
-        kategori: p.kategori,
-        id: p.id,
-      })
+      if (!seenNames.has(lower)) {
+        seenNames.add(lower)
+        list.push({
+          nama: p.nama_pemeriksaan,
+          hasil: undefined,
+          status: 'menunggu',
+          kategori: p.kategori,
+          id: p.id,
+        })
+      }
     }
 
-    // 2. Data dari P (kategori 'Diagnostik') di CPPT jika belum tercatat di db.penunjang
+    // 2. Data dari P (kategori 'Diagnostik' atau Konsul) di CPPT jika belum tercatat
     for (const it of pdxRawItems) {
+      if (isTechnicalFilename(it.nama_item) || isGarbageToken(it.nama_item)) continue
+      if (it.status === 'stop') continue
       const lower = it.nama_item.trim().toLowerCase()
       if (!seenNames.has(lower)) {
         seenNames.add(lower)
-        const hasResult = !!it.dosis_keterangan?.trim()
         list.push({
           nama: it.nama_item,
-          hasil: hasResult ? it.dosis_keterangan : undefined,
-          status: hasResult ? 'selesai' : 'menunggu',
+          hasil: it.dosis_keterangan?.trim() || undefined,
+          status: 'menunggu',
           kategori: 'Lainnya',
         })
       }
     }
 
-    // Jika pasien berstatus Konsul, tampilkan di PDx
+    // 3. Jika pasien berstatus Konsul, tampilkan di PDx
     if (patient.peran_rawat === 'Konsul') {
       const konsulLabel = patient.dpjp_utama && patient.dpjp_utama !== 'Neuro' ? `Konsul ${patient.dpjp_utama}` : 'Konsul'
       if (!seenNames.has(konsulLabel.toLowerCase())) {
@@ -298,20 +339,56 @@ function PatientCardContent({
   const pdxSummary = useMemo(() => {
     if (diagnosticItems.length === 0) return ''
     return diagnosticItems
-      .map((item) => {
-        if (item.hasil) return `${item.nama} (${item.hasil})`
-        return item.nama
-      })
+      .map((item) => (item.status === 'menunggu' ? `${item.nama} (Menunggu)` : item.nama))
       .join(', ')
   }, [diagnosticItems])
 
   const hasPdx = diagnosticItems.length > 0
   const canExpandPdx = diagnosticItems.length > 0
 
-
-
   // PTx: Plan Terapi (Farmakologi, Non-Farmakologi, Monitoring, Edukasi)
-  const ptxItems = useMemo(() => allTherapies.filter((p) => p.kategori !== 'Diagnostik'), [allTherapies])
+  const ptxItems = useMemo(() => {
+    const rawList = allTherapies.filter((p) => {
+      if (p.kategori === 'Diagnostik') return false
+      if (/^konsul\b/i.test(p.nama_item)) return false
+      if (isGarbageToken(p.nama_item)) return false
+      if (isLikelyDiagnosis(p.nama_item)) return false
+      if (isTechnicalFilename(p.nama_item)) return false
+      return true
+    })
+
+    // Deduplikasi cerdas berdasarkan nama obat dasar (misal "inf ns" vs "IVFD NS")
+    const deduplicated: TerapiItem[] = []
+    const seenMedKeys = new Map<string, number>()
+
+    for (const item of rawList) {
+      const coreKey = item.nama_item
+        .toLowerCase()
+        .replace(/\b(?:inj\.?|injeksi|inf\.?|infus|ivfd|po|oral|tab|kapsul|drip|syrup|sirup|fls|vial|amp)\b/g, '')
+        .replace(/[^a-z0-9]/g, '')
+        .trim()
+
+      if (!coreKey) {
+        deduplicated.push(item)
+        continue
+      }
+
+      if (seenMedKeys.has(coreKey)) {
+        const existingIdx = seenMedKeys.get(coreKey)!
+        const existing = deduplicated[existingIdx]
+        // Jika item baru punya dosis/keterangan lebih lengkap, pakai item baru
+        if ((item.dosis_keterangan?.length || 0) > (existing.dosis_keterangan?.length || 0)) {
+          deduplicated[existingIdx] = item
+        }
+      } else {
+        seenMedKeys.set(coreKey, deduplicated.length)
+        deduplicated.push(item)
+      }
+    }
+
+    return deduplicated
+  }, [allTherapies])
+
   const activePtx = useMemo(() => ptxItems.filter((p) => p.status === 'aktif'), [ptxItems])
   const ptxSummary = activePtx.length > 0
     ? activePtx.map((p) => p.nama_item).join(', ')
@@ -447,12 +524,6 @@ function PatientCardContent({
                           </p>
                         )}
                       </div>
-                      {canExpandOFisik && (
-                        <button type="button" onClick={(e) => toggleSection('OFisik', e)}
-                          className="text-ink-muted hover:text-ink p-0.5 shrink-0 cursor-pointer mt-0.5" aria-label="Toggle O Fisik">
-                          <ChevronDown size={14} className={`transition-transform duration-200 ${expandedSections['OFisik'] ? 'rotate-180' : 'rotate-0'}`} />
-                        </button>
-                      )}
                     </div>
                   )}
                   {/* Sub-baris 2: Penunjang */}
@@ -474,12 +545,6 @@ function PatientCardContent({
                           </p>
                         )}
                       </div>
-                      {canExpandOPenunjang && (
-                        <button type="button" onClick={(e) => toggleSection('OPenunjang', e)}
-                          className="text-ink-muted hover:text-ink p-0.5 shrink-0 cursor-pointer mt-0.5" aria-label="Toggle O Penunjang">
-                          <ChevronDown size={14} className={`transition-transform duration-200 ${expandedSections['OPenunjang'] ? 'rotate-180' : 'rotate-0'}`} />
-                        </button>
-                      )}
                     </div>
                   )}
                 </div>
@@ -517,22 +582,6 @@ function PatientCardContent({
                     )}
                   </div>
                 </div>
-                {canExpandA && (
-                  <button
-                    type="button"
-                    onClick={(e) => toggleSection('A', e)}
-                    className="text-ink-muted hover:text-ink p-0.5 shrink-0 cursor-pointer mt-0.5"
-                    aria-label="Toggle detail A"
-                    title={expandedSections['A'] ? 'Tutup detail' : 'Buka detail'}
-                  >
-                    <ChevronDown
-                      size={14}
-                      className={`transition-transform duration-200 ${
-                        expandedSections['A'] ? 'rotate-180' : 'rotate-0'
-                      }`}
-                    />
-                  </button>
-                )}
               </div>
             </div>
           )}
@@ -569,12 +618,6 @@ function PatientCardContent({
                           </div>
                         )}
                       </div>
-                      {canExpandPdx && (
-                        <button type="button" onClick={(e) => toggleSection('PDx', e)}
-                          className="text-ink-muted hover:text-ink p-0.5 shrink-0 cursor-pointer mt-0.5" aria-label="Toggle PDx">
-                          <ChevronDown size={14} className={`transition-transform duration-200 ${expandedSections['PDx'] ? 'rotate-180' : 'rotate-0'}`} />
-                        </button>
-                      )}
                     </div>
                   )}
                   {/* Sub-baris 2: PTx */}
@@ -605,12 +648,6 @@ function PatientCardContent({
                           </div>
                         )}
                       </div>
-                      {canExpandPtx && (
-                        <button type="button" onClick={(e) => toggleSection('PTx', e)}
-                          className="text-ink-muted hover:text-ink p-0.5 shrink-0 cursor-pointer mt-0.5" aria-label="Toggle PTx">
-                          <ChevronDown size={14} className={`transition-transform duration-200 ${expandedSections['PTx'] ? 'rotate-180' : 'rotate-0'}`} />
-                        </button>
-                      )}
                     </div>
                   )}
                 </div>
