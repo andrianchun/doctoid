@@ -24,6 +24,7 @@ import { extractClinicalHighlights, extractObjectivePositives } from '../utils/c
 import VisiteModal from '../components/VisiteModal'
 import { useBodyScrollLock } from '../utils/useBodyScrollLock'
 import { appCache, cacheHospitals, cacheWards, cachePatients, cacheNotes } from '../utils/dataCache'
+import { cleanNamaDepan, formatPatientDisplayName } from '../utils/patientName'
 
 function cleanSubjective(raw?: string): string {
   if (!raw) return ''
@@ -326,7 +327,8 @@ function PatientCardContent({
       <div className="flex items-center justify-between gap-1.5">
         <div className="flex items-center gap-1.5 truncate min-w-0">
           <span className="text-xs font-bold text-ink truncate">
-            {patient.title} <Masked value={patient.nama_depan || (patient as any).inisial} type="name" />
+            {patient.title ? `${patient.title} ` : ''}
+            <Masked value={cleanNamaDepan(patient.nama_depan || (patient as any).inisial, patient.title)} type="name" />
           </span>
           {cleanUsia && <span className="caption text-xs font-medium shrink-0">({cleanUsia} th)</span>}
         </div>
@@ -1360,9 +1362,7 @@ export default function RawatInap() {
         })
 
         notify(
-          `Pasien ${currentPatient.title ? currentPatient.title + ' ' : ''}${
-            currentPatient.nama_depan || 'terpilih'
-          } dipindahkan ke ${targetWard?.nama || 'ruangan baru'}`
+          `Pasien ${formatPatientDisplayName(currentPatient.title, currentPatient.nama_depan || 'terpilih')} dipindahkan ke ${targetWard?.nama || 'ruangan baru'}`
         )
       }
       return
@@ -1397,9 +1397,7 @@ export default function RawatInap() {
       })
 
       notify(
-        `Pasien ${currentPatient.title ? currentPatient.title + ' ' : ''}${
-          currentPatient.nama_depan || 'terpilih'
-        } dipindahkan ke ${targetWard?.nama || 'ruangan baru'}`
+        `Pasien ${formatPatientDisplayName(currentPatient.title, currentPatient.nama_depan || 'terpilih')} dipindahkan ke ${targetWard?.nama || 'ruangan baru'}`
       )
     }
   }

@@ -30,6 +30,7 @@ import { verifyBiometric } from '../webauthn'
 import { chatPasien, type ChatMsg } from '../ai'
 import { applyMicroUpdate } from '../microUpdate'
 import { formatDate, hariKe, getLocalDateString } from '../utils/dateFormat'
+import { cleanNamaDepan, formatPatientDisplayName } from '../utils/patientName'
 import VisiteModal from '../components/VisiteModal'
 import DateInput from '../components/DateInput'
 import { useBodyScrollLock } from '../utils/useBodyScrollLock'
@@ -430,7 +431,7 @@ export default function PatientProfile() {
     if (!patient) return
     setEditPatientForm({
       title: patient.title || 'Tn.',
-      nama_depan: patient.nama_depan || (patient as any).inisial || '',
+      nama_depan: cleanNamaDepan(patient.nama_depan || (patient as any).inisial, patient.title) || '',
       usia: (patient.usia || '').replace(/\s*(th|tahun)\b/gi, '').trim(),
       no_rm: patient.no_rm || '',
       diagnosis_utama: patient.diagnosis_utama || '',
@@ -464,10 +465,12 @@ export default function PatientProfile() {
       newOrder = wardCount + 1
     }
 
+    const cleanName = cleanNamaDepan(editPatientForm.nama_depan, editPatientForm.title)
+
     const updatedPatient: Patient = {
       ...patient,
       title: editPatientForm.title,
-      nama_depan: editPatientForm.nama_depan.trim(),
+      nama_depan: cleanName,
       usia: editPatientForm.usia.trim() ? `${editPatientForm.usia.trim()} th` : '',
       no_rm: editPatientForm.no_rm.trim(),
       diagnosis_utama: editPatientForm.diagnosis_utama.trim(),
@@ -489,7 +492,7 @@ export default function PatientProfile() {
 
     await db.patients.update(pid, {
       title: editPatientForm.title,
-      nama_depan: editPatientForm.nama_depan.trim(),
+      nama_depan: cleanName,
       usia: editPatientForm.usia.trim() ? `${editPatientForm.usia.trim()} th` : '',
       no_rm: editPatientForm.no_rm.trim(),
       diagnosis_utama: editPatientForm.diagnosis_utama.trim(),
@@ -514,8 +517,8 @@ export default function PatientProfile() {
 
   const handleDeletePatient = async () => {
     if (!patient) return
-    const nama = patient.nama_depan || (patient as any).inisial || 'pasien ini'
-    if (window.confirm(`Yakin ingin menghapus seluruh data rekam medis ${patient.title || ''} ${nama}? Tindakan ini tidak dapat dibatalkan.`)) {
+    const displayName = formatPatientDisplayName(patient.title, patient.nama_depan || (patient as any).inisial || 'pasien ini')
+    if (window.confirm(`Yakin ingin menghapus seluruh data rekam medis ${displayName}? Tindakan ini tidak dapat dibatalkan.`)) {
       await db.progressNotes.where('patient_id').equals(pid).delete()
       await db.patients.delete(pid)
       notify('Data pasien berhasil dihapus')
@@ -1001,7 +1004,7 @@ export default function PatientProfile() {
     const oral = aktif.filter((p) => !PARENTERAL.test(`${p.nama_item} ${p.dosis_keterangan}`))
     const parenteral = aktif.filter((p) => PARENTERAL.test(`${p.nama_item} ${p.dosis_keterangan}`))
     const lines = [
-      `*Obat KRS — ${(patient as any).title ? (patient as any).title + ' ' : ''}${patient.nama_depan || (patient as any).inisial}${patient.no_rm ? ` (RM ${patient.no_rm})` : ''}*`,
+      `*Obat KRS — ${formatPatientDisplayName((patient as any).title, patient.nama_depan || (patient as any).inisial)}${patient.no_rm ? ` (RM ${patient.no_rm})` : ''}*`,
       `Dx: ${patient.diagnosis_utama}`,
       '',
       ...oral.map((p, i) => `${i + 1}. ${p.nama_item} ${p.dosis_keterangan}`.trim()),
@@ -1196,8 +1199,8 @@ export default function PatientProfile() {
 
           <div className="min-w-0 flex-1">
             <h1 className="h1 text-2xl font-black text-white flex flex-wrap items-center gap-2">
-              <span>{patient.title}</span>
-              <Masked value={patient.nama_depan || (patient as any).inisial} type="name" className="text-white" />
+              {patient.title && <span>{patient.title}</span>}
+              <Masked value={cleanNamaDepan(patient.nama_depan || (patient as any).inisial, patient.title)} type="name" className="text-white" />
               {cleanUsia && <span className="text-base font-medium text-white/80">({cleanUsia} th)</span>}
             </h1>
 
@@ -3557,7 +3560,7 @@ export default function PatientProfile() {
                 </div>
                 <div>
                   <h3 className="text-sm font-bold text-ink">Alih DPJP Utama (Leader)</h3>
-                  <p className="text-[11px] text-ink-muted">Pasien: {patient.title} {patient.nama_depan || (patient as any).inisial}</p>
+                  <p className="text-[11px] text-ink-muted">Pasien: {formatPatientDisplayName(patient.title, patient.nama_depan || (patient as any).inisial)}</p>
                 </div>
               </div>
               <button

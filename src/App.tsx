@@ -21,6 +21,7 @@ import DoctorProfile from './pages/DoctorProfile'
 import { initAuthListener } from './auth'
 import { checkRevoked, initRealtimeCloudSync, fbConfigured } from './sync'
 import { useWaInboxSync } from './utils/waInboxSync'
+import { sanitizeExistingPatientNamesInDb } from './utils/patientName'
 
 const IDLE_LOCK_MS = 5 * 60 * 1000 // 5 menit tanpa aktivitas → auto-lock layar (proteksi data pasien)
 
@@ -84,9 +85,10 @@ export default function App() {
     return () => unsubscribe()
   }, [setUser, setIsUnlocked, setAuthLoading])
 
-  // Kill switch: cek status revoke saat mount
+  // Kill switch & Sanitasi nama pasien di Dexie: cek status revoke saat mount
   useEffect(() => {
     checkRevoked()
+    sanitizeExistingPatientNamesInDb()
   }, [])
 
   // Auto-lock idle: reset timer di tiap interaksi user, kunci layar jika diam 5 menit

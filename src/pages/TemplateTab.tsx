@@ -3,6 +3,7 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { Plus, Trash2, ClipboardCopy, Check, Edit3 } from 'lucide-react'
 import { db, type Patient, type ProgressNote, type DiagnosisItem } from '../db'
 import { formatDate, hariKe } from '../utils/dateFormat'
+import { formatPatientDisplayName } from '../utils/patientName'
 import CustomSelect from '../components/CustomSelect'
 
 const inputCls =
@@ -122,7 +123,7 @@ export default function TemplateTab({ isEmbedded = false }: { isEmbedded?: boole
       aktifList.forEach((p) => {
         opts.push({
           value: String(p.id),
-          label: `${p.title ? p.title + ' ' : ''}${p.nama_depan || (p as any).inisial || 'Pasien'} (RM: ${p.no_rm})`,
+          label: `${formatPatientDisplayName(p.title, p.nama_depan || (p as any).inisial || 'Pasien')} (RM: ${p.no_rm})`,
         })
       })
     }
@@ -144,7 +145,7 @@ export default function TemplateTab({ isEmbedded = false }: { isEmbedded?: boole
         const krsTag = p.tgl_krs ? ` [${keluarLabel}: ${formatDate(p.tgl_krs)}]` : ` [${keluarLabel}]`
         opts.push({
           value: String(p.id),
-          label: `${p.title ? p.title + ' ' : ''}${p.nama_depan || (p as any).inisial || 'Pasien'} (RM: ${p.no_rm})${krsTag}`,
+          label: `${formatPatientDisplayName(p.title, p.nama_depan || (p as any).inisial || 'Pasien')} (RM: ${p.no_rm})${krsTag}`,
         })
       })
     }

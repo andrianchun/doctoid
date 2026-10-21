@@ -6,6 +6,7 @@ import { db } from '../db'
 import Masked from '../components/Masked'
 import CustomSelect from '../components/CustomSelect'
 import { formatDate, hariKe } from '../utils/dateFormat'
+import { cleanNamaDepan } from '../utils/patientName'
 import { appCache, cacheHospitals, cacheWards, cacheAllPatients, cacheNotes } from '../utils/dataCache'
 
 const inputCls =
@@ -257,7 +258,8 @@ export default function RekamMedis() {
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-1.5 flex-wrap">
                       <span className="text-xs font-bold text-ink">
-                        {p.title} <Masked value={p.nama_depan || (p as any).inisial} type="name" />
+                        {p.title ? `${p.title} ` : ''}
+                        <Masked value={cleanNamaDepan(p.nama_depan || (p as any).inisial, p.title)} type="name" />
                       </span>
                       {p.usia && <span className="caption font-normal">({p.usia} th)</span>}
                       <span className="caption">· RM <Masked value={p.no_rm} type="rm" /></span>

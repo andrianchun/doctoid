@@ -7,6 +7,7 @@ import { convertToWebP } from '../utils/mediaCompress'
 import { getLocalDateString, hariKe } from '../utils/dateFormat'
 import { useBodyScrollLock } from '../utils/useBodyScrollLock'
 import { getVisiteSubjectivePrefill, extractClinicalMetrics } from '../utils/clinicalExtractor'
+import { cleanNamaDepan, formatPatientDisplayName } from '../utils/patientName'
 import Masked from './Masked'
 import DateInput from './DateInput'
 import PredictiveInput from './PredictiveInput'
@@ -66,7 +67,7 @@ export default function VisiteModal({
     setOcrMessage('Menganalisis foto layar SIMRS / chat WA...')
     try {
       const webp = await convertToWebP(file, 1200, 0.85)
-      const promptContext = `Pasien: ${patient.title} ${patient.nama_depan}\nTanggal: ${tanggal}`
+      const promptContext = `Pasien: ${formatPatientDisplayName(patient.title, patient.nama_depan)}\nTanggal: ${tanggal}`
       const r = await rapikan(promptContext, [{ type: 'image/webp', dataUrl: webp }], false)
 
       if (r.S && r.S.trim()) {
@@ -227,7 +228,7 @@ export default function VisiteModal({
         })
       }
 
-      onSaved(`Visite ${patient.title} ${patient.nama_depan} berhasil dicatat`)
+      onSaved(`Visite ${formatPatientDisplayName(patient.title, patient.nama_depan)} berhasil dicatat`)
       onClose()
     } catch (err) {
       console.error(err)
@@ -255,7 +256,8 @@ export default function VisiteModal({
         <div className="flex items-center justify-between gap-2 border-b border-slate-100 pb-3 shrink-0">
           <div className="min-w-0 flex-1 flex items-center justify-between gap-2">
             <h2 className="text-sm font-bold text-ink truncate leading-tight">
-              {patient.title} <Masked value={patient.nama_depan} type="name" />{' '}
+              {patient.title ? `${patient.title} ` : ''}
+              <Masked value={cleanNamaDepan(patient.nama_depan, patient.title)} type="name" />{' '}
               {patient.usia && (
                 <span className="text-xs font-normal text-ink-muted">({patient.usia})</span>
               )}

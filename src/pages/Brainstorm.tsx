@@ -48,6 +48,7 @@ import {
   dismissAllInboxItems,
   syncWaInboxToDexie,
 } from '../utils/waInboxSync'
+import { splitTitleAndName, cleanNamaDepan } from '../utils/patientName'
 
 const today = () => getLocalDateString()
 
@@ -346,9 +347,13 @@ export default function Brainstorm() {
         try {
           const { data, success } = localParse(item.raw_text, regexRules)
           if (success) {
+            const { title: resolvedTitle, nama_depan: resolvedNama } = splitTitleAndName(
+              data.nama_depan || form.nama_depan,
+              (data.title as any) || form.title
+            )
             parsedSoapData = {
-              title: (data.title as any) || (data.nama_depan?.match(/^(?:dr\.|Tn\.|Ny\.|Sdr\.|Sdri\.|An\.|By\.)/i)?.[0] as any) || form.title,
-              nama_depan: data.nama_depan || form.nama_depan,
+              title: resolvedTitle,
+              nama_depan: resolvedNama,
               usia: data.usia || form.usia,
               no_rm: data.no_rm || form.no_rm,
               jaminan: (data.jaminan as any) || form.jaminan,
@@ -433,10 +438,16 @@ export default function Brainstorm() {
         ? (currentO_penunjang.trim() ? `${currentO_penunjang.trim()}\n\n${visionPenunjangText}` : visionPenunjangText)
         : currentO_penunjang
 
+      const rawName = item.parsed_data?.nama_depan || parsedSoapData.nama_depan || form.nama_depan
+      const { title: resolvedTitle, nama_depan: resolvedNama } = splitTitleAndName(
+        rawName,
+        (parsedSoapData.title as any) || form.title
+      )
+
       const formPatch: Partial<FormState> = {
         ...parsedSoapData,
-        title: (item.parsed_data?.nama_depan?.match(/^(?:dr\.|Tn\.|Ny\.|Sdr\.|Sdri\.|An\.|By\.)/i)?.[0] as any) || parsedSoapData.title || form.title,
-        nama_depan: item.parsed_data?.nama_depan || parsedSoapData.nama_depan || form.nama_depan,
+        title: resolvedTitle,
+        nama_depan: resolvedNama,
         usia: item.parsed_data?.usia || parsedSoapData.usia || form.usia,
         no_rm: item.parsed_data?.no_rm || parsedSoapData.no_rm || form.no_rm,
         jaminan: (item.parsed_data?.jaminan as any) || parsedSoapData.jaminan || form.jaminan,
@@ -624,19 +635,25 @@ export default function Brainstorm() {
         try {
           const { data: parsed, success } = localParse(text, regexRules)
           if (success) {
-            setForm((prev) => ({
-              ...prev,
-              title: (parsed.title as any) || (parsed.nama_depan?.match(/^(?:dr\.|Tn\.|Ny\.|Sdr\.|Sdri\.|An\.|By\.)/i)?.[0] as any) || prev.title,
-              nama_depan: parsed.nama_depan || prev.nama_depan,
-              usia: parsed.usia || prev.usia,
-              no_rm: parsed.no_rm || prev.no_rm,
-              jaminan: (parsed.jaminan as any) || prev.jaminan,
-              S: parsed.S || prev.S,
-              O_pemfis: parsed.O_pemfis || prev.O_pemfis,
-              O_penunjang: parsed.O_penunjang || prev.O_penunjang,
-              A: parsed.A && parsed.A.length > 0 ? parsed.A : prev.A,
-              P: parsed.P && parsed.P.length > 0 ? parsed.P : prev.P,
-            }))
+            setForm((prev) => {
+              const { title: resolvedTitle, nama_depan: resolvedNama } = splitTitleAndName(
+                parsed.nama_depan || prev.nama_depan,
+                (parsed.title as any) || prev.title
+              )
+              return {
+                ...prev,
+                title: resolvedTitle,
+                nama_depan: resolvedNama,
+                usia: parsed.usia || prev.usia,
+                no_rm: parsed.no_rm || prev.no_rm,
+                jaminan: (parsed.jaminan as any) || prev.jaminan,
+                S: parsed.S || prev.S,
+                O_pemfis: parsed.O_pemfis || prev.O_pemfis,
+                O_penunjang: parsed.O_penunjang || prev.O_penunjang,
+                A: parsed.A && parsed.A.length > 0 ? parsed.A : prev.A,
+                P: parsed.P && parsed.P.length > 0 ? parsed.P : prev.P,
+              }
+            })
           } else {
             setForm((prev) => ({ ...prev, S: prev.S ? `${prev.S}\n\n${text}` : text }))
           }
@@ -701,19 +718,25 @@ export default function Brainstorm() {
       try {
         const { data: parsed, success } = localParse(text, regexRules)
         if (success) {
-          setForm((prev) => ({
-            ...prev,
-            title: (parsed.title as any) || (parsed.nama_depan?.match(/^(?:dr\.|Tn\.|Ny\.|Sdr\.|Sdri\.|An\.|By\.)/i)?.[0] as any) || prev.title,
-            nama_depan: parsed.nama_depan || prev.nama_depan,
-            usia: parsed.usia || prev.usia,
-            no_rm: parsed.no_rm || prev.no_rm,
-            jaminan: (parsed.jaminan as any) || prev.jaminan,
-            S: parsed.S || prev.S,
-            O_pemfis: parsed.O_pemfis || prev.O_pemfis,
-            O_penunjang: parsed.O_penunjang || prev.O_penunjang,
-            A: parsed.A && parsed.A.length > 0 ? parsed.A : prev.A,
-            P: parsed.P && parsed.P.length > 0 ? parsed.P : prev.P,
-          }))
+          setForm((prev) => {
+            const { title: resolvedTitle, nama_depan: resolvedNama } = splitTitleAndName(
+              parsed.nama_depan || prev.nama_depan,
+              (parsed.title as any) || prev.title
+            )
+            return {
+              ...prev,
+              title: resolvedTitle,
+              nama_depan: resolvedNama,
+              usia: parsed.usia || prev.usia,
+              no_rm: parsed.no_rm || prev.no_rm,
+              jaminan: (parsed.jaminan as any) || prev.jaminan,
+              S: parsed.S || prev.S,
+              O_pemfis: parsed.O_pemfis || prev.O_pemfis,
+              O_penunjang: parsed.O_penunjang || prev.O_penunjang,
+              A: parsed.A && parsed.A.length > 0 ? parsed.A : prev.A,
+              P: parsed.P && parsed.P.length > 0 ? parsed.P : prev.P,
+            }
+          })
         } else {
           setForm((prev) => ({ ...prev, S: prev.S ? `${prev.S}\n\n${text}` : text }))
         }
@@ -1363,10 +1386,12 @@ export default function Brainstorm() {
         .filter((p) => p.status_rawat === 'aktif')
         .count()
 
+      const cleanName = cleanNamaDepan(form.nama_depan, form.title)
+
       await db.patients.update(patientToUse.id, {
         hospital_id: hospitalId,
         title: form.title,
-        nama_depan: form.nama_depan.trim(),
+        nama_depan: cleanName,
         usia: form.usia.trim(),
         no_rm: form.no_rm.trim(),
         tgl_mrs: form.tgl_mrs,
@@ -1391,10 +1416,12 @@ export default function Brainstorm() {
         .filter((p) => p.status_rawat === 'aktif')
         .count()
 
+      const cleanName = cleanNamaDepan(form.nama_depan, form.title)
+
       targetPatientId = await db.patients.add({
         hospital_id: hospitalId,
         title: form.title,
-        nama_depan: form.nama_depan.trim(),
+        nama_depan: cleanName,
         usia: form.usia.trim(),
         no_rm: form.no_rm.trim(),
         tgl_mrs: form.tgl_mrs,
@@ -1735,7 +1762,15 @@ export default function Brainstorm() {
           <input
             ref={namaRef}
             value={form.nama_depan}
-            onChange={(e) => set({ nama_depan: e.target.value })}
+            onChange={(e) => {
+              const val = e.target.value
+              if (/^(?:dr\.|Tn\.|Ny\.|Sdr\.|Sdri\.|An\.|By\.)\s*/i.test(val)) {
+                const { title: newTitle, nama_depan: newName } = splitTitleAndName(val, form.title)
+                set({ title: newTitle, nama_depan: newName })
+              } else {
+                set({ nama_depan: val })
+              }
+            }}
             placeholder="Nama"
             className={inputCls + ' flex-1 min-w-0' + hl('nama_depan')}
           />
