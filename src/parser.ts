@@ -677,6 +677,8 @@ function sectionize(raw: string): RawSections {
     // Abaikan kalimat basa-basi konsultasi di awal/akhir
     if (NOISE_PHRASES.test(line) && !current) continue
     if (/^mohon\s*(?:advis|tatalaksana|petunjuk|arahan)/i.test(line)) continue
+    if (/^---\s*$/i.test(line)) continue
+    if (/^\*?(?:Jawaban|Advis|Balasan)\s*(?:\/?\s*Advis)?\s*(?:Dokter)?\*?[:\s]*$/i.test(line)) continue
 
     // Cek apakah baris ini adalah Suhu (Temperatur) di tanda vital, bukan seksi S
     const isTemp = IS_TEMPERATURE_LINE.test(line)
@@ -756,6 +758,8 @@ function parseDiagnosisLines(lines: string[]): DiagnosisItem[] {
     const clean = line.replace(/^[-•*•–—\d.)\]]+\s*/, '').trim()
     if (!clean) continue
     if (NOISE_PHRASES.test(clean)) continue
+    if (/^---\s*$/i.test(clean)) continue
+    if (/^\*?(?:Jawaban|Advis|Balasan)\s*(?:\/?\s*Advis)?\s*(?:Dokter)?\*?[:\s]*$/i.test(clean)) continue
 
     // Pisahkan jika ada koma di baris yang sama (mis. "CVA Infark, HT, DM")
     // Jangan pecah angka desimal berkoma seperti "Hipokalemia 3,25" (koma diikuti digit)
@@ -783,6 +787,8 @@ function parsePlanningLines(lines: string[], today: string): TerapiItem[] {
     if (!rawLine) continue
     if (NOISE_PHRASES.test(rawLine)) continue
     if (/^mohon\s*(?:arahan|advis|petunjuk|tatalaksana)/i.test(rawLine)) continue
+    if (/^---\s*$/i.test(rawLine)) continue
+    if (/^\*?(?:Jawaban|Advis|Balasan)\s*(?:\/?\s*Advis)?\s*(?:Dokter)?\*?[:\s]*$/i.test(rawLine)) continue
 
     // 1. Deteksi Sub-Header PDX (Plan Diagnostik)
     const pdxMatch = rawLine.match(/^(?:[*_~#]*\s*)?(?:Pdx|Plan\s*Diagnostik|Diagnostik|Usulan\s*Lab|Pemeriksaan\s*Penunjang)\b\s*[:\-–—]?\s*(.*)$/i)

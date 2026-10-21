@@ -22,7 +22,7 @@ const ShareReceiver: ShareReceiverPlugin | null = Capacitor.isNativePlatform()
 import {
   Mic,
   Trash2, Loader2, X, ChevronDown, Send,
-  Search, Paperclip, Bell, ScanEye
+  Search, Paperclip, Bell, ScanEye, RotateCw
 } from 'lucide-react'
 import { db, type Jaminan, type TerapiItem, type DiagnosisItem, type RegexField, type Patient, type RawatEpisode, type PeranRawat, type InboxItem, type AttachmentTag } from '../db'
 import { DEPT_ALIH_RAWAT } from './PatientProfile'
@@ -46,9 +46,50 @@ import {
   dismissInboxItem,
   markInboxItemImported,
   dismissAllInboxItems,
+  syncWaInboxToDexie,
 } from '../utils/waInboxSync'
 
 const today = () => getLocalDateString()
+
+function splitConsultAndAdvis(rawText: string): { consult: string; advis: string } {
+  if (!rawText) return { consult: '', advis: '' }
+
+  // 1. Tag pemisah eksplisit dari gateway / server: "---" atau "*Jawaban / Advis Dokter:*"
+  const explicitMarker = rawText.match(/\n\s*---\s*\n\s*(?:\*?Jawaban\s*\/?\s*Advis\s*Dokter\*?[:\s]*)?/i)
+  if (explicitMarker && explicitMarker.index !== undefined) {
+    return {
+      consult: rawText.slice(0, explicitMarker.index).trim(),
+      advis: rawText.slice(explicitMarker.index + explicitMarker[0].length).trim(),
+    }
+  }
+
+  // 2. Pemisah "Mohon advis..." diikuti oleh jawaban dokter "A:" atau "PTx:"
+  const mohonAdvisMatch = rawText.match(/\n(Mohon\s*(?:advis|tatalaksana|petunjuk|arahan)[^\n]*)\n+([\s\S]*)/i)
+  if (mohonAdvisMatch && mohonAdvisMatch.index !== undefined) {
+    const afterMohon = mohonAdvisMatch[2].trim()
+    if (afterMohon.length > 0) {
+      const consultEnd = mohonAdvisMatch.index + mohonAdvisMatch[1].length + 1
+      return {
+        consult: rawText.slice(0, consultEnd).trim(),
+        advis: afterMohon,
+      }
+    }
+  }
+
+  // 3. Deteksi balasan sekunder "A:" setelah seksi PLANNING/PTx pertama
+  const secondA = rawText.match(/(?:PLANNING|PTx)[\s\S]*?\n\s*\n\s*(A\s*:\s*\n[\s\S]+)/i)
+  if (secondA && secondA.index !== undefined) {
+    const splitIdx = rawText.lastIndexOf(secondA[1])
+    if (splitIdx > 0) {
+      return {
+        consult: rawText.slice(0, splitIdx).trim(),
+        advis: rawText.slice(splitIdx).trim(),
+      }
+    }
+  }
+
+  return { consult: rawText, advis: '' }
+}
 
 interface StagedAnalysis {
   A: DiagnosisItem[]
@@ -194,7 +235,18 @@ export default function Brainstorm() {
   const [importingInboxId, setImportingInboxId] = useState<string | number | null>(null)
   const [importProgress, setImportProgress] = useState<number>(0)
   const [importStepText, setImportStepText] = useState<string>('')
+  const [isSyncingInbox, setIsSyncingInbox] = useState(false)
   const importingInboxIdRef = useRef<string | number | null>(null)
+
+  const handleManualSyncInbox = async () => {
+    if (isSyncingInbox || importingInboxId) return
+    setIsSyncingInbox(true)
+    try {
+      await syncWaInboxToDexie()
+    } finally {
+      setTimeout(() => setIsSyncingInbox(false), 500)
+    }
+  }
   const showInboxModalRef = useRef(showInboxModal)
   const showSearchModalRef = useRef(showSearchModal)
   const viewerStateRef = useRef(viewerState)
@@ -2582,14 +2634,35 @@ export default function Brainstorm() {
           >
             {/* Header Modal */}
             <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
-              <h3 className="text-sm font-bold text-slate-900">Inbox</h3>
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2">
+                <h3 className="text-sm font-bold text-slate-900">Inbox</h3>
+                {pendingInboxItems.length > 0 && (
+                  <span className="text-[11px] font-semibold text-primary bg-primary/10 px-2 py-0.5 rounded-full">
+                    {pendingInboxItems.length}
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  disabled={Boolean(importingInboxId) || isSyncingInbox}
+                  onClick={handleManualSyncInbox}
+                  title="Segarkan antrean konsul"
+                  aria-label="Segarkan antrean konsul"
+                  className={`rounded-full p-1.5 text-slate-400 transition-all ${
+                    importingInboxId
+                      ? 'opacity-40 pointer-events-none'
+                      : 'cursor-pointer hover:text-slate-700 hover:bg-slate-100 active:scale-95'
+                  }`}
+                >
+                  <RotateCw size={16} className={isSyncingInbox ? 'animate-spin text-primary' : ''} />
+                </button>
                 {pendingInboxItems.length > 1 && (
                   <button
                     type="button"
                     disabled={Boolean(importingInboxId)}
                     onClick={handleDismissAllInbox}
-                    className={`text-xs font-semibold transition-colors cursor-pointer ${
+                    className={`text-xs font-semibold transition-colors cursor-pointer ml-1 ${
                       importingInboxId ? 'opacity-40 pointer-events-none text-slate-300' : 'text-slate-400 hover:text-red-600'
                     }`}
                   >
@@ -2601,7 +2674,7 @@ export default function Brainstorm() {
                   disabled={Boolean(importingInboxId)}
                   onClick={() => setShowInboxModal(false)}
                   aria-label="Tutup"
-                  className={`rounded-full p-1.5 text-slate-400 transition-colors ${
+                  className={`rounded-full p-1.5 text-slate-400 transition-colors ml-1 ${
                     importingInboxId ? 'opacity-40 pointer-events-none' : 'cursor-pointer hover:text-slate-700 hover:bg-slate-100'
                   }`}
                 >
@@ -2620,130 +2693,163 @@ export default function Brainstorm() {
                   </p>
                 </div>
               ) : (
-                pendingInboxItems.map((item) => (
-                  <div key={item.id} className="pt-5 first:pt-0 space-y-3">
-                    {/* Header item: Pengirim & Waktu */}
-                    <div className="flex items-baseline justify-between gap-2">
-                      <div className="min-w-0">
-                        <span className="text-sm font-bold text-slate-900">
-                          {item.parsed_data?.nama_depan || item.sender_name || 'Konsul Pasien'}
-                        </span>
-                        {item.parsed_data?.usia && (
-                          <span className="ml-1.5 text-xs text-slate-500 font-medium">
-                            ({item.parsed_data.usia})
+                pendingInboxItems.map((item) => {
+                  const { consult, advis } = splitConsultAndAdvis(item.raw_text || '')
+                  return (
+                    <div key={item.id} className="pt-5 first:pt-0 space-y-3">
+                      {/* Header item: Pengirim & Waktu */}
+                      <div className="flex items-baseline justify-between gap-2">
+                        <div className="min-w-0">
+                          <span className="text-sm font-bold text-slate-900">
+                            {item.parsed_data?.nama_depan || item.sender_name || 'Konsul Pasien'}
+                          </span>
+                          {item.parsed_data?.usia && (
+                            <span className="ml-1.5 text-xs text-slate-500 font-medium">
+                              ({item.parsed_data.usia})
+                            </span>
+                          )}
+                        </div>
+                        {item.created_at && (
+                          <span className="text-[11px] text-slate-400 shrink-0">
+                            {new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                           </span>
                         )}
                       </div>
-                      {item.created_at && (
-                        <span className="text-[11px] text-slate-400 shrink-0">
-                          {new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                        </span>
+
+                      {/* Teks Konsulan Awal */}
+                      {consult && (
+                        <div className="space-y-1">
+                          {advis && (
+                            <div className="text-[11px] font-semibold text-slate-500">
+                              Pesan Konsul
+                            </div>
+                          )}
+                          <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200/80 text-xs text-slate-800 leading-relaxed whitespace-pre-wrap select-text max-h-56 overflow-y-auto font-sans">
+                            {consult}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Lampiran Gambar/Dokumen */}
+                      {item.attachments && item.attachments.length > 0 && (
+                        <div className="space-y-1.5">
+                          <div className="flex items-center justify-between text-[11px] font-semibold text-slate-600">
+                            <span>Lampiran ({item.attachments.length})</span>
+                            <span className="text-[10px] text-slate-400 font-normal">Ketuk untuk memperbesar</span>
+                          </div>
+                          <div className="grid grid-cols-3 gap-2">
+                            {item.attachments.map((att: any, idx: number) => {
+                              const isImg = att.type?.startsWith('image/') || att.dataUrl?.startsWith('data:image/') || att.url
+                              return (
+                                <div
+                                  key={att.id || idx}
+                                  onClick={() => {
+                                    if (isImg && (att.dataUrl || att.url)) {
+                                      const imgAtts = (item.attachments || [])
+                                        .filter((x: any) => x.type?.startsWith('image/') || x.dataUrl?.startsWith('data:image/') || x.url)
+                                        .map((x: any) => ({ url: x.dataUrl || x.url, name: x.name, type: x.type }))
+                                      const cIdx = imgAtts.findIndex((x: any) => (x.url === (att.dataUrl || att.url)))
+                                      setViewerState({
+                                        isOpen: true,
+                                        images: imgAtts,
+                                        initialIndex: Math.max(0, cIdx),
+                                      })
+                                    }
+                                  }}
+                                  className={`relative rounded-xl overflow-hidden border border-slate-200 bg-slate-100 aspect-video flex items-center justify-center text-[11px] text-slate-500 p-1 ${
+                                    isImg ? 'cursor-pointer hover:border-primary group transition-colors' : ''
+                                  }`}
+                                >
+                                  {isImg && (att.dataUrl || att.url) ? (
+                                    <>
+                                      <img
+                                        src={att.dataUrl || att.url}
+                                        alt={att.name || 'Lampiran'}
+                                        className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                                      />
+                                      <div className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                                        <span className="text-[10px] font-bold text-white bg-slate-900/70 px-2 py-0.5 rounded-md">
+                                          Zoom
+                                        </span>
+                                      </div>
+                                    </>
+                                  ) : (
+                                    <span className="truncate px-1 text-center font-medium">
+                                      {att.name || 'Dokumen'}
+                                    </span>
+                                  )}
+                                </div>
+                              )
+                            })}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Jawaban / Advis Dokter (ditempatkan tepat di bawah lampiran!) */}
+                      {advis && (
+                        <div className="space-y-1 pt-1">
+                          <div className="flex items-center justify-between text-[11px]">
+                            <span className="font-bold text-teal-800">
+                              Jawaban / Advis Anda (Dokter)
+                            </span>
+                            <span className="text-[10px] text-teal-600 font-medium">
+                              Otomatis ke A & P
+                            </span>
+                          </div>
+                          <div className="p-3 bg-teal-50/70 rounded-2xl border border-teal-200/80 text-xs text-teal-950 leading-relaxed whitespace-pre-wrap select-text max-h-52 overflow-y-auto font-sans">
+                            {advis}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Tombol Aksi Simpel atau Progress Bar Ala Darka */}
+                      {importingInboxId === (item.id || item.created_at) ? (
+                        <div className="w-full mt-2 p-3 bg-slate-50 border border-primary/20 rounded-2xl space-y-2 animate-in fade-in duration-200">
+                          <div className="flex items-center gap-2 text-xs">
+                            <Loader2 className="w-3.5 h-3.5 text-primary animate-spin shrink-0" />
+                            <span className="font-semibold text-slate-800 truncate">
+                              {importStepText || 'Sedang memproses lampiran & data konsul...'}
+                            </span>
+                            <span className="ml-auto text-xs font-mono text-primary font-bold">
+                              {Math.floor(importProgress)}%
+                            </span>
+                          </div>
+                          <div className="w-full h-1.5 bg-slate-200/80 rounded-full overflow-hidden">
+                            <div
+                              className="h-full bg-primary transition-all duration-200 ease-out rounded-full shadow-xs"
+                              style={{ width: `${Math.max(importProgress, 4)}%` }}
+                            />
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex items-center justify-end gap-2 pt-1">
+                          <button
+                            type="button"
+                            disabled={Boolean(importingInboxId)}
+                            onClick={() => {
+                              dismissInboxItem(item.id || item.created_at)
+                            }}
+                            className={`px-3 py-1.5 text-xs font-semibold rounded-xl transition-colors cursor-pointer ${
+                              importingInboxId ? 'opacity-40 pointer-events-none text-slate-400' : 'text-slate-500 hover:text-red-600 hover:bg-red-50'
+                            }`}
+                          >
+                            Hapus
+                          </button>
+                          <button
+                            type="button"
+                            disabled={Boolean(importingInboxId)}
+                            onClick={() => handleImportInboxItem(item)}
+                            className={`px-4 py-1.5 bg-primary text-white text-xs font-bold rounded-xl active:scale-95 transition-all cursor-pointer shadow-xs ${
+                              importingInboxId ? 'opacity-40 pointer-events-none' : 'hover:bg-primary-deep'
+                            }`}
+                          >
+                            Catat Pasien
+                          </button>
+                        </div>
                       )}
                     </div>
-
-                    {/* Teks Pesan Lengkap — Luas & Mudah Dibaca */}
-                    {item.raw_text && (
-                      <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200/80 text-xs text-slate-800 leading-relaxed whitespace-pre-wrap select-text max-h-60 overflow-y-auto font-sans">
-                        {item.raw_text}
-                      </div>
-                    )}
-
-                    {/* Lampiran Gambar/Dokumen */}
-                    {item.attachments && item.attachments.length > 0 && (
-                      <div className="grid grid-cols-3 gap-2">
-                        {item.attachments.map((att: any, idx: number) => {
-                          const isImg = att.type?.startsWith('image/') || att.dataUrl?.startsWith('data:image/')
-                          return (
-                            <div
-                              key={att.id || idx}
-                              onClick={() => {
-                                if (isImg && (att.dataUrl || att.url)) {
-                                  const imgAtts = (item.attachments || [])
-                                    .filter((x: any) => x.type?.startsWith('image/') || x.dataUrl?.startsWith('data:image/') || x.url)
-                                    .map((x: any) => ({ url: x.dataUrl || x.url, name: x.name, type: x.type }))
-                                  const cIdx = imgAtts.findIndex((x: any) => (x.url === (att.dataUrl || att.url)))
-                                  setViewerState({
-                                    isOpen: true,
-                                    images: imgAtts,
-                                    initialIndex: Math.max(0, cIdx),
-                                  })
-                                }
-                              }}
-                              className={`relative rounded-xl overflow-hidden border border-slate-200 bg-slate-100 aspect-video flex items-center justify-center text-[11px] text-slate-500 p-1 ${
-                                isImg ? 'cursor-pointer hover:border-primary group transition-colors' : ''
-                              }`}
-                            >
-                              {isImg && (att.dataUrl || att.url) ? (
-                                <>
-                                  <img
-                                    src={att.dataUrl || att.url}
-                                    alt={att.name || 'Lampiran'}
-                                    className="w-full h-full object-cover group-hover:scale-105 transition-transform"
-                                  />
-                                  <div className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                                    <span className="text-[10px] font-bold text-white bg-slate-900/70 px-2 py-0.5 rounded-md">
-                                      Zoom
-                                    </span>
-                                  </div>
-                                </>
-                              ) : (
-                                <span className="truncate px-1 text-center font-medium">
-                                  {att.name || 'Dokumen'}
-                                </span>
-                              )}
-                            </div>
-                          )
-                        })}
-                      </div>
-                    )}
-
-                    {/* Tombol Aksi Simpel atau Progress Bar Ala Darka */}
-                    {importingInboxId === (item.id || item.created_at) ? (
-                      <div className="w-full mt-2 p-3 bg-slate-50 border border-primary/20 rounded-2xl space-y-2 animate-in fade-in duration-200">
-                        <div className="flex items-center gap-2 text-xs">
-                          <Loader2 className="w-3.5 h-3.5 text-primary animate-spin shrink-0" />
-                          <span className="font-semibold text-slate-800 truncate">
-                            {importStepText || 'Sedang memproses lampiran & data konsul...'}
-                          </span>
-                          <span className="ml-auto text-xs font-mono text-primary font-bold">
-                            {Math.floor(importProgress)}%
-                          </span>
-                        </div>
-                        <div className="w-full h-1.5 bg-slate-200/80 rounded-full overflow-hidden">
-                          <div
-                            className="h-full bg-primary transition-all duration-200 ease-out rounded-full shadow-xs"
-                            style={{ width: `${Math.max(importProgress, 4)}%` }}
-                          />
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="flex items-center justify-end gap-2 pt-1">
-                        <button
-                          type="button"
-                          disabled={Boolean(importingInboxId)}
-                          onClick={() => {
-                            dismissInboxItem(item.id || item.created_at)
-                          }}
-                          className={`px-3 py-1.5 text-xs font-semibold rounded-xl transition-colors cursor-pointer ${
-                            importingInboxId ? 'opacity-40 pointer-events-none text-slate-400' : 'text-slate-500 hover:text-red-600 hover:bg-red-50'
-                          }`}
-                        >
-                          Hapus
-                        </button>
-                        <button
-                          type="button"
-                          disabled={Boolean(importingInboxId)}
-                          onClick={() => handleImportInboxItem(item)}
-                          className={`px-4 py-1.5 bg-primary text-white text-xs font-bold rounded-xl active:scale-95 transition-all cursor-pointer shadow-xs ${
-                            importingInboxId ? 'opacity-40 pointer-events-none' : 'hover:bg-primary-deep'
-                          }`}
-                        >
-                          Catat Pasien
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                ))
+                  )
+                })
               )}
             </div>
           </div>

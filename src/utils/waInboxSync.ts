@@ -506,9 +506,11 @@ export async function syncWaInboxToDexie() {
 
     // Sinkronisasi status: Jika item aktif di server sudah berkurang/dibersihkan,
     // maka item lokal yang pending namun sudah tidak ada di server otomatis di-dismiss
-    const activeServerKeys = new Set(
-      items.map((it) => String(it.id || it.created_at || ''))
-    )
+    const activeServerKeys = new Set<string>()
+    items.forEach((it) => {
+      if (it.id) activeServerKeys.add(String(it.id))
+      if (it.created_at) activeServerKeys.add(String(it.created_at))
+    })
 
     const localPending = await db.inboxQueue.where('status').equals('pending').toArray()
     for (const loc of localPending) {
@@ -526,16 +528,17 @@ export async function syncWaInboxToDexie() {
 
       // Cek apakah item sudah pernah tercatat di inboxQueue lokal berdasarkan ID / timestamp unik
       const existing = await db.inboxQueue
-        .filter(
-          (q) =>
-            Boolean(item.created_at && q.created_at === item.created_at) ||
-            Boolean(item.id && q.id === item.id)
-        )
+        .filter((q) => {
+          const idMatch = Boolean(item.id && q.id && String(q.id) === String(item.id))
+          const timeMatch = Boolean(item.created_at && q.created_at && q.created_at === item.created_at)
+          return idMatch || timeMatch
+        })
         .first()
 
       if (!existing) {
-        await db.inboxQueue.add({
-          id: typeof item.id === 'number' ? item.id : undefined,
+        const numericId = typeof item.id === 'number' ? item.id : Number(item.id) || undefined
+        await db.inboxQueue.put({
+          ...(numericId ? { id: numericId } : {}),
           source: 'whatsapp',
           sender_name: item.sender_name || 'Konsulan WhatsApp',
           sender_phone: item.sender_phone || '',
@@ -557,11 +560,12 @@ export async function syncWaInboxToDexie() {
         const incomingDataLen = (item.attachments?.[0]?.dataUrl || '').length
         const attachUpdated = newAttachCount !== oldAttachCount || (incomingDataLen > existingDataLen)
 
-        if (newAttachCount > 0 && (attachUpdated || textChanged)) {
+        if (attachUpdated || textChanged) {
           await db.inboxQueue.update(existing.id!, {
             raw_text: item.raw_text || existing.raw_text,
             attachments: item.attachments || existing.attachments,
             parsed_data: item.parsed_data || existing.parsed_data,
+            created_at: item.created_at || existing.created_at,
           })
         }
       }

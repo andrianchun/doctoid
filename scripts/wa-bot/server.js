@@ -497,7 +497,11 @@ async function initBaileys() {
               if (inboxItem.parsed_data?.nama_depan) recentItem.parsed_data = inboxItem.parsed_data
             } else if (inboxItem.raw_text) {
               // Tambahkan teks baru (advis dokter atau chat lanjutan) dengan pemisah baris rapi
-              recentItem.raw_text += '\n\n' + inboxItem.raw_text
+              if (isFromDoctor && !recentItem.raw_text.includes('*Jawaban / Advis Dokter:*')) {
+                recentItem.raw_text += '\n\n---\n*Jawaban / Advis Dokter:*\n' + inboxItem.raw_text
+              } else {
+                recentItem.raw_text += '\n\n' + inboxItem.raw_text
+              }
 
               // Jika item sebelumnya belum punya nama pasien tapi pesan baru punya, update
               if (inboxItem.parsed_data?.nama_depan && !recentItem.parsed_data?.nama_depan) {
