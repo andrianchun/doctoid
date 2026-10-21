@@ -35,6 +35,7 @@ const CLINICAL_GROUP_NAME = 'Doctobot by Doctoid'
 let botConfig = {
   clinicalGroupId: null,
   clinicalGroupName: CLINICAL_GROUP_NAME,
+  brandedGroupId: null,
 }
 
 if (fs.existsSync(CONFIG_JSON_PATH)) {
@@ -122,8 +123,15 @@ Grup ini bekerja dalam mode pasif (silent listener) & terenkripsi end-to-end. Da
 
 Platform: https://docto-id.web.app`
 
-async function setupDoctoGroupBranding(groupId, currentSubject = '', customIconBuffer = null) {
+async function setupDoctoGroupBranding(groupId, currentSubject = '', customIconBuffer = null, force = false) {
   if (!sock || !groupId) return
+
+  // Cegah spam: jika grup ini sudah pernah dipasang logo dan deskripsi, lewati kecuali dipaksa manual
+  if (!force && botConfig.brandedGroupId === groupId && !customIconBuffer) {
+    console.log(`✓ Grup ${groupId} sudah memiliki branding resmi Doctobot. Melewati pembaruan ikon/nama.`)
+    return
+  }
+
   console.log(`🎨 Memeriksa branding resmi Doctobot pada grup ${groupId}...`)
 
   // 1. Rename nama grup menjadi "Doctobot by Doctoid" jika belum sesuai
@@ -138,28 +146,30 @@ async function setupDoctoGroupBranding(groupId, currentSubject = '', customIconB
     }
   }
 
-  // 2. Pasang Foto Profil Logo Resmi Docto.id
-  try {
-    let iconBuffer = customIconBuffer
-    if (!iconBuffer) {
-      const iconLocalPath = path.join(__dirname, 'icon.jpg')
-      const iconPublicPath = path.join(PUBLIC_DIR, 'icon.jpg')
-      const iconB64Path = path.join(__dirname, 'icon_b64.txt')
-      if (fs.existsSync(iconLocalPath)) {
-        iconBuffer = fs.readFileSync(iconLocalPath)
-      } else if (fs.existsSync(iconPublicPath)) {
-        iconBuffer = fs.readFileSync(iconPublicPath)
-      } else if (fs.existsSync(iconB64Path)) {
-        iconBuffer = Buffer.from(fs.readFileSync(iconB64Path, 'utf8').trim(), 'base64')
+  // 2. Pasang Foto Profil Logo Resmi Docto.id (hanya jika belum dibranding atau dipaksa)
+  if (force || botConfig.brandedGroupId !== groupId || customIconBuffer) {
+    try {
+      let iconBuffer = customIconBuffer
+      if (!iconBuffer) {
+        const iconLocalPath = path.join(__dirname, 'icon.jpg')
+        const iconPublicPath = path.join(PUBLIC_DIR, 'icon.jpg')
+        const iconB64Path = path.join(__dirname, 'icon_b64.txt')
+        if (fs.existsSync(iconLocalPath)) {
+          iconBuffer = fs.readFileSync(iconLocalPath)
+        } else if (fs.existsSync(iconPublicPath)) {
+          iconBuffer = fs.readFileSync(iconPublicPath)
+        } else if (fs.existsSync(iconB64Path)) {
+          iconBuffer = Buffer.from(fs.readFileSync(iconB64Path, 'utf8').trim(), 'base64')
+        }
       }
-    }
 
-    if (iconBuffer) {
-      await sock.updateProfilePicture(groupId, iconBuffer)
-      console.log(`✓ Foto profil logo resmi Docto.id berhasil dipasang pada grup!`)
+      if (iconBuffer) {
+        await sock.updateProfilePicture(groupId, iconBuffer)
+        console.log(`✓ Foto profil logo resmi Docto.id berhasil dipasang pada grup!`)
+      }
+    } catch (err) {
+      console.warn('⚠️ Gagal memasang foto profil grup:', err.message)
     }
-  } catch (err) {
-    console.warn('⚠️ Gagal memasang foto profil grup:', err.message)
   }
 
   // 3. Pasang Deskripsi Resmi Panduan Konsul
@@ -169,6 +179,9 @@ async function setupDoctoGroupBranding(groupId, currentSubject = '', customIconB
   } catch (err) {
     console.warn('⚠️ Gagal memasang deskripsi grup:', err.message)
   }
+
+  botConfig.brandedGroupId = groupId
+  saveBotConfig()
 }
 
 async function initBaileys() {
@@ -296,8 +309,10 @@ async function initBaileys() {
             botState.clinicalGroupName = CLINICAL_GROUP_NAME
             broadcastState()
 
-            // Modifikasi grup: Rename ke "Doctobot by Doctoid", pasang logo resmi, & deskripsi
-            await setupDoctoGroupBranding(targetGroupId, currentSubject)
+            // Modifikasi grup HANYA jika target grup belum pernah dibranding sama sekali
+            if (botConfig.brandedGroupId !== targetGroupId) {
+              await setupDoctoGroupBranding(targetGroupId, currentSubject)
+            }
           }
         } catch (err) {
           console.warn('Gagal membaca/mengatur grup klinis:', err.message)
@@ -1083,7 +1098,7 @@ const server = http.createServer(async (req, res) => {
             }
           } catch {}
         }
-        await setupDoctoGroupBranding(botConfig.clinicalGroupId, '', customBuffer)
+        await setupDoctoGroupBranding(botConfig.clinicalGroupId, '', customBuffer, true)
         res.writeHead(200, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify({ success: true, message: 'Logo dan deskripsi grup berhasil diperbarui.' }))
       } catch (err) {
