@@ -21,7 +21,7 @@ const ShareReceiver: ShareReceiverPlugin | null = Capacitor.isNativePlatform()
   : null
 import {
   Mic,
-  Trash2, Loader2, X, ChevronDown, Send,
+  Loader2, X, ChevronDown, Send,
   Search, Paperclip, Bell, ScanEye, RotateCw
 } from 'lucide-react'
 import { db, type Jaminan, type TerapiItem, type DiagnosisItem, type RegexField, type Patient, type RawatEpisode, type PeranRawat, type InboxItem, type AttachmentTag } from '../db'
@@ -217,6 +217,8 @@ export default function Brainstorm() {
   useBodyScrollLock(showSearchModal)
   const [showInboxModal, setShowInboxModal] = useState(false)
   useBodyScrollLock(showInboxModal)
+  const [showClearConfirmModal, setShowClearConfirmModal] = useState(false)
+  useBodyScrollLock(showClearConfirmModal)
 
   useEffect(() => {
     const handler = () => setShowInboxModal(true)
@@ -269,6 +271,7 @@ export default function Brainstorm() {
   }, [showInboxModal])
   const showInboxModalRef = useRef(showInboxModal)
   const showSearchModalRef = useRef(showSearchModal)
+  const showClearConfirmModalRef = useRef(showClearConfirmModal)
   const viewerStateRef = useRef(viewerState)
 
   useEffect(() => {
@@ -284,6 +287,10 @@ export default function Brainstorm() {
   }, [showSearchModal])
 
   useEffect(() => {
+    showClearConfirmModalRef.current = showClearConfirmModal
+  }, [showClearConfirmModal])
+
+  useEffect(() => {
     viewerStateRef.current = viewerState
   }, [viewerState])
 
@@ -295,6 +302,10 @@ export default function Brainstorm() {
       backHandle = await CapApp.addListener('backButton', () => {
         // Jika sedang memproses import AI, jangan tutup modal atau kembali agar tidak gagal
         if (importingInboxIdRef.current) {
+          return
+        }
+        if (showClearConfirmModalRef.current) {
+          setShowClearConfirmModal(false)
           return
         }
         if (showInboxModalRef.current) {
@@ -1109,20 +1120,19 @@ export default function Brainstorm() {
     }
   }
 
-  const handleClearAll = async () => {
-    if (window.confirm('Kosongkan semua isian formulir?')) {
-      setForm(emptyForm())
-      setRaw('')
-      setAttachments([])
-      setKomentarAnalisis('')
-      setStagedAnalysis(null)
-      setSelectedPatient(null)
-      setDetectedPatient(null)
-      setHospitalId(0)
-      setWardId(0)
-      await db.brainstormDraft.delete(1)
-      notify('Formulir berhasil dikosongkan')
-    }
+  const handleClearConfirmed = async () => {
+    setShowClearConfirmModal(false)
+    setForm(emptyForm())
+    setRaw('')
+    setAttachments([])
+    setKomentarAnalisis('')
+    setStagedAnalysis(null)
+    setSelectedPatient(null)
+    setDetectedPatient(null)
+    setHospitalId(0)
+    setWardId(0)
+    await db.brainstormDraft.delete(1)
+    notify('Formulir berhasil dikosongkan')
   }
 
   const runAnalisis = async () => {
@@ -1639,12 +1649,12 @@ export default function Brainstorm() {
           {isFormFilled && (
             <button
               type="button"
-              onClick={handleClearAll}
-              className="rounded-xl bg-rose-500 hover:bg-rose-600 active:scale-95 px-3 py-1.5 text-xs font-bold text-white transition-all cursor-pointer border border-rose-400/40 shadow-sm shadow-rose-950/20 flex items-center gap-1.5 animate-in fade-in zoom-in-95 duration-200"
-              title="Kosongkan seluruh isian formulir"
+              onClick={() => setShowClearConfirmModal(true)}
+              className="flex items-center justify-center size-9 rounded-2xl bg-white/15 hover:bg-rose-500/80 active:scale-95 text-white transition-all cursor-pointer border border-white/20 shadow-xs animate-in fade-in zoom-in-95 duration-200"
+              title="Kosongkan formulir"
+              aria-label="Kosongkan formulir"
             >
-              <Trash2 size={13} />
-              Hapus
+              <X size={18} />
             </button>
           )}
         </div>
@@ -2984,6 +2994,42 @@ export default function Brainstorm() {
                   )
                 })
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Konfirmasi Kosongkan Formulir */}
+      {showClearConfirmModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-in fade-in select-none"
+          onClick={() => setShowClearConfirmModal(false)}
+        >
+          <div
+            className="w-full max-w-sm rounded-3xl bg-white p-5 shadow-2xl border border-slate-200 animate-in zoom-in-95 duration-150 select-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-base font-bold text-slate-900">
+              Kosongkan Formulir?
+            </h3>
+            <p className="mt-2 text-xs leading-relaxed text-slate-600">
+              Apakah Anda yakin ingin menghapus seluruh isi form input? Seluruh isian identitas, SOAP, dan lampiran yang belum disimpan akan dikosongkan.
+            </p>
+            <div className="mt-5 flex items-center justify-end gap-2.5">
+              <button
+                type="button"
+                onClick={() => setShowClearConfirmModal(false)}
+                className="rounded-xl px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 active:scale-95 transition-all cursor-pointer"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                onClick={handleClearConfirmed}
+                className="rounded-xl bg-rose-600 hover:bg-rose-700 active:scale-95 px-4 py-2 text-xs font-bold text-white shadow-sm shadow-rose-950/20 transition-all cursor-pointer"
+              >
+                Kosongkan
+              </button>
             </div>
           </div>
         </div>

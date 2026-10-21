@@ -186,58 +186,204 @@ export async function exportTables(): Promise<Record<string, unknown[]>> {
   const out: Record<string, unknown[]> = {}
   for (const t of TABLES) {
     const list = await db.table(t).toArray()
+    let cleanedList = list
+
+    // Optimasi ukuran dokumen Firestore (Mencegah melampaui batas 1 MB Firebase):
+    // 1. therapyHistory: simpan 150 record terbaru untuk sinkronisasi cloud
+    if (t === 'therapyHistory' && list.length > 150) {
+      cleanedList = list.slice(-150)
+    }
+
+    // 2. progressNotes & penunjang: jika ada dataUrl base64 berukuran besar (>50KB per file),
+    // simpan secara utuh di Dexie lokal perangkat, namun untuk cloud payload cukup bawa metadata
+    // agar setDoc() tidak ditolak Firestore karena melebihi batas 1 MB.
+    if (t === 'progressNotes') {
+      cleanedList = list.map((item: any) => {
+        if (Array.isArray(item.attachments)) {
+          const safeAtts = item.attachments.map((att: any) => {
+            if (att.dataUrl && att.dataUrl.length > 50000) {
+              return { ...att, dataUrl: '' }
+            }
+            return att
+          })
+          return { ...item, attachments: safeAtts }
+        }
+        return item
+      })
+    }
+
+    if (t === 'penunjang') {
+      cleanedList = list.map((item: any) => {
+        if (item.dataUrl && item.dataUrl.length > 50000) {
+          return { ...item, dataUrl: '' }
+        }
+        if (item.foto_url && item.foto_url.length > 50000) {
+          return { ...item, foto_url: '' }
+        }
+        return item
+      })
+    }
+
     // JSON parse/stringify cycle removes any undefined fields safely to prevent Firestore setDoc error
-    out[t] = JSON.parse(JSON.stringify(list))
+    out[t] = JSON.parse(JSON.stringify(cleanedList))
   }
   return out
 }
 
-/* Proteksi Wipe-Out: Validasi snapshot sebelum penimpaan & simpan safety backup */
+/**
+ * Pemulihan otomatis jika ada data lokal (pasien baru, status KRS, progress note)
+ * yang sempat tertimpa oleh snapshot lama sebelum perbaikan Two-Way Merge.
+ */
+export async function autoRecoverPreSyncBackup(): Promise<number> {
+  try {
+    const raw = sessionStorage.getItem('doctoid_pre_sync_backup') || localStorage.getItem('doctoid_pre_sync_backup')
+    if (!raw) return 0
+    const backup = JSON.parse(raw) as Record<string, any[]>
+    if (!backup || typeof backup !== 'object') return 0
+
+    let restoredCount = 0
+
+    // 1. Pulihkan pasien yang hilang atau status KRS yang ter-revert
+    if (Array.isArray(backup.patients)) {
+      const currentPatients = await db.patients.toArray()
+      const currentMap = new Map(currentPatients.map((p) => [p.id, p]))
+
+      for (const bp of backup.patients) {
+        if (!bp || bp.id == null) continue
+        const cur = currentMap.get(bp.id)
+
+        if (!cur) {
+          // Pasien di backup belum ada di DB lokal saat ini (misal pasien Puspa yang hilang)
+          await db.patients.put(bp)
+          restoredCount++
+          console.log(`[Auto-Recovery] Memulihkan pasien yang hilang: ${bp.nama_depan} (ID: ${bp.id})`)
+        } else if (cur.status_rawat === 'aktif' && bp.status_rawat === 'krs') {
+          // Status KRS yang sempat ter-revert jadi aktif
+          await db.patients.update(cur.id!, {
+            status_rawat: 'krs',
+            tgl_krs: bp.tgl_krs,
+            keterangan_krs: bp.keterangan_krs,
+          })
+          restoredCount++
+          console.log(`[Auto-Recovery] Memulihkan status KRS pasien: ${cur.nama_depan}`)
+        }
+      }
+    }
+
+    // 2. Pulihkan progressNotes yang hilang
+    if (Array.isArray(backup.progressNotes)) {
+      const currentNotes = await db.progressNotes.toArray()
+      const noteIds = new Set(currentNotes.map((n) => n.id).filter(Boolean))
+
+      for (const bn of backup.progressNotes) {
+        if (bn && bn.id != null && !noteIds.has(bn.id)) {
+          await db.progressNotes.put(bn)
+          restoredCount++
+        }
+      }
+    }
+
+    // 3. Pulihkan penunjang yang hilang
+    if (Array.isArray(backup.penunjang)) {
+      const currentPenunjang = await db.penunjang.toArray()
+      const pjIds = new Set(currentPenunjang.map((p) => p.id).filter(Boolean))
+
+      for (const bpj of backup.penunjang) {
+        if (bpj && bpj.id != null && !pjIds.has(bpj.id)) {
+          await db.penunjang.put(bpj)
+          restoredCount++
+        }
+      }
+    }
+
+    if (restoredCount > 0) {
+      console.log(`✓ Auto-Recovery: Berhasil memulihkan ${restoredCount} data dari cadangan pra-sinkronisasi.`)
+      const aktifList = await db.patients.where('status_rawat').equals('aktif').toArray()
+      cachePatients(aktifList)
+      cacheAllPatients(await db.patients.toArray())
+      cacheNotes(await db.progressNotes.toArray())
+      triggerCloudSync(300)
+    }
+
+    return restoredCount
+  } catch (err) {
+    console.warn('Gagal memulihkan cadangan pra-sinkronisasi:', err)
+    return 0
+  }
+}
+
+/* Two-Way Smart Merge: Menggabungkan data cloud ke database lokal tanpa pernah menghapus data lokal yang belum tersinkron */
 export async function safeImportTables(tables: Record<string, unknown[]>): Promise<boolean> {
   if (!tables || typeof tables !== 'object') {
     throw new Error('Data tabel tidak valid untuk diimpor.')
   }
 
-  // Hitung total seluruh record lokal vs remote (tidak hanya pasien, termasuk faskes & template)
-  let localTotal = 0
-  for (const t of TABLES) {
-    try {
-      localTotal += await db.table(t).count()
-    } catch {
-      // ignore
-    }
-  }
-
-  let remoteTotal = 0
-  for (const t of TABLES) {
-    if (Array.isArray(tables[t])) {
-      remoteTotal += tables[t].length
-    }
-  }
-
-  // Jika lokal memiliki data tapi remote kosong (mis. faskes baru dibuat di lokal), jangan hapus lokal!
-  if (localTotal > 0 && remoteTotal === 0) {
-    console.warn('WIPEOUT SHIELD: Mencegah penimpaan database lokal dengan remote kosong. Memicu push.')
-    return false
-  }
-
-  // Backup data lokal terakhir sebelum ditimpa
+  // Backup data lokal terakhir sebelum penggabungan (disimpan di sessionStorage dan localStorage)
   try {
     const currentLocal = await exportTables()
-    sessionStorage.setItem('doctoid_pre_sync_backup', JSON.stringify(currentLocal))
+    const serialized = JSON.stringify(currentLocal)
+    sessionStorage.setItem('doctoid_pre_sync_backup', serialized)
+    localStorage.setItem('doctoid_pre_sync_backup', serialized)
   } catch {
     // abaikan jika storage penuh
   }
 
-  // Set flag agar Dexie hooks tidak memicu sync looping
+  // Set flag agar Dexie hooks tidak memicu sync looping saat memproses import
   isImporting = true
+  let hasLocalOnlyRecords = false
+
   try {
     await db.transaction('rw', TABLES.map((t) => db.table(t)), async () => {
       for (const t of TABLES) {
-        if (Array.isArray(tables[t])) {
-          await db.table(t).clear()
-          if (tables[t].length > 0) {
-            await db.table(t).bulkPut(tables[t])
+        if (!Array.isArray(tables[t])) continue
+        const remoteList = tables[t] as any[]
+        const localItems = await db.table(t).toArray()
+        const localMap = new Map(localItems.map((item: any) => [item.id, item]))
+        const remoteIdSet = new Set(remoteList.map((item: any) => item?.id).filter((id) => id != null))
+
+        // Cek apakah ada record lokal yang belum dimiliki oleh remote (misal pasien yang baru diinput di HP ini)
+        for (const localItem of localItems) {
+          if (localItem && localItem.id != null && !remoteIdSet.has(localItem.id)) {
+            hasLocalOnlyRecords = true
+            // JANGAN DIHAPUS! Tetap pertahankan record lokal ini
+          }
+        }
+
+        // Lakukan penggabungan cerdas untuk setiap item dari remote
+        for (const remoteItem of remoteList) {
+          if (!remoteItem || remoteItem.id == null) continue
+          const existingLocal = localMap.get(remoteItem.id)
+
+          if (existingLocal) {
+            // Khusus tabel pasien: Jangan pernah me-revert pasien yang sudah KRS menjadi aktif kembali
+            if (t === 'patients') {
+              if (existingLocal.status_rawat === 'krs' && remoteItem.status_rawat === 'aktif') {
+                remoteItem.status_rawat = 'krs'
+                remoteItem.tgl_krs = existingLocal.tgl_krs || remoteItem.tgl_krs
+                remoteItem.keterangan_krs = existingLocal.keterangan_krs || remoteItem.keterangan_krs
+              }
+            }
+
+            // Khusus progressNotes & penunjang: Jangan hilangkan foto/dataUrl lokal jika remote berukuran kosong
+            if (t === 'progressNotes' && Array.isArray(remoteItem.attachments) && Array.isArray(existingLocal.attachments)) {
+              remoteItem.attachments = remoteItem.attachments.map((rAtt: any, idx: number) => {
+                const lAtt = existingLocal.attachments[idx] || existingLocal.attachments.find((a: any) => a.name === rAtt.name)
+                if (!rAtt.dataUrl && lAtt?.dataUrl) {
+                  return { ...rAtt, dataUrl: lAtt.dataUrl }
+                }
+                return rAtt
+              })
+            }
+
+            if (t === 'penunjang') {
+              if (!remoteItem.dataUrl && existingLocal.dataUrl) remoteItem.dataUrl = existingLocal.dataUrl
+              if (!remoteItem.foto_url && existingLocal.foto_url) remoteItem.foto_url = existingLocal.foto_url
+            }
+
+            await db.table(t).put(remoteItem)
+          } else {
+            // Record baru dari remote yang belum ada di lokal
+            await db.table(t).put(remoteItem)
           }
         }
       }
@@ -262,6 +408,11 @@ export async function safeImportTables(tables: Record<string, unknown[]>): Promi
     }
   } finally {
     isImporting = false
+  }
+
+  // Jika lokal memiliki data yang belum dimiliki remote, langsung picu auto-push agar cloud ikut terupdate
+  if (hasLocalOnlyRecords) {
+    triggerCloudSync(200)
   }
 
   return true
@@ -380,19 +531,25 @@ export async function syncUserCloud(uid: string, forcePush = false): Promise<str
   const tables = await exportTables()
   const currentProfile = getSavedUserProfile()
 
-  await setDoc(
-    ref,
-    {
-      tables,
-      devices,
-      updatedAt,
-      displayName: currentProfile?.displayName || null,
-      photoURL: currentProfile?.photoURL || null,
-      specialty: currentProfile?.specialty || getDoctorSpecialty(),
-      email: currentProfile?.email || null,
-    },
-    { merge: true }
-  )
+  try {
+    await setDoc(
+      ref,
+      {
+        tables,
+        devices,
+        updatedAt,
+        displayName: currentProfile?.displayName || null,
+        photoURL: currentProfile?.photoURL || null,
+        specialty: currentProfile?.specialty || getDoctorSpecialty(),
+        email: currentProfile?.email || null,
+      },
+      { merge: true }
+    )
+    console.log(`[Sync] ✓ Sukses PUSH data ke Firestore Cloud users/${uid}! Waktu: ${new Date(updatedAt).toLocaleTimeString()}`)
+  } catch (err: any) {
+    console.error(`[Sync] ❌ Gagal PUSH data ke Firestore Cloud:`, err.message || err)
+    throw err
+  }
 
   localStorage.setItem('doctoid_last_push', String(updatedAt))
   localStorage.setItem('doctoid_devices', JSON.stringify(devices))

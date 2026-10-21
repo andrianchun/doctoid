@@ -19,7 +19,7 @@ import PatientProfile from './pages/PatientProfile'
 import Settings from './pages/Settings'
 import DoctorProfile from './pages/DoctorProfile'
 import { initAuthListener } from './auth'
-import { checkRevoked, initRealtimeCloudSync, fbConfigured } from './sync'
+import { checkRevoked, initRealtimeCloudSync, fbConfigured, autoRecoverPreSyncBackup } from './sync'
 import { useWaInboxSync } from './utils/waInboxSync'
 import { sanitizeExistingPatientNamesInDb } from './utils/patientName'
 import { sanitizeMedicalRecordsInDb } from './utils/sanitizeRecords'
@@ -86,9 +86,10 @@ export default function App() {
     return () => unsubscribe()
   }, [setUser, setIsUnlocked, setAuthLoading])
 
-  // Kill switch & Sanitasi nama pasien serta rekam medis di Dexie: cek status revoke saat mount
+  // Kill switch & Sanitasi nama pasien serta pemulihan otomatis data pra-sync di Dexie:
   useEffect(() => {
     checkRevoked()
+    autoRecoverPreSyncBackup()
     sanitizeExistingPatientNamesInDb()
     sanitizeMedicalRecordsInDb()
   }, [])

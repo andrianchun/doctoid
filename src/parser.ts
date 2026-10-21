@@ -1,11 +1,10 @@
 import { db, type TerapiItem, type DiagnosisItem, type Jaminan, type RegexRule, type RegexField } from './db'
 import { getLocalDateString } from './utils/dateFormat'
+import { isValidPatientName, isGenderToken as checkGenderToken } from './utils/patientName'
 
 /* Deteksi token jenis kelamin (L/P/Laki-laki/Perempuan) agar tidak pernah salah dibaca sebagai nama pasien */
 export function isGenderToken(str: string): boolean {
-  if (!str) return false
-  const clean = str.trim().toLowerCase().replace(/^[*_~#/:,.\s]+|[*_~#/:,.\s]+$/g, '')
-  return /^(?:l|p|lk|pr|laki|laki-laki|laki2|laki\s*-\s*laki|pria|perempuan|wanita|female|male)$/i.test(clean)
+  return checkGenderToken(str)
 }
 
 export function parseGender(str: string): 'L' | 'P' | '' {
@@ -341,7 +340,7 @@ export function extractDemografi(
   const prioritizedRules = [...userRules, ...otherRules]
 
   const learnedName = applyLearnedScalar(raw, 'nama_depan', prioritizedRules)
-  if (learnedName && !isGenderToken(learnedName)) {
+  if (learnedName && isValidPatientName(learnedName) && !isGenderToken(learnedName)) {
     nama_depan = learnedName
   }
 
@@ -359,8 +358,14 @@ export function extractDemografi(
     if (!cleanLine.includes('/')) continue
     // Abaikan baris url atau header chat WhatsApp ber-timestamp
     if (/(?:^|\s)\[\d{1,2}[/-]\d{1,2}/.test(line) || /https?:\/\//i.test(line)) continue
-    // Abaikan baris TD / TTV misal "TD 120/80" atau "120/80"
-    if (/^\s*(?:td|tensi|vital\s*sign)?\s*[:=]?\s*\d{2,3}\/\d{2,3}\b/i.test(cleanLine)) continue
+    // Abaikan baris tanda vital / TTV misal "TD 120/80", "Suhu(C) : 36.5", "TTV: ...", "Nadi: 80"
+    if (
+      /^\s*(?:td|tensi|vital\s*sign|ttv|suhu|temp|nadi|hr|rr|spo2)\b/i.test(cleanLine) ||
+      /\b(?:suhu|temp|nadi|hr|heart\s*rate|rr|respirasi|spo2|gcs)\s*[:=]/i.test(cleanLine) ||
+      /^\s*(?:td|tensi|vital\s*sign)?\s*[:=]?\s*\d{2,3}\/\d{2,3}\b/i.test(cleanLine)
+    ) {
+      continue
+    }
 
     const segments = cleanLine.split('/').map((s) => s.trim()).filter(Boolean)
     if (segments.length < 2) continue
@@ -372,13 +377,29 @@ export function extractDemografi(
         continue // PASTI BUKAN NAMA
       }
 
-      // B. Cek apakah segmen ini Usia
-      const ageMatch = seg.match(/\b(\d{1,3})\s*(?:th|thn|tahun|bln|bulan|hari|yo)\b/i) || seg.match(/^(\d{1,3})$/)
+      // B. Cek apakah segmen ini Usia (dengan satuan eksplisit atau konteks identitas kuat)
+      const ageMatch = seg.match(/\b(\d{1,3})\s*(?:th|thn|tahun|bln|bulan|hari|yo)\b/i)
       if (ageMatch && !usia) {
         const num = parseInt(ageMatch[1], 10)
         if (num > 0 && num <= 125) {
           usia = `${num} th`
           continue // PASTI BUKAN NAMA
+        }
+      }
+
+      // Angka polos tanpa unit hanya boleh diakui usia jika baris memiliki indikator identitas jelas
+      const hasStrongIdentityContext =
+        /^(?:dr|Tn|Ny|Sdri|Sdr|An|By)\b/i.test(cleanLine) ||
+        /\b(?:bpjs|jkn|kis|umum|asuransi|inhealth)\b/i.test(cleanLine) ||
+        /\b(?:laki-laki|perempuan|pria|wanita|\b[LP]\b)/i.test(cleanLine)
+      if (hasStrongIdentityContext && !usia) {
+        const bareNumberMatch = seg.match(/^(\d{1,3})$/)
+        if (bareNumberMatch) {
+          const num = parseInt(bareNumberMatch[1], 10)
+          if (num > 0 && num <= 125) {
+            usia = `${num} th`
+            continue
+          }
         }
       }
 
@@ -414,11 +435,10 @@ export function extractDemografi(
           candidateNama = candidateNama.replace(/^(?:nama(?:\s*pasien)?|pasien|px|identitas)\s*[:-]?\s*/i, '').trim()
         }
 
-        // Validasi kelayakan nama: bukan gender token, bukan keyword medis/header
+        // Validasi kelayakan nama: bukan gender token, bukan keyword medis/header/vital sign
         if (
-          candidateNama.length >= 2 &&
-          !isGenderToken(candidateNama) &&
-          !/^(?:dokter|perawat|bidan|subjektif|subjektive|objektif|assesment|assessment|planning|konsul|pemeriksa|rujukan|identitas|pasien|baru|lama|bangsal|ruangan|igd|rawat|tanggal|tgl|jam|pagi|siang|sore|malam)$/i.test(candidateNama)
+          isValidPatientName(candidateNama) &&
+          !isGenderToken(candidateNama)
         ) {
           if (candidateGelar) {
             title = (candidateGelar === 'dr' || candidateGelar === 'dok' || candidateGelar === 'dokter')
@@ -436,7 +456,7 @@ export function extractDemografi(
     const labelMatch = raw.match(/(?:nama(?:\s*pasien)?|identitas|pasien|px)\s*[:-]\s*([A-Za-z][A-Za-z'.\s]{1,40}?)(?=\s*(?:,|\n|usia|umur|rm|\/|$))/i)
     if (labelMatch) {
       const candidate = labelMatch[1].trim()
-      if (!isGenderToken(candidate)) {
+      if (isValidPatientName(candidate) && !isGenderToken(candidate)) {
         const titleCheck = candidate.match(/^(dr|dok|dokter|Tn|Ny|Sdri|Sdr|An|By)\.?\s*(.+)$/i)
         if (titleCheck) {
           const lower = titleCheck[1].toLowerCase()
@@ -462,6 +482,7 @@ export function extractDemografi(
         const rawGelar = titleMatch[1].toLowerCase()
         const candidateName = titleMatch[2].replace(/[/,*_–—|]/g, '').trim()
         if (
+          isValidPatientName(candidateName) &&
           !isGenderToken(candidateName) &&
           !/^(?:jaga|spesialis|ruangan|pemeriksa|bella|konsul|igd|rawat|bangsal|dokter)/i.test(candidateName)
         ) {
@@ -478,7 +499,7 @@ export function extractDemografi(
   // 4. Fallback aturan regex AI jika belum ditemukan
   if (!nama_depan) {
     const fallbackLearned = applyLearnedScalar(raw, 'nama_depan', prioritizedRules)
-    if (fallbackLearned && !isGenderToken(fallbackLearned)) {
+    if (fallbackLearned && isValidPatientName(fallbackLearned) && !isGenderToken(fallbackLearned)) {
       nama_depan = fallbackLearned
     }
   }
@@ -525,9 +546,11 @@ export function extractDemografi(
   // 9. Tanggal MRS & Tanggal Onset
   const { tgl_mrs, tgl_onset } = extractDates(raw)
 
-  // 10. PROTEKSI MUTLAK: Nama Depan TIDAK BOLEH Gender Token!
-  if (isGenderToken(nama_depan)) {
-    if (!detectedGender) detectedGender = parseGender(nama_depan)
+  // 10. PROTEKSI MUTLAK: Nama Depan TIDAK BOLEH Gender Token, Tanda Vital, atau Karakter Non-Nama!
+  if (!isValidPatientName(nama_depan)) {
+    if (isGenderToken(nama_depan) && !detectedGender) {
+      detectedGender = parseGender(nama_depan)
+    }
     nama_depan = ''
   }
 

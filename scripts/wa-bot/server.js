@@ -438,7 +438,14 @@ async function initBaileys() {
           /(?:subjektif|keluhan utama|rps)\s*[:\.]/i.test(textContent)
         )
 
-        const extractedName = titleMatch ? titleMatch[0].trim() : (namaLabelMatch ? namaLabelMatch[1].trim() : '')
+        let extractedName = titleMatch ? titleMatch[0].trim() : (namaLabelMatch ? namaLabelMatch[1].trim() : '')
+        if (extractedName) {
+          const lower = extractedName.toLowerCase()
+          const INVALID_BOT_NAME_TERMS = ['suhu', 'temp', 'temperature', 'tensi', 'td', 'nadi', 'hr', 'rr', 'respirasi', 'spo2', 'gcs', 'ku', 'gda', 'gds', 'subjektif', 'objektif', 'assessment', 'planning']
+          if (INVALID_BOT_NAME_TERMS.some((t) => lower.includes(t)) || /[:()[\]{}=0-9]/.test(extractedName)) {
+            extractedName = ''
+          }
+        }
         const parsedData = {
           nama_depan: extractedName,
           no_rm: rmMatch ? rmMatch[1].trim() : '',
