@@ -222,7 +222,12 @@ export default function Brainstorm() {
     window.addEventListener('doctoid_open_wa_inbox', handler)
 
     // Buka otomatis jika navigasi dipicu dari notifikasi status bar
-    if (sessionStorage.getItem('doctoid_auto_open_inbox') === 'true') {
+    const shouldOpen =
+      localStorage.getItem('doctoid_auto_open_inbox') === 'true' ||
+      sessionStorage.getItem('doctoid_auto_open_inbox') === 'true'
+
+    if (shouldOpen) {
+      localStorage.removeItem('doctoid_auto_open_inbox')
       sessionStorage.removeItem('doctoid_auto_open_inbox')
       setShowInboxModal(true)
     }
@@ -2712,7 +2717,7 @@ export default function Brainstorm() {
                           </span>
                           {item.parsed_data?.usia && (
                             <span className="ml-1.5 text-xs text-slate-500 font-medium">
-                              ({item.parsed_data.usia})
+                              ({item.parsed_data.usia.replace(/\s*tahun/i, ' th')})
                             </span>
                           )}
                         </div>

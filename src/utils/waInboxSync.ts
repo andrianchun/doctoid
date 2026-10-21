@@ -34,7 +34,12 @@ export async function setupNotificationChannel() {
  */
 export function openWaInboxInApp() {
   try {
+    localStorage.setItem('doctoid_auto_open_inbox', 'true')
     sessionStorage.setItem('doctoid_auto_open_inbox', 'true')
+
+    // Sinkronisasi data lokal seketika
+    syncWaInboxToDexie()
+
     // 1. Beri tahu Layout agar navigate('/brainstorm')
     window.dispatchEvent(new CustomEvent('doctoid_nav_inbox'))
 
@@ -46,9 +51,10 @@ export function openWaInboxInApp() {
 
     // 3. Picu buka modal seketika dan dengan jeda bertingkat
     window.dispatchEvent(new CustomEvent('doctoid_open_wa_inbox'))
-    setTimeout(() => window.dispatchEvent(new CustomEvent('doctoid_open_wa_inbox')), 120)
-    setTimeout(() => window.dispatchEvent(new CustomEvent('doctoid_open_wa_inbox')), 350)
-    setTimeout(() => window.dispatchEvent(new CustomEvent('doctoid_open_wa_inbox')), 700)
+    setTimeout(() => window.dispatchEvent(new CustomEvent('doctoid_open_wa_inbox')), 100)
+    setTimeout(() => window.dispatchEvent(new CustomEvent('doctoid_open_wa_inbox')), 300)
+    setTimeout(() => window.dispatchEvent(new CustomEvent('doctoid_open_wa_inbox')), 600)
+    setTimeout(() => window.dispatchEvent(new CustomEvent('doctoid_open_wa_inbox')), 1000)
   } catch {}
 }
 
@@ -386,7 +392,9 @@ if (typeof window !== 'undefined') {
 
 export async function sendLocalNotification(item: any) {
   const patientName = item.parsed_data?.nama_depan || item.sender_name || 'Konsul Pasien Baru'
-  const age = item.parsed_data?.usia ? ` (${item.parsed_data.usia})` : ''
+  const rawAge = item.parsed_data?.usia || ''
+  const formattedAge = rawAge ? ` (${rawAge.replace(/\s*tahun/i, ' th').trim()})` : ''
+  const title = `${patientName}${formattedAge}`.trim()
   const snippet = item.raw_text
     ? item.raw_text.replace(/\n+/g, ' ').slice(0, 120)
     : 'Pesan konsulan baru masuk dari WhatsApp.'
@@ -414,7 +422,7 @@ export async function sendLocalNotification(item: any) {
         notifications: [
           {
             id: getNotificationIdForItem(item),
-            title: `Konsul WhatsApp: ${patientName}${age}`,
+            title: title,
             body: snippet,
             channelId: 'wa_inbox_channel',
             sound: 'default',
@@ -436,7 +444,7 @@ export async function sendLocalNotification(item: any) {
   try {
     if (typeof window !== 'undefined' && 'Notification' in window) {
       if (Notification.permission === 'granted') {
-        const notif = new Notification(`Konsul WhatsApp: ${patientName}${age}`, {
+        const notif = new Notification(title, {
           body: snippet,
           icon: '/favicon.ico',
         })

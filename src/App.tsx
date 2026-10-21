@@ -138,7 +138,8 @@ export default function App() {
               <Route
                 path="/"
                 element={
-                  sessionStorage.getItem('doctoid_auto_open_inbox') === 'true' ? (
+                  (localStorage.getItem('doctoid_auto_open_inbox') === 'true' ||
+                    sessionStorage.getItem('doctoid_auto_open_inbox') === 'true') ? (
                     <Navigate to="/brainstorm" replace />
                   ) : (
                     <Navigate to="/dasbor" replace />

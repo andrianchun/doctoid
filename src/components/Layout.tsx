@@ -39,6 +39,7 @@ export default function Layout() {
   // Navigasi otomatis ke Catat Pasien (/brainstorm) dan buka modal Inbox saat notifikasi status bar diklik
   useEffect(() => {
     const handleNavInbox = () => {
+      localStorage.setItem('doctoid_auto_open_inbox', 'true')
       sessionStorage.setItem('doctoid_auto_open_inbox', 'true')
       if (location.pathname !== '/brainstorm') {
         navigate('/brainstorm')

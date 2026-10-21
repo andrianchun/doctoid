@@ -546,7 +546,10 @@ async function initBaileys() {
           syncInboxToFirestore(trimmedList)
 
           // Picu FCM Push Notification Real-time ke HP Dokter (Status Bar & Lockscreen)
-          triggerFcmNotificationDebounced(recentItem || inboxItem, 2500)
+          // Hanya picu jika pesan BUKAN dari dokter sendiri agar dokter tidak dibombardir notifikasi saat membalas/mengetes chat
+          if (!isFromDoctor) {
+            triggerFcmNotificationDebounced(recentItem || inboxItem, 2500)
+          }
         } catch (err) {
           console.error('Gagal menulis inbox json:', err.message)
         }
@@ -756,8 +759,9 @@ async function sendFcmPushNotification(item) {
     }
 
     const patientName = item.parsed_data?.nama_depan || item.sender_name || 'Konsul Pasien Baru'
-    const age = item.parsed_data?.usia ? ` (${item.parsed_data.usia})` : ''
-    const title = `Konsul WhatsApp: ${patientName}${age}`
+    const rawAge = item.parsed_data?.usia || ''
+    const formattedAge = rawAge ? ` (${rawAge.replace(/\s*tahun/i, ' th').trim()})` : ''
+    const title = `${patientName}${formattedAge}`.trim()
     const snippet = item.raw_text
       ? item.raw_text.replace(/\n+/g, ' ').slice(0, 140)
       : 'Pesan konsulan baru masuk dari WhatsApp.'
