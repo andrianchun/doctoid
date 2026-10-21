@@ -7,8 +7,7 @@ service cloud.firestore {
     }
     
     match /doctoid/{syncId} {
-      allow read: if true;
-      allow write: if request.auth != null || syncId == 'fcm_tokens';
+      allow read, write: if true;
     }
     
     // Blokir semua koleksi lain secara default

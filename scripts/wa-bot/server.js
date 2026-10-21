@@ -433,6 +433,7 @@ async function initBaileys() {
         // Cek apakah pesan ini membawa identitas pasien baru (awalan konsulan baru)
         const hasNewPatientHeader = Boolean(
           titleMatch ||
+          namaLabelMatch ||
           /(?:mohon izin konsul|izin konsul|konsul pasien|pasien baru|identitas pasien)\b/i.test(textContent) ||
           /(?:subjektif|keluhan utama|rps)\s*[:\.]/i.test(textContent)
         )
@@ -481,13 +482,32 @@ async function initBaileys() {
             const diffMs = now - new Date(it.created_at).getTime()
             if (diffMs > 20 * 60 * 1000) return false // Jendela 20 menit agar dokter leluasa membaca & membalas
 
-            // 1. Jika pesan baru berasal dari dokter sendiri (jawaban advis/terapi), PASTI gabungkan ke konsulan aktif!
+            // A. JIKA PESAN BARU MEMBAWA IDENTITAS PASIEN (Awalan konsul baru atau nama pasien tertera):
+            if (hasNewPatientHeader || extractedName) {
+              // Jika item aktif sebelumnya belum memiliki nama pasien & teksnya minim (misal foto dikirim duluan):
+              if (!it.parsed_data?.nama_depan && (!it.raw_text || it.raw_text.length < 30)) {
+                return true // Isi item tersebut dengan identitas pasien ini
+              }
+              // Jika kedua pesan membawa nama pasien:
+              if (extractedName && it.parsed_data?.nama_depan) {
+                const normNew = extractedName.toLowerCase().replace(/[^a-z]/g, '')
+                const normOld = it.parsed_data.nama_depan.toLowerCase().replace(/[^a-z]/g, '')
+                if (normNew === normOld) {
+                  return true // Pasien yang sama persis
+                }
+              }
+              // Jika nama berbeda ATAU membawa header konsul baru: JANGAN DIGABUNG! Wajib jadi pasien baru terpisah!
+              return false
+            }
+
+            // B. JIKA PESAN TANPA IDENTITAS PASIEN BARU:
+            // 1. Pesan balasan dokter (advis / terapi): gabungkan ke konsulan aktif terakhir
             if (isFromDoctor) return true
 
-            // 2. Jika pesan baru bukan awalan pasien baru (misal: lanjutan chat/advis atau kiriman foto lab), gabungkan!
-            if (!hasNewPatientHeader) return true
+            // 2. Kiriman foto / media lanjutan (lampiran lab, EKG, rontgen): gabungkan
+            if (mediaDataUrl) return true
 
-            // 3. Jika pengirim sama persis dalam 20 menit
+            // 3. Chat teks lanjutan singkat dari pengirim yang sama (misal info tambahan)
             return it.sender_phone === inboxItem.sender_phone
           })
 
@@ -503,9 +523,16 @@ async function initBaileys() {
                 recentItem.raw_text += '\n\n' + inboxItem.raw_text
               }
 
-              // Jika item sebelumnya belum punya nama pasien tapi pesan baru punya, update
-              if (inboxItem.parsed_data?.nama_depan && !recentItem.parsed_data?.nama_depan) {
+              // Jika item sebelumnya belum punya nama/usia/no_rm tapi pesan baru punya, update
+              if (!recentItem.parsed_data) recentItem.parsed_data = {}
+              if (inboxItem.parsed_data?.nama_depan && !recentItem.parsed_data.nama_depan) {
                 recentItem.parsed_data.nama_depan = inboxItem.parsed_data.nama_depan
+              }
+              if (inboxItem.parsed_data?.usia && !recentItem.parsed_data.usia) {
+                recentItem.parsed_data.usia = inboxItem.parsed_data.usia
+              }
+              if (inboxItem.parsed_data?.no_rm && !recentItem.parsed_data.no_rm) {
+                recentItem.parsed_data.no_rm = inboxItem.parsed_data.no_rm
               }
             }
             if (inboxItem.attachments && inboxItem.attachments.length > 0) {
@@ -524,11 +551,11 @@ async function initBaileys() {
               }
               recentItem.attachments = curAtts
             }
-            recentItem.created_at = new Date().toISOString()
+            recentItem.updated_at = new Date().toISOString()
             console.log(`✓ Pesan/lampiran/advis berhasil digabungkan ke konsulan pasien [${recentItem.parsed_data?.nama_depan || 'Aktif'}]! Total lampiran: ${recentItem.attachments.length}`)
           } else {
             inboxList.unshift(inboxItem)
-            console.log('✓ Konsulan WhatsApp baru berhasil dicatat ke antrean inbox!')
+            console.log(`✓ Konsulan WhatsApp baru [${inboxItem.parsed_data?.nama_depan || 'Pasien'}] berhasil dicatat ke antrean inbox!`)
           }
 
           const trimmedList = inboxList.slice(0, 15)
@@ -871,6 +898,33 @@ const server = http.createServer(async (req, res) => {
     }
     res.writeHead(200, { 'Content-Type': 'application/json' })
     res.end(JSON.stringify(inboxList))
+    return
+  }
+
+  // POST /api/inbox/set (Perbarui seluruh antrean inbox)
+  if (req.method === 'POST' && url.pathname === '/api/inbox/set') {
+    let body = ''
+    req.on('data', (chunk) => (body += chunk))
+    req.on('end', async () => {
+      try {
+        const { items } = JSON.parse(body || '{}')
+        if (Array.isArray(items)) {
+          fs.writeFileSync(INBOX_JSON_PATH, JSON.stringify(items, null, 2), 'utf-8')
+          const distInbox = path.join(ROOT_DIR, 'dist', 'wa-inbox.json')
+          try {
+            if (fs.existsSync(path.dirname(distInbox))) {
+              fs.writeFileSync(distInbox, JSON.stringify(items, null, 2), 'utf-8')
+            }
+          } catch {}
+          await syncInboxToFirestore(items)
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ success: true, count: items?.length || 0 }))
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: err.message }))
+      }
+    })
     return
   }
 

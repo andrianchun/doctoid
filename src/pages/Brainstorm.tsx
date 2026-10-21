@@ -259,6 +259,13 @@ export default function Brainstorm() {
       setTimeout(() => setIsSyncingInbox(false), 500)
     }
   }
+
+  // Segarkan antrean dari cloud saat modal inbox dibuka
+  useEffect(() => {
+    if (showInboxModal) {
+      handleManualSyncInbox()
+    }
+  }, [showInboxModal])
   const showInboxModalRef = useRef(showInboxModal)
   const showSearchModalRef = useRef(showSearchModal)
   const viewerStateRef = useRef(viewerState)
@@ -2699,10 +2706,19 @@ export default function Brainstorm() {
             <div className="flex-1 overflow-y-auto p-5 divide-y divide-slate-100 space-y-5">
               {pendingInboxItems.length === 0 ? (
                 <div className="py-16 text-center space-y-2">
-                  <p className="text-sm font-semibold text-slate-700">Tidak ada konsulan baru</p>
-                  <p className="text-xs text-slate-500 max-w-xs mx-auto leading-relaxed">
-                    Pesan rujukan atau kasus yang dikirim ke grup WhatsApp Doctoid akan otomatis muncul di sini.
-                  </p>
+                  {isSyncingInbox ? (
+                    <div className="flex flex-col items-center justify-center space-y-2">
+                      <RotateCw size={22} className="animate-spin text-primary" />
+                      <p className="text-xs font-semibold text-slate-600">Memuat konsulan...</p>
+                    </div>
+                  ) : (
+                    <>
+                      <p className="text-sm font-semibold text-slate-700">Tidak ada konsulan baru</p>
+                      <p className="text-xs text-slate-500 max-w-xs mx-auto leading-relaxed">
+                        Pesan rujukan atau kasus yang dikirim ke grup WhatsApp Doctoid akan otomatis muncul di sini.
+                      </p>
+                    </>
+                  )}
                 </div>
               ) : (
                 pendingInboxItems.map((item) => {
