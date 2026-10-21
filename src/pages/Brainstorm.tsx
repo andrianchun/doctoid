@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useMemo, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { createPortal } from 'react-dom'
 import { Capacitor, registerPlugin } from '@capacitor/core'
+import { App as CapApp } from '@capacitor/app'
 import { useLiveQuery } from 'dexie-react-hooks'
 
 interface ShareDataPayload {
@@ -190,131 +191,227 @@ export default function Brainstorm() {
   const [patientSearchQ, setPatientSearchQ] = useState('')
   const [stagedAnalysis, setStagedAnalysis] = useState<StagedAnalysis | null>(null)
 
-  const handleImportInboxItem = async (item: InboxItem) => {
-    // 1. Ekstrak otomatis struktur SOAP dari teks mentah jika ada
-    let parsedSoapData: Partial<FormState> = {}
-    if (item.raw_text) {
-      try {
-        const { data, success } = localParse(item.raw_text, regexRules)
-        if (success) {
-          parsedSoapData = {
-            title: (data.title as any) || (data.nama_depan?.match(/^(?:dr\.|Tn\.|Ny\.|Sdr\.|Sdri\.|An\.|By\.)/i)?.[0] as any) || form.title,
-            nama_depan: data.nama_depan || form.nama_depan,
-            usia: data.usia || form.usia,
-            no_rm: data.no_rm || form.no_rm,
-            jaminan: (data.jaminan as any) || form.jaminan,
-            S: data.S || form.S,
-            O_pemfis: data.O_pemfis || form.O_pemfis,
-            O_penunjang: data.O_penunjang || form.O_penunjang,
-            A: data.A && data.A.length > 0 ? data.A : form.A,
-            P: data.P && data.P.length > 0 ? data.P : form.P,
-          }
-        } else if (!item.parsed_data) {
-          parsedSoapData = { S: item.raw_text }
+  const [importingInboxId, setImportingInboxId] = useState<string | number | null>(null)
+  const [importProgress, setImportProgress] = useState<number>(0)
+  const [importStepText, setImportStepText] = useState<string>('')
+  const importingInboxIdRef = useRef<string | number | null>(null)
+  const showInboxModalRef = useRef(showInboxModal)
+  const showSearchModalRef = useRef(showSearchModal)
+  const viewerStateRef = useRef(viewerState)
+
+  useEffect(() => {
+    importingInboxIdRef.current = importingInboxId
+  }, [importingInboxId])
+
+  useEffect(() => {
+    showInboxModalRef.current = showInboxModal
+  }, [showInboxModal])
+
+  useEffect(() => {
+    showSearchModalRef.current = showSearchModal
+  }, [showSearchModal])
+
+  useEffect(() => {
+    viewerStateRef.current = viewerState
+  }, [viewerState])
+
+  // Tangani tombol Back fisik Android: cegah keluar/gagal jika sedang proses import konsulan
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return
+    let backHandle: any = null
+    const setupBack = async () => {
+      backHandle = await CapApp.addListener('backButton', () => {
+        // Jika sedang memproses import AI, jangan tutup modal atau kembali agar tidak gagal
+        if (importingInboxIdRef.current) {
+          return
         }
-      } catch (err) {
-        console.warn('Auto parse inbox failed, falling back:', err)
-        if (!item.parsed_data) {
-          parsedSoapData = { S: item.raw_text }
+        if (showInboxModalRef.current) {
+          setShowInboxModal(false)
+          return
         }
-      }
-    }
-
-    // 2. Analisis AI Vision untuk lampiran (Klasifikasi 4 Badge, PDx, & Temuan Abnormal Lab ↑ / ↓)
-    let processedAttachments: { id: string; name: string; type: string; dataUrl: string; kategori: Kategori; tag?: AttachmentTag }[] = []
-    let visionPdx: TerapiItem[] = []
-    let visionPenunjangText = ''
-
-    if (item.attachments && item.attachments.length > 0) {
-      notify('🔍 Mengidentifikasi lampiran & mengekstrak temuan abnormal...')
-      try {
-        const visionRes = await analyzeAndClassifyAttachments(
-          item.attachments as any,
-          item.raw_text || ''
-        )
-        if (visionRes.classifiedAttachments?.length > 0) {
-          processedAttachments = visionRes.classifiedAttachments.map((ca, idx) => ({
-            id: ca.id || `att-${Date.now()}-${idx}`,
-            name: ca.name || 'Lampiran',
-            type: ca.type || 'image/jpeg',
-            dataUrl: ca.dataUrl,
-            kategori: (ca.kategori as Kategori) || 'penunjang',
-            tag: ca.tag,
-          }))
+        if (showSearchModalRef.current) {
+          setShowSearchModal(false)
+          return
         }
-        if (visionRes.pdxSuggestions?.length > 0) {
-          visionPdx = visionRes.pdxSuggestions.map((p) => ({
-            ...lineToTerapi(p.nama_item, today()),
-            kategori: 'Diagnostik',
-          }))
+        if (viewerStateRef.current.isOpen) {
+          setViewerState((prev) => ({ ...prev, isOpen: false }))
+          return
         }
-        if (visionRes.penunjangTextSummary) {
-          visionPenunjangText = visionRes.penunjangTextSummary
+        if (window.history.length > 1) {
+          window.history.back()
+        } else {
+          CapApp.exitApp()
         }
-      } catch (err) {
-        console.warn('Vision analysis error:', err)
-        processedAttachments = item.attachments.map((att, idx) => ({
-          id: att.id || `att-${Date.now()}-${idx}`,
-          name: att.name || 'Lampiran',
-          type: att.type || 'image/jpeg',
-          dataUrl: att.dataUrl,
-          kategori: (att.kategori as Kategori) || 'penunjang',
-          tag: att.tag,
-        }))
-      }
-    }
-
-    // 3. Gabungkan data parsed_data & vision ke form
-    const currentP = (item.parsed_data?.P && item.parsed_data.P.length > 0)
-      ? item.parsed_data.P
-      : (parsedSoapData.P || form.P)
-
-    // Tambahkan usulan PDx dari vision jika belum ada
-    const existingPNames = new Set(currentP.map((p) => p.nama_item.trim().toLowerCase()))
-    const newPdx = visionPdx.filter((vp) => !existingPNames.has(vp.nama_item.trim().toLowerCase()))
-    const finalP = [...currentP, ...newPdx]
-
-    // Gabungkan teks penunjang dengan ringkasan temuan abnormal lab/EKG/radiologi
-    const currentO_penunjang = item.parsed_data?.O_penunjang || parsedSoapData.O_penunjang || form.O_penunjang
-    const finalO_penunjang = visionPenunjangText
-      ? (currentO_penunjang.trim() ? `${currentO_penunjang.trim()}\n\n${visionPenunjangText}` : visionPenunjangText)
-      : currentO_penunjang
-
-    const formPatch: Partial<FormState> = {
-      ...parsedSoapData,
-      title: (item.parsed_data?.nama_depan?.match(/^(?:dr\.|Tn\.|Ny\.|Sdr\.|Sdri\.|An\.|By\.)/i)?.[0] as any) || parsedSoapData.title || form.title,
-      nama_depan: item.parsed_data?.nama_depan || parsedSoapData.nama_depan || form.nama_depan,
-      usia: item.parsed_data?.usia || parsedSoapData.usia || form.usia,
-      no_rm: item.parsed_data?.no_rm || parsedSoapData.no_rm || form.no_rm,
-      jaminan: (item.parsed_data?.jaminan as any) || parsedSoapData.jaminan || form.jaminan,
-      S: item.parsed_data?.S || parsedSoapData.S || form.S,
-      O_pemfis: item.parsed_data?.O_pemfis || parsedSoapData.O_pemfis || form.O_pemfis,
-      O_penunjang: finalO_penunjang,
-      A: item.parsed_data?.A && item.parsed_data.A.length > 0 ? item.parsed_data.A : (parsedSoapData.A || form.A),
-      P: finalP,
-    }
-
-    set(formPatch)
-
-    // Bersihkan prompt box bawah agar tidak menduplikasi teks yang sudah masuk ke form
-    setRaw('')
-
-    if (processedAttachments.length > 0) {
-      setAttachments((prev) => {
-        const existingUrls = new Set(prev.map((a) => a.dataUrl))
-        const unique = processedAttachments.filter((pa) => !existingUrls.has(pa.dataUrl))
-        return [...prev, ...unique]
       })
     }
+    setupBack()
+    return () => {
+      if (backHandle && typeof backHandle.remove === 'function') {
+        backHandle.remove()
+      }
+    }
+  }, [])
 
-    await markInboxItemImported(item.id || item.created_at)
-    setShowInboxModal(false)
-    notify('Data konsul WhatsApp & temuan lampiran berhasil dimuat ke formulir ✓')
+  const handleImportInboxItem = async (item: InboxItem) => {
+    const itemId = item.id || item.created_at
+    setImportingInboxId(itemId)
+    setImportProgress(10)
+    setImportStepText('Mempersiapkan data...')
+
+    // Interval progres simulasi halus ala Darka
+    const progressInterval = setInterval(() => {
+      setImportProgress((prev) => {
+        if (prev < 40) return prev + 3
+        if (prev < 75) return prev + 1.5
+        if (prev < 90) return prev + 0.5
+        return prev
+      })
+    }, 150)
+
+    try {
+      // 1. Ekstrak otomatis struktur SOAP dari teks mentah jika ada
+      let parsedSoapData: Partial<FormState> = {}
+      if (item.raw_text) {
+        try {
+          const { data, success } = localParse(item.raw_text, regexRules)
+          if (success) {
+            parsedSoapData = {
+              title: (data.title as any) || (data.nama_depan?.match(/^(?:dr\.|Tn\.|Ny\.|Sdr\.|Sdri\.|An\.|By\.)/i)?.[0] as any) || form.title,
+              nama_depan: data.nama_depan || form.nama_depan,
+              usia: data.usia || form.usia,
+              no_rm: data.no_rm || form.no_rm,
+              jaminan: (data.jaminan as any) || form.jaminan,
+              S: data.S || form.S,
+              O_pemfis: data.O_pemfis || form.O_pemfis,
+              O_penunjang: data.O_penunjang || form.O_penunjang,
+              A: data.A && data.A.length > 0 ? data.A : form.A,
+              P: data.P && data.P.length > 0 ? data.P : form.P,
+            }
+          } else if (!item.parsed_data) {
+            parsedSoapData = { S: item.raw_text }
+          }
+        } catch (err) {
+          console.warn('Auto parse inbox failed, falling back:', err)
+          if (!item.parsed_data) {
+            parsedSoapData = { S: item.raw_text }
+          }
+        }
+      }
+
+      // 2. Analisis AI Vision untuk lampiran (Klasifikasi 4 Badge, PDx, & Temuan Abnormal Lab ↑ / ↓)
+      let processedAttachments: { id: string; name: string; type: string; dataUrl: string; kategori: Kategori; tag?: AttachmentTag }[] = []
+      let visionPdx: TerapiItem[] = []
+      let visionPenunjangText = ''
+
+      if (item.attachments && item.attachments.length > 0) {
+        setImportStepText('Menganalisis lampiran medis & lab...')
+        try {
+          const visionRes = await analyzeAndClassifyAttachments(
+            item.attachments as any,
+            item.raw_text || '',
+            (pct, stepText) => {
+              setImportProgress((prev) => Math.max(prev, pct))
+              if (stepText) setImportStepText(stepText)
+            }
+          )
+          if (visionRes.classifiedAttachments?.length > 0) {
+            processedAttachments = visionRes.classifiedAttachments.map((ca, idx) => ({
+              id: ca.id || `att-${Date.now()}-${idx}`,
+              name: ca.name || 'Lampiran',
+              type: ca.type || 'image/jpeg',
+              dataUrl: ca.dataUrl,
+              kategori: (ca.kategori as Kategori) || 'penunjang',
+              tag: ca.tag,
+            }))
+          }
+          if (visionRes.pdxSuggestions?.length > 0) {
+            visionPdx = visionRes.pdxSuggestions.map((p) => ({
+              ...lineToTerapi(p.nama_item, today()),
+              kategori: 'Diagnostik',
+            }))
+          }
+          if (visionRes.penunjangTextSummary) {
+            visionPenunjangText = visionRes.penunjangTextSummary
+          }
+        } catch (err) {
+          console.warn('Vision analysis error:', err)
+          processedAttachments = item.attachments.map((att, idx) => ({
+            id: att.id || `att-${Date.now()}-${idx}`,
+            name: att.name || 'Lampiran',
+            type: att.type || 'image/jpeg',
+            dataUrl: att.dataUrl,
+            kategori: (att.kategori as Kategori) || 'penunjang',
+            tag: att.tag,
+          }))
+        }
+      }
+
+      // 3. Gabungkan data parsed_data & vision ke form
+      const currentP = (item.parsed_data?.P && item.parsed_data.P.length > 0)
+        ? item.parsed_data.P
+        : (parsedSoapData.P || form.P)
+
+      // Tambahkan usulan PDx dari vision jika belum ada
+      const existingPNames = new Set(currentP.map((p) => p.nama_item.trim().toLowerCase()))
+      const newPdx = visionPdx.filter((vp) => !existingPNames.has(vp.nama_item.trim().toLowerCase()))
+      const finalP = [...currentP, ...newPdx]
+
+      // Gabungkan teks penunjang dengan ringkasan temuan abnormal lab/EKG/radiologi
+      const currentO_penunjang = item.parsed_data?.O_penunjang || parsedSoapData.O_penunjang || form.O_penunjang
+      const finalO_penunjang = visionPenunjangText
+        ? (currentO_penunjang.trim() ? `${currentO_penunjang.trim()}\n\n${visionPenunjangText}` : visionPenunjangText)
+        : currentO_penunjang
+
+      const formPatch: Partial<FormState> = {
+        ...parsedSoapData,
+        title: (item.parsed_data?.nama_depan?.match(/^(?:dr\.|Tn\.|Ny\.|Sdr\.|Sdri\.|An\.|By\.)/i)?.[0] as any) || parsedSoapData.title || form.title,
+        nama_depan: item.parsed_data?.nama_depan || parsedSoapData.nama_depan || form.nama_depan,
+        usia: item.parsed_data?.usia || parsedSoapData.usia || form.usia,
+        no_rm: item.parsed_data?.no_rm || parsedSoapData.no_rm || form.no_rm,
+        jaminan: (item.parsed_data?.jaminan as any) || parsedSoapData.jaminan || form.jaminan,
+        S: item.parsed_data?.S || parsedSoapData.S || form.S,
+        O_pemfis: item.parsed_data?.O_pemfis || parsedSoapData.O_pemfis || form.O_pemfis,
+        O_penunjang: finalO_penunjang,
+        A: item.parsed_data?.A && item.parsed_data.A.length > 0 ? item.parsed_data.A : (parsedSoapData.A || form.A),
+        P: finalP,
+      }
+
+      set(formPatch)
+
+      // Bersihkan prompt box bawah agar tidak menduplikasi teks yang sudah masuk ke form
+      setRaw('')
+
+      if (processedAttachments.length > 0) {
+        setAttachments((prev) => {
+          const existingUrls = new Set(prev.map((a) => a.dataUrl))
+          const unique = processedAttachments.filter((pa) => !existingUrls.has(pa.dataUrl))
+          return [...prev, ...unique]
+        })
+      }
+
+      await markInboxItemImported(item.id || item.created_at)
+
+      clearInterval(progressInterval)
+      setImportProgress(100)
+      setImportStepText('Selesai!')
+      await new Promise((resolve) => setTimeout(resolve, 350))
+
+      setShowInboxModal(false)
+      notify('Data konsul WhatsApp & temuan lampiran berhasil dimuat ke formulir')
+    } catch (err) {
+      console.error('Import inbox error:', err)
+      notify('Gagal memproses data konsulan.')
+    } finally {
+      clearInterval(progressInterval)
+      setImportingInboxId(null)
+      setImportProgress(0)
+      setImportStepText('')
+    }
   }
 
   const handleRescanAttachments = async () => {
     if (attachments.length === 0) return
-    notify('🔍 Menganalisis lampiran medis & mengekstrak lab...')
+    notify('Menganalisis lampiran medis & mengekstrak lab...')
     try {
       const visionRes = await analyzeAndClassifyAttachments(attachments as any, `${form.S}\n${form.O_pemfis}`)
       if (visionRes.classifiedAttachments?.length > 0) {
@@ -338,7 +435,7 @@ export default function Brainstorm() {
           set({ O_penunjang: cur ? `${cur}\n\n${visionRes.penunjangTextSummary}` : visionRes.penunjangTextSummary })
         }
       }
-      notify('Analisis lampiran selesai ✓')
+      notify('Analisis lampiran selesai')
     } catch {
       notify('Gagal menganalisis lampiran.')
     }
@@ -347,7 +444,7 @@ export default function Brainstorm() {
   const handleDismissAllInbox = async () => {
     await dismissAllInboxItems()
     setShowInboxModal(false)
-    notify('Seluruh antrean konsul berhasil dibersihkan ✓')
+    notify('Seluruh antrean konsul berhasil dibersihkan')
   }
 
   const [showFaskesMenu, setShowFaskesMenu] = useState(false)
@@ -495,7 +592,7 @@ export default function Brainstorm() {
           }),
         ])
       }
-      notify('📥 Berkas / pesan dari WhatsApp berhasil diterima ✓')
+      notify('Berkas dari WhatsApp berhasil diterima')
     },
     [regexRules]
   )
@@ -553,7 +650,7 @@ export default function Brainstorm() {
         setForm((prev) => ({ ...prev, S: prev.S ? `${prev.S}\n\n${text}` : text }))
       }
       setRaw('')
-      notify('📥 Menerima teks konsul dari kiriman luar')
+      notify('Menerima teks konsul dari kiriman luar')
       window.history.replaceState({}, document.title, window.location.pathname + window.location.hash)
     }
   }, [regexRules])
@@ -782,7 +879,7 @@ export default function Brainstorm() {
       setDetectedPatient(null)
       setHospitalId(0)
       setWardId(0)
-      notify(`CPPT hari ini untuk ${p.nama_depan} berhasil diperbarui! ⚡`)
+      notify(`CPPT hari ini untuk ${p.nama_depan} berhasil diperbarui`)
       navigate(`/pasien/${p.id}`)
     } catch (err: any) {
       alert(err?.message || 'Gagal memperbarui CPPT pasien.')
@@ -861,7 +958,7 @@ export default function Brainstorm() {
       for (const file of imageFiles) {
         await handleAttachFile(file, 'penunjang')
       }
-      notify(`📷 ${imageFiles.length} foto disematkan ke Lampiran Penunjang (EKG/Lab/Radiologi) ✓`)
+      notify(`${imageFiles.length} foto disematkan ke Lampiran Penunjang (EKG/Lab/Radiologi)`)
     }
   }, [])
 
@@ -1355,8 +1452,8 @@ export default function Brainstorm() {
     // Faskes & ruangan sengaja dikosongkan lagi tiap pasien baru — cegah salah kamar kalau lupa ganti
     setHospitalId(0)
     setWardId(0)
-    const learnTag = learnedNewRule ? ' (Pola IGD dipelajari ✓)' : ''
-    notify(selectedPatient ? `Readmisi pasien tersimpan & riwayat tersambung 🎉${learnTag}` : `Pasien baru tersimpan 🎉${learnTag}`)
+    const learnTag = learnedNewRule ? ' (Pola IGD dipelajari)' : ''
+    notify(selectedPatient ? `Readmisi pasien tersimpan & riwayat tersambung${learnTag}` : `Pasien baru tersimpan${learnTag}`)
   }
 
   return (
@@ -2477,7 +2574,7 @@ export default function Brainstorm() {
       {showInboxModal && (
         <div
           className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/60 backdrop-blur-sm p-0 sm:p-4 animate-in fade-in overscroll-contain touch-none select-none"
-          onClick={() => setShowInboxModal(false)}
+          onClick={() => !importingInboxId && setShowInboxModal(false)}
         >
           <div
             className="flex h-[85dvh] max-h-[680px] w-full max-w-lg flex-col rounded-t-3xl sm:rounded-3xl bg-white shadow-2xl border border-slate-200 overscroll-contain touch-auto select-auto overflow-hidden animate-in zoom-in-95 duration-200"
@@ -2490,17 +2587,23 @@ export default function Brainstorm() {
                 {pendingInboxItems.length > 1 && (
                   <button
                     type="button"
+                    disabled={Boolean(importingInboxId)}
                     onClick={handleDismissAllInbox}
-                    className="text-xs font-semibold text-slate-400 hover:text-red-600 transition-colors cursor-pointer"
+                    className={`text-xs font-semibold transition-colors cursor-pointer ${
+                      importingInboxId ? 'opacity-40 pointer-events-none text-slate-300' : 'text-slate-400 hover:text-red-600'
+                    }`}
                   >
                     Hapus Semua
                   </button>
                 )}
                 <button
                   type="button"
+                  disabled={Boolean(importingInboxId)}
                   onClick={() => setShowInboxModal(false)}
                   aria-label="Tutup"
-                  className="cursor-pointer rounded-full p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
+                  className={`rounded-full p-1.5 text-slate-400 transition-colors ${
+                    importingInboxId ? 'opacity-40 pointer-events-none' : 'cursor-pointer hover:text-slate-700 hover:bg-slate-100'
+                  }`}
                 >
                   <X size={20} />
                 </button>
@@ -2594,25 +2697,51 @@ export default function Brainstorm() {
                       </div>
                     )}
 
-                    {/* Tombol Aksi Simpel: Tanpa Kotak Bertumpuk */}
-                    <div className="flex items-center justify-end gap-2 pt-1">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          dismissInboxItem(item.id || item.created_at)
-                        }}
-                        className="px-3 py-1.5 text-xs font-semibold text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-xl transition-colors cursor-pointer"
-                      >
-                        Hapus
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleImportInboxItem(item)}
-                        className="px-4 py-1.5 bg-primary hover:bg-primary-deep text-white text-xs font-bold rounded-xl active:scale-95 transition-all cursor-pointer shadow-xs"
-                      >
-                        Catat Pasien
-                      </button>
-                    </div>
+                    {/* Tombol Aksi Simpel atau Progress Bar Ala Darka */}
+                    {importingInboxId === (item.id || item.created_at) ? (
+                      <div className="w-full mt-2 p-3 bg-slate-50 border border-primary/20 rounded-2xl space-y-2 animate-in fade-in duration-200">
+                        <div className="flex items-center gap-2 text-xs">
+                          <Loader2 className="w-3.5 h-3.5 text-primary animate-spin shrink-0" />
+                          <span className="font-semibold text-slate-800 truncate">
+                            {importStepText || 'Sedang memproses lampiran & data konsul...'}
+                          </span>
+                          <span className="ml-auto text-xs font-mono text-primary font-bold">
+                            {Math.floor(importProgress)}%
+                          </span>
+                        </div>
+                        <div className="w-full h-1.5 bg-slate-200/80 rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-primary transition-all duration-200 ease-out rounded-full shadow-xs"
+                            style={{ width: `${Math.max(importProgress, 4)}%` }}
+                          />
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex items-center justify-end gap-2 pt-1">
+                        <button
+                          type="button"
+                          disabled={Boolean(importingInboxId)}
+                          onClick={() => {
+                            dismissInboxItem(item.id || item.created_at)
+                          }}
+                          className={`px-3 py-1.5 text-xs font-semibold rounded-xl transition-colors cursor-pointer ${
+                            importingInboxId ? 'opacity-40 pointer-events-none text-slate-400' : 'text-slate-500 hover:text-red-600 hover:bg-red-50'
+                          }`}
+                        >
+                          Hapus
+                        </button>
+                        <button
+                          type="button"
+                          disabled={Boolean(importingInboxId)}
+                          onClick={() => handleImportInboxItem(item)}
+                          className={`px-4 py-1.5 bg-primary text-white text-xs font-bold rounded-xl active:scale-95 transition-all cursor-pointer shadow-xs ${
+                            importingInboxId ? 'opacity-40 pointer-events-none' : 'hover:bg-primary-deep'
+                          }`}
+                        >
+                          Catat Pasien
+                        </button>
+                      </div>
+                    )}
                   </div>
                 ))
               )}
@@ -2622,7 +2751,7 @@ export default function Brainstorm() {
       )}
 
       {toast && (
-        <div className="fixed inset-x-0 bottom-28 z-50 mx-auto w-fit max-w-[90%] rounded-2xl bg-gradient-to-br from-primary to-primary-deep px-4 py-2.5 text-center shadow-lg shadow-primary/30">
+        <div className="fixed inset-x-0 bottom-28 z-[60] mx-auto w-fit max-w-[90%] rounded-2xl bg-gradient-to-br from-primary to-primary-deep px-4 py-2.5 text-center shadow-lg shadow-primary/30 pointer-events-none animate-in fade-in zoom-in-95 duration-150">
           {toast.split('\n').map((line, i) => (
             <p key={i} className={i === 0 ? 'text-xs font-bold text-white' : 'mt-0.5 caption font-medium text-white/85'}>
               {line}

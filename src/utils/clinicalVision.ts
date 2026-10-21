@@ -20,7 +20,7 @@ export interface ClinicalVisionResult {
   hasAbnormalLab: boolean
 }
 
-function getGeminiApiKey(): string | null {
+function getGeminiApiKeys(): string[] {
   const geminiLocal = localStorage.getItem('doctoid_gemini_key')
   const aiLocal = localStorage.getItem('doctoid_ai_key')
   const viteGemini = (import.meta.env as any)?.VITE_GEMINI_API_KEY
@@ -31,13 +31,58 @@ function getGeminiApiKey(): string | null {
     .map((k: string) => k.trim())
 
   // Cari key Google (diawali AIza atau AQ.)
-  for (const k of candidates) {
-    if (k.startsWith('AIza') || k.startsWith('AQ.')) return k
-  }
-  return candidates[0] || null
+  const googleKeys = candidates.filter((k) => k.startsWith('AIza') || k.startsWith('AQ.'))
+  return Array.from(new Set(googleKeys.length > 0 ? googleKeys : candidates))
 }
 
-const VISION_MODELS = ['gemini-2.5-flash', 'gemini-1.5-flash', 'gemini-2.0-flash', 'gemini-flash-latest']
+const VISION_MODELS = [
+  'gemini-3.5-flash-lite',
+  'gemini-flash-lite-latest',
+  'gemini-3.5-flash',
+  'gemini-3.8-flash',
+]
+
+/**
+ * Kompresi & downscale foto sebelum dikirim ke AI Vision.
+ * Mengubah resolusi foto kamera/WhatsApp (3000-4000px) menjadi maksimal 1024px JPEG (kualitas 0.75).
+ * Memangkas ukuran payload dari ~25MB menjadi < 1MB sehingga upload 30x lebih cepat dan hemat memori.
+ */
+async function compressImageForVision(dataUrl: string, maxDim = 1024, quality = 0.75): Promise<string> {
+  if (typeof window === 'undefined' || !dataUrl.startsWith('data:image/')) return dataUrl
+  return new Promise((resolve) => {
+    const img = new Image()
+    img.onload = () => {
+      let { width, height } = img
+      if (width <= maxDim && height <= maxDim && dataUrl.length < 300 * 1024) {
+        return resolve(dataUrl)
+      }
+      if (width > height) {
+        if (width > maxDim) {
+          height = Math.round((height * maxDim) / width)
+          width = maxDim
+        }
+      } else {
+        if (height > maxDim) {
+          width = Math.round((width * maxDim) / height)
+          height = maxDim
+        }
+      }
+      try {
+        const canvas = document.createElement('canvas')
+        canvas.width = width
+        canvas.height = height
+        const ctx = canvas.getContext('2d')
+        if (!ctx) return resolve(dataUrl)
+        ctx.drawImage(img, 0, 0, width, height)
+        resolve(canvas.toDataURL('image/jpeg', quality))
+      } catch {
+        resolve(dataUrl)
+      }
+    }
+    img.onerror = () => resolve(dataUrl)
+    img.src = dataUrl
+  })
+}
 
 /**
  * Menganalisis lampiran medis (EKG, CT Scan/Thorax, Lab, Foto Fisik) menggunakan AI Vision Cerdas.
@@ -45,9 +90,11 @@ const VISION_MODELS = ['gemini-2.5-flash', 'gemini-1.5-flash', 'gemini-2.0-flash
  */
 export async function analyzeAndClassifyAttachments(
   attachments: VisionAttachmentItem[],
-  rawText: string = ''
+  rawText: string = '',
+  onProgress?: (percent: number, stepText: string) => void
 ): Promise<ClinicalVisionResult> {
   if (!attachments || attachments.length === 0) {
+    onProgress?.(100, 'Selesai')
     return {
       classifiedAttachments: [],
       pdxSuggestions: [],
@@ -59,12 +106,25 @@ export async function analyzeAndClassifyAttachments(
   const imageItems = attachments.filter((a) => a.type?.startsWith('image/') && a.dataUrl)
 
   // 1. Coba pemrosesan AI Vision Multimodal via Gemini Flash (Prioritas #1: 1-2 detik, Gratis)
-  const apiKey = getGeminiApiKey()
-  if (apiKey && imageItems.length > 0) {
+  const keys = getGeminiApiKeys()
+  if (keys.length > 0 && imageItems.length > 0) {
     try {
-      const result = await callGeminiVision(imageItems, rawText, apiKey)
+      onProgress?.(15, 'Mempersiapkan & mengoptimalkan lampiran...')
+      const targetImages = imageItems.slice(0, 10)
+      const compressedImages = await Promise.all(
+        targetImages.map(async (img) => ({
+          ...img,
+          dataUrl: await compressImageForVision(img.dataUrl),
+        }))
+      )
+
+      onProgress?.(45, 'Menganalisis lab, EKG & radiologi dengan AI...')
+      const result = await callGeminiVision(compressedImages, rawText, keys)
       if (result) {
-        return mergeVisionResult(attachments, result)
+        onProgress?.(85, 'Mengekstrak temuan abnormal...')
+        const merged = mergeVisionResult(attachments, result)
+        onProgress?.(100, 'Selesai')
+        return merged
       }
     } catch (err) {
       console.warn('Gemini Vision gagal, beralih ke heuristik lokal:', err)
@@ -72,7 +132,10 @@ export async function analyzeAndClassifyAttachments(
   }
 
   // 2. Fallback Heuristik Cerdas (Lokal / Offline)
-  return runHeuristicClassifier(attachments, rawText)
+  onProgress?.(80, 'Mengekstrak data secara lokal...')
+  const fallbackRes = runHeuristicClassifier(attachments, rawText)
+  onProgress?.(100, 'Selesai')
+  return fallbackRes
 }
 
 interface GeminiVisionParsedOutput {
@@ -91,14 +154,12 @@ interface GeminiVisionParsedOutput {
 async function callGeminiVision(
   images: VisionAttachmentItem[],
   rawText: string,
-  apiKey: string
+  keys: string[]
 ): Promise<GeminiVisionParsedOutput | null> {
-  // Batasi maksimal 10 foto untuk kecepatan maksimal
-  const targetImages = images.slice(0, 10)
   const parts: any[] = []
 
-  for (let i = 0; i < targetImages.length; i++) {
-    const img = targetImages[i]
+  for (let i = 0; i < images.length; i++) {
+    const img = images[i]
     const match = img.dataUrl.match(/^data:([^;]+);base64,(.+)$/)
     if (match) {
       parts.push({
@@ -161,32 +222,43 @@ OUTPUT HARUS BERUPA JSON VALID dengan struktur persis seperti ini:
 
   parts.push({ text: prompt })
 
-  for (const model of VISION_MODELS) {
-    try {
-      const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{ parts }],
-            generationConfig: {
-              responseMimeType: 'application/json',
-              temperature: 0.1,
-            },
-          }),
-        }
-      )
+  // Coba model dan kunci yang tersedia dengan batas waktu (timeout) 10 detik agar tidak menggantung
+  for (const key of keys.slice(0, 3)) {
+    for (const model of VISION_MODELS) {
+      try {
+        const res = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              contents: [{ parts }],
+              generationConfig: {
+                responseMimeType: 'application/json',
+                temperature: 0.1,
+              },
+            }),
+            signal: AbortSignal.timeout(10000),
+          }
+        )
 
-      if (res.ok) {
-        const data = await res.json()
-        const text = data.candidates?.[0]?.content?.parts?.[0]?.text
-        if (text) {
-          return JSON.parse(text)
+        if (res.ok) {
+          const data = await res.json()
+          const text = data.candidates?.[0]?.content?.parts?.[0]?.text
+          if (text) {
+            return JSON.parse(text)
+          }
+        } else if (res.status === 429 || res.status === 503) {
+          // Kuota penuh atau beban tinggi, coba model / kunci berikutnya
+          continue
+        } else if (res.status === 404 || res.status === 400) {
+          // Model tidak cocok / parameter invalid
+          continue
         }
+      } catch {
+        // Timeout atau koneksi terputus, coba alternatif model/kunci
+        continue
       }
-    } catch {
-      continue
     }
   }
 
