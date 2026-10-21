@@ -220,6 +220,13 @@ export default function Brainstorm() {
   useEffect(() => {
     const handler = () => setShowInboxModal(true)
     window.addEventListener('doctoid_open_wa_inbox', handler)
+
+    // Buka otomatis jika navigasi dipicu dari notifikasi status bar
+    if (sessionStorage.getItem('doctoid_auto_open_inbox') === 'true') {
+      sessionStorage.removeItem('doctoid_auto_open_inbox')
+      setShowInboxModal(true)
+    }
+
     return () => window.removeEventListener('doctoid_open_wa_inbox', handler)
   }, [])
 

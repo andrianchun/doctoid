@@ -135,7 +135,16 @@ export default function App() {
         <BrowserRouter>
           <Routes>
             <Route element={<Layout />}>
-              <Route path="/" element={<Navigate to="/dasbor" replace />} />
+              <Route
+                path="/"
+                element={
+                  sessionStorage.getItem('doctoid_auto_open_inbox') === 'true' ? (
+                    <Navigate to="/brainstorm" replace />
+                  ) : (
+                    <Navigate to="/dasbor" replace />
+                  )
+                }
+              />
               <Route path="/dasbor" element={<Dasbor />} />
               <Route path="/brainstorm" element={<Brainstorm />} />
               <Route path="/rawatinap" element={<RawatInap />} />

@@ -28,6 +28,30 @@ export async function setupNotificationChannel() {
 }
 
 // Inisialisasi Real-time Firebase Cloud Messaging (Push Notifications)
+/**
+ * Alihkan navigasi ke tab Catat Pasien (/brainstorm) dan buka modal Inbox WhatsApp
+ * Aman dipanggil dari PushNotification, LocalNotification, maupun PWA Notification onClick.
+ */
+export function openWaInboxInApp() {
+  try {
+    sessionStorage.setItem('doctoid_auto_open_inbox', 'true')
+    // 1. Beri tahu Layout agar navigate('/brainstorm')
+    window.dispatchEvent(new CustomEvent('doctoid_nav_inbox'))
+
+    // 2. Direct browser navigation fallback jika Layout belum mendengarkan
+    if (window.location.pathname !== '/brainstorm') {
+      window.history.pushState({}, '', '/brainstorm')
+      window.dispatchEvent(new PopStateEvent('popstate'))
+    }
+
+    // 3. Picu buka modal seketika dan dengan jeda bertingkat
+    window.dispatchEvent(new CustomEvent('doctoid_open_wa_inbox'))
+    setTimeout(() => window.dispatchEvent(new CustomEvent('doctoid_open_wa_inbox')), 120)
+    setTimeout(() => window.dispatchEvent(new CustomEvent('doctoid_open_wa_inbox')), 350)
+    setTimeout(() => window.dispatchEvent(new CustomEvent('doctoid_open_wa_inbox')), 700)
+  } catch {}
+}
+
 export async function setupPushNotifications() {
   if (!Capacitor.isNativePlatform()) return
 
@@ -51,9 +75,8 @@ export async function setupPushNotifications() {
 
       PushNotifications.addListener('pushNotificationActionPerformed', async (notification) => {
         console.log('👆 Push notification ditekan di status bar / lockscreen:', notification)
-        window.location.hash = '#/catat'
+        openWaInboxInApp()
         syncWaInboxToDexie()
-        window.dispatchEvent(new CustomEvent('doctoid_open_wa_inbox'))
         await clearAllDeliveredNotifications()
       })
     }
@@ -348,8 +371,8 @@ if (typeof window !== 'undefined') {
       setupPushNotifications()
 
       LocalNotifications.addListener('localNotificationActionPerformed', async (notification) => {
-        window.location.hash = '#/catat'
-        window.dispatchEvent(new CustomEvent('doctoid_open_wa_inbox'))
+        openWaInboxInApp()
+        syncWaInboxToDexie()
         if (notification.notification) {
           await LocalNotifications.removeDeliveredNotifications({
             notifications: [notification.notification],
@@ -419,8 +442,7 @@ export async function sendLocalNotification(item: any) {
         })
         notif.onclick = () => {
           window.focus()
-          window.location.hash = '#/catat'
-          window.dispatchEvent(new CustomEvent('doctoid_open_wa_inbox'))
+          openWaInboxInApp()
         }
       } else if (Notification.permission !== 'denied' && !notifPermissionRequested) {
         notifPermissionRequested = true

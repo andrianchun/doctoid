@@ -1,4 +1,4 @@
-import { useRef } from 'react'
+import { useRef, useEffect } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { LayoutDashboard, PenLine, BedDouble, Stethoscope, FolderOpen } from 'lucide-react'
 
@@ -35,6 +35,22 @@ export default function Layout() {
     : isRekamMedis
     ? 4
     : -1
+
+  // Navigasi otomatis ke Catat Pasien (/brainstorm) dan buka modal Inbox saat notifikasi status bar diklik
+  useEffect(() => {
+    const handleNavInbox = () => {
+      sessionStorage.setItem('doctoid_auto_open_inbox', 'true')
+      if (location.pathname !== '/brainstorm') {
+        navigate('/brainstorm')
+      }
+      setTimeout(() => {
+        window.dispatchEvent(new CustomEvent('doctoid_open_wa_inbox'))
+      }, 100)
+    }
+
+    window.addEventListener('doctoid_nav_inbox', handleNavInbox)
+    return () => window.removeEventListener('doctoid_nav_inbox', handleNavInbox)
+  }, [navigate, location.pathname])
 
   // Gestur Swipe Horizontal antar Tab Utama
   const touchStartX = useRef<number | null>(null)
