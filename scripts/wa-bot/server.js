@@ -20,7 +20,9 @@ import makeWASocket, {
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
-const ROOT_DIR = path.resolve(__dirname, '../..')
+const ROOT_DIR = fs.existsSync(path.resolve(__dirname, '../../public'))
+  ? path.resolve(__dirname, '../..')
+  : __dirname
 const PUBLIC_DIR = path.join(ROOT_DIR, 'public')
 const AUTH_DIR = path.join(__dirname, '.auth_session')
 const STATUS_JSON_PATH = path.join(PUBLIC_DIR, 'wa-status.json')
