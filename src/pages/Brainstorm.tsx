@@ -22,7 +22,7 @@ const ShareReceiver: ShareReceiverPlugin | null = Capacitor.isNativePlatform()
 import {
   Mic,
   Loader2, X, ChevronDown, Send,
-  Search, Paperclip, Bell, ScanEye, RotateCw
+  Search, Paperclip, Bell, ScanEye, RotateCw, Play
 } from 'lucide-react'
 import { db, type Jaminan, type TerapiItem, type DiagnosisItem, type RegexField, type Patient, type RawatEpisode, type PeranRawat, type InboxItem, type AttachmentTag } from '../db'
 import { DEPT_ALIH_RAWAT } from './PatientProfile'
@@ -33,7 +33,7 @@ import CustomSelect from '../components/CustomSelect'
 import { PemfisVisualizer } from '../components/PemfisVisualizer'
 import { ClinicalMediaCard } from '../components/ClinicalMediaCard'
 import { ImageViewerModal, type ViewerImage } from '../components/ImageViewerModal'
-import { lineToTerapi, localParse, classifyFragment, synthesizeRegexRule, isGenderToken, isNonTherapyText, type LocalParseResult } from '../parser'
+import { lineToTerapi, localParse, parsePlanningLines, classifyFragment, synthesizeRegexRule, isGenderToken, isNonTherapyText, type LocalParseResult } from '../parser'
 import { rapikan, analisisKasus } from '../ai'
 import { buatKonteks, catatTerapi, saranTerapi, type Suggestion } from '../styleLearning'
 import { formatDate, hariKe, getLocalDateString } from '../utils/dateFormat'
@@ -210,6 +210,13 @@ export default function Brainstorm() {
   const regexRules = useLiveQuery(() => db.regexRules.toArray(), [], [])
   const allPatients = useLiveQuery(() => db.patients.toArray(), [], [])
   const pendingInboxItems = useLiveQuery(() => db.inboxQueue?.where('status').equals('pending').toArray(), [], []) || []
+  const sortedPendingInboxItems = useMemo(() => {
+    return [...pendingInboxItems].sort((a, b) => {
+      const timeA = new Date(a.created_at || a.id || 0).getTime()
+      const timeB = new Date(b.created_at || b.id || 0).getTime()
+      return timeB - timeA
+    })
+  }, [pendingInboxItems])
   const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null)
   const [detectedPatient, setDetectedPatient] = useState<Patient | null>(null)
   const [dismissedPatientId, setDismissedPatientId] = useState<number | null>(null)
@@ -356,7 +363,8 @@ export default function Brainstorm() {
       let parsedSoapData: Partial<FormState> = {}
       if (item.raw_text) {
         try {
-          const { data, success } = localParse(item.raw_text, regexRules)
+          const { consult, advis } = splitConsultAndAdvis(item.raw_text || '')
+          const { data, success } = localParse(consult || item.raw_text, regexRules)
           if (success) {
             const { title: resolvedTitle, nama_depan: resolvedNama } = splitTitleAndName(
               data.nama_depan || form.nama_depan,
@@ -376,6 +384,24 @@ export default function Brainstorm() {
             }
           } else if (!item.parsed_data) {
             parsedSoapData = { S: item.raw_text }
+          }
+
+          // PRIORITAS UTAMA ADVIS DOKTER: Jika pesan memuat balasan/advis dokter,
+          // ekstrak A (Diagnosis DPJP) dan P (Terapi DPJP) dari advis untuk menggantikan terapi sementara IGD!
+          if (advis) {
+            const advisParsed = localParse(advis, regexRules)
+            if (advisParsed.data.A && advisParsed.data.A.length > 0) {
+              parsedSoapData.A = advisParsed.data.A
+            }
+            if (advisParsed.data.P && advisParsed.data.P.length > 0) {
+              parsedSoapData.P = advisParsed.data.P
+            } else {
+              // Jika advis berbentuk daftar baris obat/planning tanpa header P:
+              const directP = parsePlanningLines(advis.split('\n'), today())
+              if (directP.length > 0) {
+                parsedSoapData.P = directP
+              }
+            }
           }
         } catch (err) {
           console.warn('Auto parse inbox failed, falling back:', err)
@@ -436,9 +462,10 @@ export default function Brainstorm() {
       }
 
       // 3. Gabungkan data parsed_data & vision ke form
-      const currentP = (item.parsed_data?.P && item.parsed_data.P.length > 0)
-        ? item.parsed_data.P
-        : (parsedSoapData.P || form.P)
+      // JIKA ada Planning definitif dari advis dokter (parsedSoapData.P), prioritaskan itu!
+      const currentP = (parsedSoapData.P && parsedSoapData.P.length > 0)
+        ? parsedSoapData.P
+        : (item.parsed_data?.P && item.parsed_data.P.length > 0 ? item.parsed_data.P : form.P)
 
       // Gabungkan teks penunjang dengan ringkasan temuan abnormal lab/EKG/radiologi
       const currentO_penunjang = item.parsed_data?.O_penunjang || parsedSoapData.O_penunjang || form.O_penunjang
@@ -2865,7 +2892,7 @@ export default function Brainstorm() {
             </div>
 
             {/* Daftar Konsulan */}
-            <div className="flex-1 overflow-y-auto p-5 divide-y divide-slate-100 space-y-5">
+            <div className="flex-1 overflow-y-auto p-5 pb-24 divide-y divide-slate-100 space-y-5">
               {pendingInboxItems.length === 0 ? (
                 <div className="py-16 text-center space-y-2">
                   {isSyncingInbox ? (
@@ -2883,7 +2910,7 @@ export default function Brainstorm() {
                   )}
                 </div>
               ) : (
-                pendingInboxItems.map((item) => {
+                sortedPendingInboxItems.map((item) => {
                   const { consult, advis } = splitConsultAndAdvis(item.raw_text || '')
                   return (
                     <div key={item.id} className="pt-5 first:pt-0 space-y-3">
@@ -2929,14 +2956,19 @@ export default function Brainstorm() {
                           </div>
                           <div className="grid grid-cols-3 gap-2">
                             {item.attachments.map((att: any, idx: number) => {
-                              const isImg = att.type?.startsWith('image/') || att.dataUrl?.startsWith('data:image/') || att.url
+                              const isVid = att.type?.startsWith('video/') || att.url?.endsWith('.mp4') || att.is_video
+                              const isImg = !isVid && (att.type?.startsWith('image/') || att.dataUrl?.startsWith('data:image/') || (att.url && !att.url.endsWith('.mp4')))
                               return (
                                 <div
                                   key={att.id || idx}
                                   onClick={() => {
+                                    if (isVid && att.url) {
+                                      window.open(att.url, '_blank')
+                                      return
+                                    }
                                     if (isImg && (att.dataUrl || att.url)) {
                                       const imgAtts = (item.attachments || [])
-                                        .filter((x: any) => x.type?.startsWith('image/') || x.dataUrl?.startsWith('data:image/') || x.url)
+                                        .filter((x: any) => !x.type?.startsWith('video/') && !x.url?.endsWith('.mp4') && (x.type?.startsWith('image/') || x.dataUrl?.startsWith('data:image/') || x.url))
                                         .map((x: any) => ({ url: x.dataUrl || x.url, name: x.name, type: x.type }))
                                       const cIdx = imgAtts.findIndex((x: any) => (x.url === (att.dataUrl || att.url)))
                                       setViewerState({
@@ -2947,10 +2979,19 @@ export default function Brainstorm() {
                                     }
                                   }}
                                   className={`relative rounded-xl overflow-hidden border border-slate-200 bg-slate-100 aspect-video flex items-center justify-center text-[11px] text-slate-500 p-1 ${
-                                    isImg ? 'cursor-pointer hover:border-primary group transition-colors' : ''
+                                    isImg || isVid ? 'cursor-pointer hover:border-primary group transition-colors' : ''
                                   }`}
                                 >
-                                  {isImg && (att.dataUrl || att.url) ? (
+                                  {isVid ? (
+                                    <div className="w-full h-full flex flex-col items-center justify-center bg-slate-900 text-white p-2">
+                                      <div className="size-7 rounded-full bg-white/20 flex items-center justify-center group-hover:scale-110 transition-transform">
+                                        <Play size={14} className="text-white fill-white ml-0.5" />
+                                      </div>
+                                      <span className="text-[10px] font-semibold mt-1 truncate max-w-full text-slate-200">
+                                        {att.name || 'Video Klinis'}
+                                      </span>
+                                    </div>
+                                  ) : isImg && (att.dataUrl || att.url) ? (
                                     <>
                                       <img
                                         src={att.dataUrl || att.url}

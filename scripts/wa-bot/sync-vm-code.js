@@ -60,8 +60,10 @@ echo "=== WA BOT CODE UPDATED & RESTARTED SUCCESSFULLY ==="
         fingerprint,
         items: [{ key: 'startup-script', value: startupScript }],
       }),
+      signal: AbortSignal.timeout(15000),
     }
   )
+  console.log('setMetadata response status:', setRes.status)
   const setData = await setRes.json()
   if (setData.error) {
     console.error('❌ Gagal update metadata:', setData.error)

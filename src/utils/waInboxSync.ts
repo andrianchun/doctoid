@@ -530,7 +530,7 @@ export async function syncWaInboxToDexie() {
     }
 
     const fetchGateway = async (): Promise<any[]> => {
-      const gRes = await fetch(`${gatewayUrl}/api/inbox?t=${Date.now()}`, { signal: AbortSignal.timeout(1000) })
+      const gRes = await fetch(`${gatewayUrl}/api/inbox?t=${Date.now()}`, { signal: AbortSignal.timeout(3500) })
       if (!gRes.ok) throw new Error('Gateway failed')
       return await gRes.json()
     }
@@ -612,9 +612,20 @@ export async function syncWaInboxToDexie() {
         const attachUpdated = newAttachCount !== oldAttachCount || (incomingDataLen > existingDataLen)
 
         if (attachUpdated || textChanged) {
+          // JANGAN menimpa lampiran lokal yang valid dengan lampiran kosong/rusak dari cloud
+          const localHasValidImages = (existing.attachments || []).some(
+            (a: any) => (a.dataUrl || '').length > 50
+          )
+          const remoteHasValidImages = (item.attachments || []).some(
+            (a: any) => (a.dataUrl || '').length > 50
+          )
+          const resolvedAttachments = (localHasValidImages && !remoteHasValidImages)
+            ? existing.attachments
+            : (item.attachments || existing.attachments)
+
           await db.inboxQueue.update(existing.id!, {
             raw_text: item.raw_text || existing.raw_text,
-            attachments: item.attachments || existing.attachments,
+            attachments: resolvedAttachments,
             parsed_data: item.parsed_data || existing.parsed_data,
             created_at: item.created_at || existing.created_at,
           })

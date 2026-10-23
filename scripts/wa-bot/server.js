@@ -379,6 +379,7 @@ async function initBaileys() {
         const isDoc = !!unwrap?.documentMessage
 
         let mediaDataUrl = ''
+        let mediaUrl = ''
         let mediaType = ''
         let mediaName = 'lampiran'
 
@@ -391,12 +392,13 @@ async function initBaileys() {
               mediaType = 'image/webp'
               mediaName = `Foto_${Date.now()}.webp`
               try {
+                // Kompresi presisi 640x640 q50: sangat tajam untuk lab & EKG, namun sangat ringan (~15KB)
                 const comp = await sharp(buffer)
-                  .resize(800, 800, { fit: 'inside', withoutEnlargement: true })
-                  .webp({ quality: 60 })
+                  .resize(640, 640, { fit: 'inside', withoutEnlargement: true })
+                  .webp({ quality: 50 })
                   .toBuffer()
                 mediaDataUrl = `data:image/webp;base64,${comp.toString('base64')}`
-                console.log(`✓ Foto berhasil dikompresi ke WebP dari ${(buffer.length/1024).toFixed(0)} KB -> ${(comp.length/1024).toFixed(0)} KB`)
+                console.log(`✓ Foto berhasil dikompresi ke WebP: ${(buffer.length/1024).toFixed(0)} KB -> ${(comp.length/1024).toFixed(0)} KB`)
               } catch (e) {
                 console.warn('Kompresi webp gagal, fallback ke jpeg:', e.message)
                 mediaType = 'image/jpeg'
@@ -404,8 +406,17 @@ async function initBaileys() {
               }
             } else if (isVideo) {
               mediaType = unwrap.videoMessage.mimetype || 'video/mp4'
-              mediaName = 'Video_Kejang.mp4'
-              // Video besar tidak di-base64-kan langsung ke JSON agar JSON tetap ringan (<500KB)
+              const vFile = `video_${Date.now()}.mp4`
+              mediaName = 'Video_Pemeriksaan.mp4'
+              const mediaDir = path.join(PUBLIC_DIR, 'media')
+              if (!fs.existsSync(mediaDir)) fs.mkdirSync(mediaDir, { recursive: true })
+              try {
+                fs.writeFileSync(path.join(mediaDir, vFile), buffer)
+                console.log(`✓ Video berhasil disimpan ke disk server: ${vFile} (${(buffer.length/1024/1024).toFixed(1)} MB)`)
+                mediaUrl = `http://35.255.95.161:3001/media/${vFile}`
+              } catch (err) {
+                console.error('Gagal menulis berkas video ke disk:', err.message)
+              }
               mediaDataUrl = ''
             } else if (isAudio) {
               mediaType = unwrap.audioMessage.mimetype || 'audio/ogg'
@@ -459,13 +470,14 @@ async function initBaileys() {
           sender_phone: participantPhone || myPhone || remotePhone,
           raw_text: textContent,
           parsed_data: parsedData,
-          attachments: mediaDataUrl
+          attachments: (mediaDataUrl || mediaUrl)
             ? [
                 {
                   id: Math.random().toString(36).substring(7),
                   name: mediaName,
                   type: mediaType,
                   dataUrl: mediaDataUrl,
+                  url: mediaUrl,
                   kategori: isVideo ? 'pemfis' : 'penunjang',
                 },
               ]
@@ -548,6 +560,7 @@ async function initBaileys() {
                 // Jangan deteksi duplikat hanya dari slice(0, 80) karena semua header WebP/JPEG identik!
                 const isDup = curAtts.some((a) => {
                   if (a.id && newAtt.id && a.id === newAtt.id) return true
+                  if (a.url && newAtt.url && a.url === newAtt.url) return true
                   if (!a.dataUrl || !newAtt.dataUrl) return false
                   if (a.dataUrl === newAtt.dataUrl) return true
                   return a.dataUrl.length === newAtt.dataUrl.length && a.dataUrl.slice(-120) === newAtt.dataUrl.slice(-120)
@@ -672,10 +685,10 @@ async function syncInboxToFirestore(inboxList) {
       return { stringValue: String(val) }
     }
 
-    // Ambil maksimal 5 item pending
+    // Ambil maksimal 8 item pending
     let pendingItems = inboxList
       .filter((i) => i.status === 'pending')
-      .slice(0, 5)
+      .slice(0, 8)
       .map((it) => JSON.parse(JSON.stringify(it)))
 
     function buildPayload(items) {
@@ -696,36 +709,30 @@ async function syncInboxToFirestore(inboxList) {
     let payload = buildPayload(pendingItems)
     let payloadStr = JSON.stringify(payload)
 
-    // Jaminan Firestore 1MB: jika payload > 500KB (aman dari overhead REST),
-    // pangkas dataUrl dari item lama (indeks >= 1) terlebih dahulu
-    if (payloadStr.length > 500000) {
-      for (let i = pendingItems.length - 1; i >= 1; i--) {
-        if (pendingItems[i].attachments) {
-          pendingItems[i].attachments.forEach((att) => {
-            att.dataUrl = ''
-          })
+    // Jaminan Firestore 1MB (1,048,576 bytes):
+    // Jika ukuran payload mendekati 750KB:
+    // Batasi lampiran pada item-item lama (indeks >= 2) maksimal 3 lampiran,
+    // TANPA MENGHAPUS dataUrl (foto-foto lama tetap UTUH dan TIDAK RUSAK!)
+    if (payloadStr.length > 750000) {
+      for (let i = 2; i < pendingItems.length; i++) {
+        if (pendingItems[i].attachments && pendingItems[i].attachments.length > 3) {
+          pendingItems[i].attachments = pendingItems[i].attachments.slice(0, 3)
         }
       }
       payload = buildPayload(pendingItems)
       payloadStr = JSON.stringify(payload)
     }
 
-    // Jika masih > 500KB, batasi lampiran item aktif ke 6 lampiran terbaru
-    if (payloadStr.length > 500000 && pendingItems[0]?.attachments?.length > 6) {
-      pendingItems[0].attachments = pendingItems[0].attachments.slice(-6)
+    // Jika masih > 750KB, batasi item index 1 maksimal 4 lampiran
+    if (payloadStr.length > 750000 && pendingItems[1]?.attachments?.length > 4) {
+      pendingItems[1].attachments = pendingItems[1].attachments.slice(0, 4)
       payload = buildPayload(pendingItems)
       payloadStr = JSON.stringify(payload)
     }
 
-    // Jika masih > 500KB, pangkas seluruh dataUrl (bawa metadata teks SOAP & identitas saja)
-    if (payloadStr.length > 500000) {
-      for (const it of pendingItems) {
-        if (it.attachments) {
-          it.attachments.forEach((att) => {
-            att.dataUrl = ''
-          })
-        }
-      }
+    // Jika masih > 750KB, batasi total item pending ke 5 item teratas
+    if (payloadStr.length > 750000 && pendingItems.length > 5) {
+      pendingItems = pendingItems.slice(0, 5)
       payload = buildPayload(pendingItems)
       payloadStr = JSON.stringify(payload)
     }
@@ -742,14 +749,12 @@ async function syncInboxToFirestore(inboxList) {
       body: payloadStr,
     })
 
-    // Fallback darurat: jika Firestore tetap menolak (misal error size 400), hapus seluruh dataUrl dan coba lagi seketika
+    // Fallback darurat jika ukuran masih mendekati limit
     if (!res.ok) {
-      console.warn('⚠️ Firestore menolak payload utama, mencoba fallback darurat teks klinis murni...')
-      for (const it of pendingItems) {
-        if (it.attachments) {
-          it.attachments.forEach((att) => {
-            att.dataUrl = ''
-          })
+      console.warn('⚠️ Firestore menolak payload utama, mencoba fallback terkompresi...')
+      for (let i = 1; i < pendingItems.length; i++) {
+        if (pendingItems[i].attachments && pendingItems[i].attachments.length > 2) {
+          pendingItems[i].attachments = pendingItems[i].attachments.slice(0, 2)
         }
       }
       const fallbackPayloadStr = JSON.stringify(buildPayload(pendingItems))
@@ -922,6 +927,41 @@ const server = http.createServer(async (req, res) => {
   }
 
   const url = new URL(req.url, `http://${req.headers.host}`)
+
+  // GET /media/:file (Streaming video & berkas media klinis)
+  if (req.method === 'GET' && url.pathname.startsWith('/media/')) {
+    const fileName = path.basename(url.pathname)
+    const filePath = path.join(PUBLIC_DIR, 'media', fileName)
+    if (fs.existsSync(filePath)) {
+      const stat = fs.statSync(filePath)
+      const range = req.headers.range
+      if (range) {
+        const parts = range.replace(/bytes=/, '').split('-')
+        const start = parseInt(parts[0], 10)
+        const end = parts[1] ? parseInt(parts[1], 10) : stat.size - 1
+        const chunksize = end - start + 1
+        const fileStream = fs.createReadStream(filePath, { start, end })
+        res.writeHead(206, {
+          'Content-Range': `bytes ${start}-${end}/${stat.size}`,
+          'Accept-Ranges': 'bytes',
+          'Content-Length': chunksize,
+          'Content-Type': 'video/mp4',
+        })
+        fileStream.pipe(res)
+      } else {
+        res.writeHead(200, {
+          'Content-Length': stat.size,
+          'Content-Type': 'video/mp4',
+          'Accept-Ranges': 'bytes',
+        })
+        fs.createReadStream(filePath).pipe(res)
+      }
+      return
+    }
+    res.writeHead(404)
+    res.end('Media Not Found')
+    return
+  }
 
   // GET /api/status
   if (req.method === 'GET' && url.pathname === '/api/status') {

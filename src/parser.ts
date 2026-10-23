@@ -853,7 +853,7 @@ function parseDiagnosisLines(lines: string[]): DiagnosisItem[] {
   return results
 }
 
-function parsePlanningLines(lines: string[], today: string): TerapiItem[] {
+export function parsePlanningLines(lines: string[], today: string): TerapiItem[] {
   const items: TerapiItem[] = []
   let currentSubCat: 'Diagnostik' | 'Farmakologi' | 'Non-Farmakologi' | 'Monitoring' | 'Edukasi' = 'Farmakologi'
   let activeRoute = '' // e.g. 'PO', 'IV'
