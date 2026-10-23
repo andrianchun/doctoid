@@ -219,7 +219,7 @@ function ApiKeyCard({ notify }: { notify: (m: string) => void }) {
       <div className="flex items-start gap-3 rounded-2xl bg-primary/10 border border-primary/20 p-4">
         <Sparkles size={20} className="text-primary shrink-0 mt-0.5" />
         <div className="text-xs text-ink space-y-1">
-          <p className="font-bold text-primary-deep">Google Gemini AI Engine</p>
+          <p className="font-bold text-primary-deep">Google Gemini Engine</p>
           <p className="text-ink-muted leading-relaxed">
             Kunci API disimpan secara aman di perangkat lokal Anda (Local Encrypted Storage) dan tidak pernah dikirimkan ke server pihak ketiga manapun.
           </p>
@@ -1075,7 +1075,7 @@ export default function Settings() {
         {[
           { id: 'manajemen' as const, label: 'Manajemen' },
           { id: 'preferensi' as const, label: 'Preferensi' },
-          { id: 'template' as const, label: 'Template & AI' },
+          { id: 'template' as const, label: 'Template & Aturan' },
           { id: 'lanjutan' as const, label: 'Lanjutan' },
         ].map((tab) => {
           const isActive = activeTab === tab.id
@@ -1263,10 +1263,10 @@ export default function Settings() {
       {/* TAB 4: LANJUTAN (API GEMINI + KEAMANAN, CADANGAN & UPDATE OTA) */}
       {activeTab === 'lanjutan' && (
         <div className="space-y-4 animate-in fade-in">
-          {/* Section 1: Asisten AI & Kunci API Google Gemini */}
+          {/* Section 1: Layanan Asisten & Kunci API Google Gemini */}
           <div className="glass-card rounded-3xl p-5 shadow-sm space-y-4">
             <h3 className="flex items-center gap-2 text-xs font-bold text-ink">
-              <Sparkles size={16} className="text-primary" /> Asisten AI & Kunci API
+              <Sparkles size={16} className="text-primary" /> Layanan Asisten & Kunci API
             </h3>
             <ApiKeyCard notify={notify} />
           </div>

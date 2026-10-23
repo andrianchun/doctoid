@@ -74,13 +74,45 @@ export async function setupPushNotifications() {
         console.warn('⚠️ FCM Registration Error:', error)
       })
 
-      PushNotifications.addListener('pushNotificationReceived', (notification) => {
+      PushNotifications.addListener('pushNotificationReceived', async (notification) => {
         console.log('📩 Push notification masuk saat app terbuka:', notification)
+        const d = notification?.data
+        if (d?.inboxId && d?.body) {
+          const numId = Number(d.inboxId) || Date.now()
+          const exists = await db.inboxQueue.get(numId)
+          if (!exists) {
+            await db.inboxQueue.put({
+              id: numId,
+              source: 'whatsapp',
+              sender_name: d.title || 'Konsulan WhatsApp',
+              sender_phone: '',
+              raw_text: d.body,
+              status: 'pending',
+              created_at: new Date().toISOString(),
+            })
+          }
+        }
         syncWaInboxToDexie()
       })
 
       PushNotifications.addListener('pushNotificationActionPerformed', async (notification) => {
         console.log('👆 Push notification ditekan di status bar / lockscreen:', notification)
+        const d = notification?.notification?.data
+        if (d?.inboxId && d?.body) {
+          const numId = Number(d.inboxId) || Date.now()
+          const exists = await db.inboxQueue.get(numId)
+          if (!exists) {
+            await db.inboxQueue.put({
+              id: numId,
+              source: 'whatsapp',
+              sender_name: d.title || 'Konsulan WhatsApp',
+              sender_phone: '',
+              raw_text: d.body,
+              status: 'pending',
+              created_at: new Date().toISOString(),
+            })
+          }
+        }
         openWaInboxInApp()
         syncWaInboxToDexie()
         await clearAllDeliveredNotifications()
@@ -531,7 +563,12 @@ export async function syncWaInboxToDexie() {
       const locKey1 = String(loc.id || '')
       const locKey2 = String(loc.created_at || '')
       if (!activeServerKeys.has(locKey1) && !activeServerKeys.has(locKey2)) {
-        await db.inboxQueue.update(loc.id!, { status: 'dismissed' })
+        // HANYA hapus otomatis jika item sudah berumur > 48 jam di server,
+        // jangan hapus item baru yang mungkin belum selesai sinkron atau sedang ditinjau dokter!
+        const ageHours = (Date.now() - new Date(loc.created_at).getTime()) / (1000 * 60 * 60)
+        if (ageHours > 48) {
+          await db.inboxQueue.update(loc.id!, { status: 'dismissed' })
+        }
       }
     }
 

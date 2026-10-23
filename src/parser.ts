@@ -32,6 +32,59 @@ const DRUG_INDICATORS =
 const NOISE_PHRASES =
   /^(?:selamat\s*(?:pagi|siang|sore|malam)|assalamu['a-z]*|halo|mohon\s*(?:izin|advis|arahan|bimbingan|tatalaksana|petunjuk)|terima\s*kasih|matur\s*nuwun|ts\s*dr|dokter\s*jaga|ttd|asal\s*pasien)/i
 
+/**
+ * Filter ketat teks yang BUKAN terapi (header chat WhatsApp, nama dokter/pengirim "Raseno", sapaan, dsb.)
+ */
+export function isNonTherapyText(text: string): boolean {
+  if (!text) return true
+  const clean = text
+    .replace(/^[-•*•–—\d.)\]]+\s*/, '')
+    .replace(/^[*_~#]+|[*_~#]+$/g, '')
+    .trim()
+  if (!clean || clean.length < 2) return true
+
+  // 1. WhatsApp / SIMRS Chat Header & Template Boilerplate
+  if (/^(?:jawaban|advis|balasan|instruksi|konsul|laporan|catatan|perawat|dpjp|dr\.?)\s*[:/\-–—*]/i.test(clean)) return true
+  if (/^(?:jawaban|advis|instruksi)\s*[/\\&]\s*(?:advis|jawaban|konsul|instruksi)/i.test(clean)) return true
+  if (/\b(?:jawaban\s*\/\s*advis\s*dokter|advis\s*dokter|jawaban\s*dokter|advis\s*dpjp|instruksi\s*dpjp|laporan\s*jaga|advis\s*ruangan)\b/i.test(clean)) return true
+  if (/^(?:p\s*[:\-–—]|ptx\s*[:\-–—]|pdx\s*[:\-–—]|pmx\s*[:\-–—]|pex\s*[:\-–—]|terapi\s*[:\-–—]|planning\s*[:\-–—])/i.test(clean)) return true
+
+  // 2. Baris yang berakhiran tanda titik dua atau bintang tanpa nama obat / dosis
+  if (/[:*]+$/.test(clean) && !/\d+\s*(?:mg|g|mcg|ml|cc|tpm|tab|amp|vial|kaps)/i.test(clean)) return true
+
+  // 3. Nama dokter, gelar spesialis, sapaan, penutup, signature
+  if (/^(?:dr\.?|dokter)\s+[a-z]+/i.test(clean)) return true
+  if (/\b(?:Sp\.[A-Z]+|Sp[A-Z]{1,3})\b/i.test(clean)) return true
+  if (/^(?:yth\.?|kepada\s*ts|ts|teman\s*sejawat|salam|wassalam|terima\s*kasih|trims|thx|matur\s*nuwun|hormat\s*kami|dpjp|ttd)\b/i.test(clean)) return true
+
+  // 4. Nama pengirim / dokter mandiri (misal "Raseno", "Adiz", "dr Raseno") tanpa dosis atau indikator obat
+  if (/^[A-Za-z\s.'-]{2,30}$/.test(clean)) {
+    const lower = clean.toLowerCase().trim()
+    const nonTherapyNames = new Set([
+      'raseno', 'dr raseno', 'adiz', 'perawat', 'bidan', 'dokter', 'dpjp', 'pasien',
+      'jawaban', 'advis', 'konsul', 'terapi', 'planning', 'instruksi', 'selesai', 'lanjut'
+    ])
+    if (nonTherapyNames.has(lower)) return true
+
+    // Jika berupa 1-2 kata nama orang tanpa ada indikator obat/rute/dosis dan tanpa non-farmako
+    const words = lower.split(/\s+/)
+    if (words.length <= 2 && !DRUG_INDICATORS.test(clean) && !NON_FARMAKO_REGEX.test(clean)) {
+      if (/^[A-Z][a-z]+$/.test(clean) && !/^(?:paracetamol|citicolin|asering|omeprazole|ranitidin|metamizol|ketorolac|antrain|nicardipin|manitol|aspilet|simvastatin)$/i.test(clean)) {
+        return true
+      }
+    }
+  }
+
+  // 5. Nama berkas lampiran
+  if (/\b(?:Foto_\d+|image_\d+|\d{12,}\.(?:webp|jpg|jpeg|png))\b/i.test(clean)) return true
+  if (/\.(?:webp|jpg|jpeg|png|pdf)$/i.test(clean)) return true
+
+  // 6. Status KRS / instruksi alih rawat yang bukan terapi
+  if (/^(?:acc\s*krs|boleh\s*pulang|alih\s*rawat|rawat\s*bersama|rujuk\s*ke)\b/i.test(clean)) return true
+
+  return false
+}
+
 export interface ParsedSoap {
   S: string
   O: string
@@ -809,9 +862,9 @@ function parsePlanningLines(lines: string[], today: string): TerapiItem[] {
     const rawLine = line.trim()
     if (!rawLine) continue
     if (NOISE_PHRASES.test(rawLine)) continue
+    if (isNonTherapyText(rawLine)) continue
     if (/^mohon\s*(?:arahan|advis|petunjuk|tatalaksana)/i.test(rawLine)) continue
     if (/^---\s*$/i.test(rawLine)) continue
-    if (/^\*?(?:Jawaban|Advis|Balasan)\s*(?:\/?\s*Advis)?\s*(?:Dokter)?\*?[:\s]*$/i.test(rawLine)) continue
     if (/^[/\\*_\-~#.,;:\s]+$/.test(rawLine)) continue
     if (/\b(?:Foto_\d+|image_\d+|\d{12,}\.(?:webp|jpg|jpeg|png))\b/i.test(rawLine)) continue
     if (/\.(?:webp|jpg|jpeg|png)$/i.test(rawLine)) continue
@@ -822,8 +875,8 @@ function parsePlanningLines(lines: string[], today: string): TerapiItem[] {
       currentSubCat = 'Diagnostik'
       activeRoute = ''
       const rest = pdxMatch[1].trim()
-      if (rest) {
-        const pdxParts = rest.split(/[,;]\s*/).map((p) => p.trim()).filter(Boolean)
+      if (rest && !isNonTherapyText(rest)) {
+        const pdxParts = rest.split(/[,;]\s*/).map((p) => p.trim()).filter(p => p && !isNonTherapyText(p))
         for (const p of pdxParts) {
           items.push({
             nama_item: p,
@@ -844,7 +897,7 @@ function parsePlanningLines(lines: string[], today: string): TerapiItem[] {
       currentSubCat = 'Farmakologi'
       activeRoute = ''
       const rest = ptxMatch[1].trim()
-      if (rest) {
+      if (rest && !isNonTherapyText(rest)) {
         items.push(lineToTerapi(rest, today, undefined))
       }
       continue
@@ -856,7 +909,7 @@ function parsePlanningLines(lines: string[], today: string): TerapiItem[] {
       currentSubCat = 'Monitoring'
       activeRoute = ''
       const rest = pmxMatch[1].trim()
-      if (rest) {
+      if (rest && !isNonTherapyText(rest)) {
         items.push({
           nama_item: rest,
           dosis_keterangan: '',
@@ -875,7 +928,7 @@ function parsePlanningLines(lines: string[], today: string): TerapiItem[] {
       currentSubCat = 'Edukasi'
       activeRoute = ''
       const rest = pexMatch[1].trim()
-      if (rest) {
+      if (rest && !isNonTherapyText(rest)) {
         items.push({
           nama_item: rest,
           dosis_keterangan: '',
@@ -898,11 +951,12 @@ function parsePlanningLines(lines: string[], today: string): TerapiItem[] {
     // 6. Parsing Item Terapi Biasa
     const cleanItem = rawLine.replace(/^[-•*•–—\d.)\]]+\s*/, '').trim()
     if (!cleanItem || /^[/\\*_\-~#.,;:\s]+$/.test(cleanItem)) continue
+    if (isNonTherapyText(cleanItem)) continue
     if (/\b(?:Foto_\d+|image_\d+|\d{12,}\.(?:webp|jpg|jpeg|png))\b/i.test(cleanItem)) continue
     if (/\.(?:webp|jpg|jpeg|png)$/i.test(cleanItem)) continue
 
     if (currentSubCat === 'Diagnostik') {
-      const parts = cleanItem.split(/[,;]\s*/).map((p) => p.trim()).filter(Boolean)
+      const parts = cleanItem.split(/[,;]\s*/).map((p) => p.trim()).filter((p) => p && !isNonTherapyText(p))
       for (const p of parts) {
         items.push({
           nama_item: p,
@@ -934,14 +988,16 @@ function parsePlanningLines(lines: string[], today: string): TerapiItem[] {
     } else {
       // Terapi (Farmakologi / Non-Farmakologi)
       const parsed = lineToTerapi(cleanItem, today)
-      if (activeRoute && !new RegExp(`\\b${activeRoute}\\b`, 'i').test(parsed.nama_item) && !new RegExp(`\\b${activeRoute}\\b`, 'i').test(parsed.dosis_keterangan)) {
-        parsed.dosis_keterangan = parsed.dosis_keterangan ? `${parsed.dosis_keterangan} ${activeRoute}` : activeRoute
+      if (!isNonTherapyText(parsed.nama_item)) {
+        if (activeRoute && !new RegExp(`\\b${activeRoute}\\b`, 'i').test(parsed.nama_item) && !new RegExp(`\\b${activeRoute}\\b`, 'i').test(parsed.dosis_keterangan)) {
+          parsed.dosis_keterangan = parsed.dosis_keterangan ? `${parsed.dosis_keterangan} ${activeRoute}` : activeRoute
+        }
+        items.push(parsed)
       }
-      items.push(parsed)
     }
   }
 
-  return items
+  return items.filter((it) => !isNonTherapyText(it.nama_item))
 }
 
 export interface LocalParseResult {

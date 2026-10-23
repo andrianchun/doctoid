@@ -696,8 +696,9 @@ async function syncInboxToFirestore(inboxList) {
     let payload = buildPayload(pendingItems)
     let payloadStr = JSON.stringify(payload)
 
-    // Jaminan Firestore 1MB: jika payload > 850KB, pangkas dataUrl dari item lama terlebih dahulu
-    if (payloadStr.length > 850000) {
+    // Jaminan Firestore 1MB: jika payload > 500KB (aman dari overhead REST),
+    // pangkas dataUrl dari item lama (indeks >= 1) terlebih dahulu
+    if (payloadStr.length > 500000) {
       for (let i = pendingItems.length - 1; i >= 1; i--) {
         if (pendingItems[i].attachments) {
           pendingItems[i].attachments.forEach((att) => {
@@ -709,9 +710,22 @@ async function syncInboxToFirestore(inboxList) {
       payloadStr = JSON.stringify(payload)
     }
 
-    // Jika masih > 850KB, batasi lampiran item aktif ke 12 lampiran terbaru
-    if (payloadStr.length > 850000 && pendingItems[0]?.attachments?.length > 12) {
-      pendingItems[0].attachments = pendingItems[0].attachments.slice(-12)
+    // Jika masih > 500KB, batasi lampiran item aktif ke 6 lampiran terbaru
+    if (payloadStr.length > 500000 && pendingItems[0]?.attachments?.length > 6) {
+      pendingItems[0].attachments = pendingItems[0].attachments.slice(-6)
+      payload = buildPayload(pendingItems)
+      payloadStr = JSON.stringify(payload)
+    }
+
+    // Jika masih > 500KB, pangkas seluruh dataUrl (bawa metadata teks SOAP & identitas saja)
+    if (payloadStr.length > 500000) {
+      for (const it of pendingItems) {
+        if (it.attachments) {
+          it.attachments.forEach((att) => {
+            att.dataUrl = ''
+          })
+        }
+      }
       payload = buildPayload(pendingItems)
       payloadStr = JSON.stringify(payload)
     }
@@ -719,7 +733,7 @@ async function syncInboxToFirestore(inboxList) {
     // Tulis ke dokumen terisolasi khusus inbox WhatsApp: doctoid/inbox_{USER_UID} (Jaminan aman < 1MB)
     const firestoreUrl = `https://firestore.googleapis.com/v1/projects/docto-id/databases/(default)/documents/doctoid/inbox_${USER_UID}`
 
-    const res = await fetch(firestoreUrl, {
+    let res = await fetch(firestoreUrl, {
       method: 'PATCH',
       headers: {
         Authorization: 'Bearer ' + accessToken,
@@ -727,6 +741,27 @@ async function syncInboxToFirestore(inboxList) {
       },
       body: payloadStr,
     })
+
+    // Fallback darurat: jika Firestore tetap menolak (misal error size 400), hapus seluruh dataUrl dan coba lagi seketika
+    if (!res.ok) {
+      console.warn('⚠️ Firestore menolak payload utama, mencoba fallback darurat teks klinis murni...')
+      for (const it of pendingItems) {
+        if (it.attachments) {
+          it.attachments.forEach((att) => {
+            att.dataUrl = ''
+          })
+        }
+      }
+      const fallbackPayloadStr = JSON.stringify(buildPayload(pendingItems))
+      res = await fetch(firestoreUrl, {
+        method: 'PATCH',
+        headers: {
+          Authorization: 'Bearer ' + accessToken,
+          'Content-Type': 'application/json',
+        },
+        body: fallbackPayloadStr,
+      })
+    }
 
     if (res.ok) {
       console.log(`☁️ Konsulan otomatis tersinkron ke Cloud Firestore (langsung muncul di APK HP dokter!)`)

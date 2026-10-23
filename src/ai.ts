@@ -55,7 +55,7 @@ function getPplxKeys(): string[] {
 function formatError(status: number, rawMessage: string, provider: string) {
   const msgLower = rawMessage.toLowerCase()
   if (status === 401 || status === 403) return `Kunci API ${provider} tidak valid.`
-  if (status === 404) return `Model AI ${provider} tidak ditemukan (Error 404).`
+  if (status === 404) return `Model ${provider} tidak ditemukan (Error 404).`
   if (status === 429) {
     if (msgLower.includes('quota') || msgLower.includes('insufficient_quota')) return `Kuota API ${provider} telah habis.`
     return `Server ${provider} sedang penuh (Rate Limit). Tunggu sebentar.`
@@ -101,7 +101,7 @@ export async function rapikan(text: string, attachments: { type: string; dataUrl
   // De-identifikasi PII sebelum payload meninggalkan perangkat (Kepatuhan UU PDP No. 27/2022)
   const { sanitizedText, originalTokens } = sanitizePiiForAi(text)
 
-  let lastError = new Error('Gagal menghubungi AI Server')
+  let lastError = new Error('Gagal menghubungi server pemrosesan')
 
   for (const key of cheapestFirst(keys)) {
     const provider = getProvider(key)
@@ -210,7 +210,7 @@ export async function analisisKasus(formStateStr: string): Promise<AnalisisResul
   const keys = getAllKeys()
   if (!keys.length) throw new Error('Isi API Key di Pengaturan terlebih dahulu.')
 
-  let lastError = new Error('Gagal menghubungi AI Server')
+  let lastError = new Error('Gagal menghubungi server pemrosesan')
 
   for (const key of cheapestFirst(keys)) {
     const provider = getProvider(key)
@@ -298,7 +298,7 @@ export async function chatPasien(messages: ChatMsg[], konteksPasien: string): Pr
   const keys = getAllKeys()
   if (!keys.length) throw new Error('Isi API Key di Pengaturan terlebih dahulu.')
 
-  let lastError = new Error('Gagal menghubungi AI Server')
+  let lastError = new Error('Gagal menghubungi server pemrosesan')
 
   for (const key of cheapestFirst(keys)) {
     const provider = getProvider(key)
@@ -427,7 +427,7 @@ export async function extractPoliPatientsFromImage(
   const keys = getAllKeys()
   if (!keys.length) throw new Error('Isi API Key di Pengaturan terlebih dahulu.')
 
-  let lastError = new Error('Gagal memproses gambar poli dengan AI')
+  let lastError = new Error('Gagal memproses gambar register poli')
 
   const promptText = `Anda adalah asisten medis spesialis digitalisasi register pasien poliklinik rumah sakit.
 Tugas Anda adalah membaca gambar foto layar monitor e-RM, buku register perawat, atau daftar antrean pasien poliklinik${hospitalName ? ` di ${hospitalName}` : ''}, dan mengekstrak daftar pasien yang tertera.

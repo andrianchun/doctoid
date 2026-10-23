@@ -118,7 +118,7 @@ export async function analyzeAndClassifyAttachments(
         }))
       )
 
-      onProgress?.(45, 'Menganalisis lab, EKG & radiologi dengan AI...')
+      onProgress?.(45, 'Menganalisis Hasil Lab, EKG, dan Radiologi...')
       const result = await callGeminiVision(compressedImages, rawText, keys)
       if (result) {
         onProgress?.(85, 'Mengekstrak temuan abnormal...')
@@ -204,10 +204,8 @@ ATURAN KLINIS WAJIB:
    - Jika foto adalah film CT polos tanpa teks ekspertise: berikan kesan orientasi (Ada/tidaknya perdarahan ICH/SAH/SDH/EDH, infark/lesi hipodens teritorial, edema serebri, midline shift / herniasi).
 
 5. PLANNING DIAGNOSTIK (pdx):
-   - Jika ada EKG -> masukkan "EKG" (cukup EKG saja, bukan 12 lead)
-   - Jika ada CT Scan -> masukkan "CT Scan Kepala"
-   - Jika ada Thorax -> masukkan "Foto Thorax"
-   - Jika ada Lab -> masukkan "Darah Lengkap", "GDS", "Elektrolit", dll. sesuai jenis lab.
+   - JANGAN masukkan pemeriksaan yang gambarnya/hasilnya SUDAH ADA di lampiran ke dalam pdx! (Karena hasil pemeriksaan tersebut sudah masuk ke data penunjang).
+   - pdx HANYA untuk usulan pemeriksaan diagnostik lanjutan yang BELUM ADA di lampiran (misal: jika disarankan "Pro CT Angiografi", "Rencana Echocardiografi", "Cek Profil Lipid"). Jika tidak ada usulan baru, kosongkan: "pdx": [].
 
 OUTPUT HARUS BERUPA JSON VALID dengan struktur persis seperti ini:
 {
@@ -217,7 +215,7 @@ OUTPUT HARUS BERUPA JSON VALID dengan struktur persis seperti ini:
   "lab_abnormal": ["Leukosit 14.500 ↑", "GDS 245 ↑"],
   "ekg_summary": "Sinus Rhythm, HR 78 bpm, tidak tampak aritmia/PVC/AF, ST-T changes (-)",
   "radiologi_summary": "CT Scan Kepala: Tidak tampak perdarahan intrakranial, infark kronis lakunar kapsula interna",
-  "pdx": ["EKG", "CT Scan Kepala", "Darah Lengkap"]
+  "pdx": []
 }`
 
   parts.push({ text: prompt })
@@ -329,17 +327,12 @@ function runHeuristicClassifier(
     if (/ekg|ecg|irama|lead/i.test(lowerName) || /ekg/i.test(rawText)) {
       tag = 'EKG'
       kategori = 'penunjang'
-      pdxSet.add('EKG')
     } else if (/ct|scan|radiologi|rontgen|thorax|xray|mri/i.test(lowerName) || /ct scan|rontgen|thorax/i.test(rawText)) {
       tag = 'Radiologi'
       kategori = 'penunjang'
-      if (/thorax/i.test(lowerName) || /thorax/i.test(rawText)) pdxSet.add('Foto Thorax')
-      else pdxSet.add('CT Scan Kepala')
     } else if (/lab|darah|dl|gds|urin|kimia/i.test(lowerName) || /leuko|tromb|hb|gds/i.test(rawText)) {
       tag = 'Lab'
       kategori = 'penunjang'
-      pdxSet.add('Darah Lengkap')
-      if (/gds|gula/i.test(rawText) || /gds/i.test(lowerName)) pdxSet.add('GDS')
     } else if (/wajah|parese|fisik|luka|mata|klinis/i.test(lowerName) || lowerType.startsWith('video/')) {
       tag = 'Pemfis'
       kategori = 'pemfis'

@@ -128,7 +128,7 @@ export default function AttachmentMenu({
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
-        aria-label={isListening ? 'Matikan Dikte' : 'Menu Alat AI & Dikte'}
+        aria-label={isListening ? 'Matikan Dikte' : 'Menu Lampiran & Dikte'}
         className={`relative z-20 flex size-10 items-center justify-center rounded-full transition-all active:scale-95 disabled:opacity-50 cursor-pointer ${
           isListening
             ? 'bg-rose-500 text-white animate-pulse shadow-lg shadow-rose-500/40'

@@ -33,7 +33,7 @@ import CustomSelect from '../components/CustomSelect'
 import { PemfisVisualizer } from '../components/PemfisVisualizer'
 import { ClinicalMediaCard } from '../components/ClinicalMediaCard'
 import { ImageViewerModal, type ViewerImage } from '../components/ImageViewerModal'
-import { lineToTerapi, localParse, classifyFragment, synthesizeRegexRule, isGenderToken, type LocalParseResult } from '../parser'
+import { lineToTerapi, localParse, classifyFragment, synthesizeRegexRule, isGenderToken, isNonTherapyText, type LocalParseResult } from '../parser'
 import { rapikan, analisisKasus } from '../ai'
 import { buatKonteks, catatTerapi, saranTerapi, type Suggestion } from '../styleLearning'
 import { formatDate, hariKe, getLocalDateString } from '../utils/dateFormat'
@@ -440,16 +440,33 @@ export default function Brainstorm() {
         ? item.parsed_data.P
         : (parsedSoapData.P || form.P)
 
-      // Tambahkan usulan PDx dari vision jika belum ada
-      const existingPNames = new Set(currentP.map((p) => p.nama_item.trim().toLowerCase()))
-      const newPdx = visionPdx.filter((vp) => !existingPNames.has(vp.nama_item.trim().toLowerCase()))
-      const finalP = [...currentP, ...newPdx]
-
       // Gabungkan teks penunjang dengan ringkasan temuan abnormal lab/EKG/radiologi
       const currentO_penunjang = item.parsed_data?.O_penunjang || parsedSoapData.O_penunjang || form.O_penunjang
       const finalO_penunjang = visionPenunjangText
         ? (currentO_penunjang.trim() ? `${currentO_penunjang.trim()}\n\n${visionPenunjangText}` : visionPenunjangText)
         : currentO_penunjang
+
+      // JANGAN masukkan ke PDx jika pemeriksaan tersebut sudah ada fotonya / sudah ada hasilnya di O_penunjang
+      const hasAttachmentTag = (tag: string) => processedAttachments.some((a) => a.tag?.toLowerCase() === tag.toLowerCase())
+      const isAlreadyInPenunjang = (name: string) => {
+        const nLower = name.toLowerCase()
+        if (nLower.includes('ekg') && (hasAttachmentTag('EKG') || /\[ekg\]/i.test(finalO_penunjang))) return true
+        if ((nLower.includes('ct') || nLower.includes('scan') || nLower.includes('radiologi')) && (hasAttachmentTag('Radiologi') || /\[radiologi\]/i.test(finalO_penunjang))) return true
+        if ((nLower.includes('darah') || nLower.includes('lab') || nLower.includes('kimia') || nLower.includes('gds')) && (hasAttachmentTag('Lab') || /\[laboratorium\]/i.test(finalO_penunjang))) return true
+        if (nLower.includes('thorax') && (hasAttachmentTag('Radiologi') || /thorax/i.test(finalO_penunjang))) return true
+        return false
+      }
+
+      // Tambahkan usulan PDx dari vision jika belum ada dan BELUM ada di penunjang
+      const existingPNames = new Set(currentP.map((p) => p.nama_item.trim().toLowerCase()))
+      const newPdx = visionPdx
+        .filter((vp) => !existingPNames.has(vp.nama_item.trim().toLowerCase()))
+        .filter((vp) => !isAlreadyInPenunjang(vp.nama_item))
+
+      // Filter seluruh finalP dari item non-terapi (seperti "Jawaban / Advis Dokter", "Raseno", dll.)
+      const finalP = [...currentP, ...newPdx]
+        .filter((p) => !isNonTherapyText(p.nama_item))
+        .filter((p) => !(p.kategori === 'Diagnostik' && isAlreadyInPenunjang(p.nama_item)))
 
       const rawName = item.parsed_data?.nama_depan || parsedSoapData.nama_depan || form.nama_depan
       const { title: resolvedTitle, nama_depan: resolvedNama } = splitTitleAndName(
@@ -514,9 +531,20 @@ export default function Brainstorm() {
       }
       if (visionRes.pdxSuggestions?.length > 0) {
         const existingPNames = new Set(form.P.map((p) => p.nama_item.trim().toLowerCase()))
+        const hasAttachmentTag = (tag: string) => attachments.some((a) => (a as any).tag?.toLowerCase() === tag.toLowerCase())
+        const isAlreadyInPenunjang = (name: string) => {
+          const nLower = name.toLowerCase()
+          if (nLower.includes('ekg') && (hasAttachmentTag('EKG') || /\[ekg\]/i.test(form.O_penunjang))) return true
+          if ((nLower.includes('ct') || nLower.includes('scan') || nLower.includes('radiologi')) && (hasAttachmentTag('Radiologi') || /\[radiologi\]/i.test(form.O_penunjang))) return true
+          if ((nLower.includes('darah') || nLower.includes('lab') || nLower.includes('kimia') || nLower.includes('gds')) && (hasAttachmentTag('Lab') || /\[laboratorium\]/i.test(form.O_penunjang))) return true
+          if (nLower.includes('thorax') && (hasAttachmentTag('Radiologi') || /thorax/i.test(form.O_penunjang))) return true
+          return false
+        }
         const newPdx = visionRes.pdxSuggestions
           .filter((vp) => !/\b(?:Foto_\d+|image_\d+|\d{12,}\.(?:webp|jpg|jpeg|png))\b/i.test(vp.nama_item) && !/\.(?:webp|jpg|jpeg|png)$/i.test(vp.nama_item))
+          .filter((vp) => !isNonTherapyText(vp.nama_item))
           .filter((vp) => !existingPNames.has(vp.nama_item.trim().toLowerCase()))
+          .filter((vp) => !isAlreadyInPenunjang(vp.nama_item))
           .map((p) => ({
             ...lineToTerapi(p.nama_item, today()),
             kategori: 'Diagnostik' as const,
@@ -1159,7 +1187,7 @@ export default function Brainstorm() {
         })),
         komentar: r.komentar || ''
       })
-      notify('Analisis AI selesai. Silakan periksa usulan di bawah tombol Analisis.')
+      notify('Analisis klinis selesai. Silakan periksa usulan di bawah tombol Analisis.')
     } catch (e: any) {
       alert(e.message)
     } finally {
@@ -2364,7 +2392,7 @@ export default function Brainstorm() {
       {komentarAnalisis && !stagedAnalysis && (
         <div className="rounded-2xl bg-blue-50/80 p-3.5 border border-blue-100">
           <div className="mb-1 text-blue-700 font-bold text-xs">
-            Analisis AI
+            Analisis Kasus
           </div>
           <p className="text-xs text-blue-900 leading-relaxed">{komentarAnalisis}</p>
         </div>
@@ -2389,12 +2417,12 @@ export default function Brainstorm() {
         </button>
       </div>
 
-      {/* Review Usulan Analisis AI (Staging) */}
+      {/* Review Usulan Analisis (Staging) */}
       {stagedAnalysis && (
         <div className="glass-card rounded-3xl p-5 shadow-md space-y-4 border-2 border-blue-300 bg-blue-50/30 animate-in fade-in slide-in-from-bottom-2">
           <div className="pb-2 border-b border-blue-200">
             <h3 className="text-xs font-extrabold text-blue-900 uppercase tracking-wider">
-              Usulan Analisis AI (Periksa & Edit Sebelum ACC)
+              Usulan Analisis Klinis (Periksa & Edit Sebelum ACC)
             </h3>
             <p className="caption text-blue-700 mt-0.5">
               Koreksi atau sesuaikan usulan diagnosis dan terapi di bawah ini sebelum diterapkan ke formulir.
@@ -2543,7 +2571,7 @@ export default function Brainstorm() {
                 })
                 setKomentarAnalisis(stagedAnalysis.komentar)
                 setStagedAnalysis(null)
-                notify('Usulan AI telah diterapkan ke formulir!')
+                notify('Usulan analisis telah diterapkan ke formulir!')
                 window.scrollTo({ top: 350, behavior: 'smooth' })
               }}
               className="flex-[2] py-3 px-4 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs cursor-pointer shadow-md shadow-blue-500/20 transition-all active:scale-95"
@@ -2569,8 +2597,8 @@ export default function Brainstorm() {
             {(busy === 'ocr' || listening || busy === 'ai' || busy === 'analisis') && (
               <div className="mb-2 flex items-center justify-center gap-2 caption font-medium text-ink bg-white/95 backdrop-blur-md px-3.5 py-1.5 rounded-full shadow-lg border border-primary/25 w-max mx-auto animate-in fade-in duration-150">
                 {busy === 'ocr' && <><Loader2 size={13} className="animate-spin text-primary" /> <span className="text-primary font-bold">Mengekstrak teks...</span></>}
-                {busy === 'ai' && <><Loader2 size={13} className="animate-spin text-primary" /> <span className="text-primary font-bold">AI sedang merapikan...</span></>}
-                {busy === 'analisis' && <><Loader2 size={13} className="animate-spin text-blue-600" /> <span className="text-blue-600 font-bold">AI sedang menganalisis...</span></>}
+                {busy === 'ai' && <><Loader2 size={13} className="animate-spin text-primary" /> <span className="text-primary font-bold">Sedang merapikan catatan...</span></>}
+                {busy === 'analisis' && <><Loader2 size={13} className="animate-spin text-blue-600" /> <span className="text-blue-600 font-bold">Sedang menganalisis kasus...</span></>}
                 {listening && <><Mic size={13} className="animate-pulse text-rose-500" /> <span className="text-rose-500 font-bold">Mendengarkan...</span></>}
               </div>
             )}
@@ -2623,7 +2651,7 @@ export default function Brainstorm() {
                   type="button"
                   onClick={parseAi}
                   disabled={busy === 'ai' || (!raw.trim() && attachments.length === 0)}
-                  aria-label="Kirim ke AI"
+                  aria-label="Proses Catatan"
                   className={`flex size-10 shrink-0 items-center justify-center rounded-full transition-all ${
                     raw.trim() || attachments.length > 0
                       ? 'bg-gradient-to-br from-primary to-primary-deep text-white shadow-md shadow-primary/30 active:scale-95 cursor-pointer'
@@ -2771,8 +2799,7 @@ export default function Brainstorm() {
                   </div>
 
                   <div className="space-y-1.5 pt-1">
-                    <div className="flex justify-between items-center text-xs font-semibold">
-                      <span className="text-slate-400 font-normal">Progres Analisis</span>
+                    <div className="flex justify-end items-center text-xs font-semibold">
                       <span className="font-mono text-primary font-bold">{Math.floor(importProgress)}%</span>
                     </div>
                     <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">

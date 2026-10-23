@@ -6,6 +6,7 @@ import {
   saveDoctorSpecialty, getDoctorSpecialty, type UserProfile
 } from './auth'
 import { cachePatients, cacheAllPatients, cacheNotes } from './utils/dataCache'
+import { isNonTherapyText } from './parser'
 
 /* Zero-knowledge sync & Cloud sync engine dengan proteksi Wipe-Out, Auto-Trigger, & Anti-Pingpong. */
 
@@ -365,14 +366,19 @@ export async function safeImportTables(tables: Record<string, unknown[]>): Promi
             }
 
             // Khusus progressNotes & penunjang: Jangan hilangkan foto/dataUrl lokal jika remote berukuran kosong
-            if (t === 'progressNotes' && Array.isArray(remoteItem.attachments) && Array.isArray(existingLocal.attachments)) {
-              remoteItem.attachments = remoteItem.attachments.map((rAtt: any, idx: number) => {
-                const lAtt = existingLocal.attachments[idx] || existingLocal.attachments.find((a: any) => a.name === rAtt.name)
-                if (!rAtt.dataUrl && lAtt?.dataUrl) {
-                  return { ...rAtt, dataUrl: lAtt.dataUrl }
-                }
-                return rAtt
-              })
+            if (t === 'progressNotes') {
+              if (Array.isArray(remoteItem.P)) {
+                remoteItem.P = remoteItem.P.filter((p: any) => !isNonTherapyText(p.nama_item))
+              }
+              if (Array.isArray(remoteItem.attachments) && Array.isArray(existingLocal.attachments)) {
+                remoteItem.attachments = remoteItem.attachments.map((rAtt: any, idx: number) => {
+                  const lAtt = existingLocal.attachments[idx] || existingLocal.attachments.find((a: any) => a.name === rAtt.name)
+                  if (!rAtt.dataUrl && lAtt?.dataUrl) {
+                    return { ...rAtt, dataUrl: lAtt.dataUrl }
+                  }
+                  return rAtt
+                })
+              }
             }
 
             if (t === 'penunjang') {
@@ -383,6 +389,9 @@ export async function safeImportTables(tables: Record<string, unknown[]>): Promi
             await db.table(t).put(remoteItem)
           } else {
             // Record baru dari remote yang belum ada di lokal
+            if (t === 'progressNotes' && Array.isArray(remoteItem.P)) {
+              remoteItem.P = remoteItem.P.filter((p: any) => !isNonTherapyText(p.nama_item))
+            }
             await db.table(t).put(remoteItem)
           }
         }
@@ -487,8 +496,8 @@ export async function syncUserCloud(uid: string, forcePush = false): Promise<str
       ? remote.updatedAt
       : remote.updatedAt ? new Date(remote.updatedAt).getTime() : 0
 
-    // PULL DATA jika remote lebih baru dari waktu sync lokal terakhir dan bukan forcePush
-    if (remoteUpdatedAt && remoteUpdatedAt > lastPush && remote.tables && !forcePush) {
+    // PULL & MERGE DATA jika remote lebih baru dari waktu sync lokal terakhir
+    if (remoteUpdatedAt && remoteUpdatedAt > lastPush && remote.tables) {
       const imported = await safeImportTables(remote.tables)
       if (imported) {
         localStorage.setItem('doctoid_last_push', String(remoteUpdatedAt))
@@ -511,14 +520,16 @@ export async function syncUserCloud(uid: string, forcePush = false): Promise<str
         }
       }
 
-      // Update info perangkat lokal saja tanpa mengubah snapshot/updatedAt utama (Anti Ping-Pong)
-      devices[deviceId] = {
-        nama: localStorage.getItem('doctoid_device_name') ?? `Perangkat ${deviceId.slice(0, 4)}`,
-        lastSeen: new Date().toISOString(),
+      if (!forcePush) {
+        // Update info perangkat lokal saja tanpa mengubah snapshot/updatedAt utama (Anti Ping-Pong)
+        devices[deviceId] = {
+          nama: localStorage.getItem('doctoid_device_name') ?? `Perangkat ${deviceId.slice(0, 4)}`,
+          lastSeen: new Date().toISOString(),
+        }
+        await setDoc(ref, { devices }, { merge: true })
+        localStorage.setItem('doctoid_devices', JSON.stringify(devices))
+        return arah
       }
-      await setDoc(ref, { devices }, { merge: true })
-      localStorage.setItem('doctoid_devices', JSON.stringify(devices))
-      return arah
     }
   }
 
@@ -545,6 +556,7 @@ export async function syncUserCloud(uid: string, forcePush = false): Promise<str
       },
       { merge: true }
     )
+    localStorage.setItem('doctoid_last_push', String(updatedAt))
     console.log(`[Sync] ✓ Sukses PUSH data ke Firestore Cloud users/${uid}! Waktu: ${new Date(updatedAt).toLocaleTimeString()}`)
   } catch (err: any) {
     console.error(`[Sync] ❌ Gagal PUSH data ke Firestore Cloud:`, err.message || err)

@@ -10,7 +10,11 @@ import {
   ChevronRight,
   Download,
   RefreshCw,
+  Eye,
+  EyeOff,
 } from 'lucide-react'
+import { useUi } from '../store'
+import { verifyBiometric } from '../webauthn'
 
 export interface ViewerImage {
   url: string
@@ -31,8 +35,19 @@ export const ImageViewerModal: React.FC<ImageViewerModalProps> = ({
   images,
   initialIndex = 0,
 }) => {
+  const { unmasked, setUnmasked } = useUi()
   const [currentIndex, setCurrentIndex] = useState(initialIndex)
   const [scale, setScale] = useState(1)
+
+  const handleToggleMask = async () => {
+    if (unmasked) {
+      setUnmasked(false)
+    } else {
+      if (await verifyBiometric()) {
+        setUnmasked(true)
+      }
+    }
+  }
   const [position, setPosition] = useState({ x: 0, y: 0 })
   const [rotation, setRotation] = useState(0)
   const [isDragging, setIsDragging] = useState(false)
@@ -251,6 +266,15 @@ export const ImageViewerModal: React.FC<ImageViewerModalProps> = ({
         <div className="flex items-center gap-1.5 shrink-0">
           <button
             type="button"
+            onClick={handleToggleMask}
+            aria-label={unmasked ? 'Sensor Identitas Pasien' : 'Buka Sensor Identitas (Biometrik)'}
+            title={unmasked ? 'Sensor Identitas' : 'Buka Sensor Identitas (Biometrik)'}
+            className="p-2 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors cursor-pointer"
+          >
+            {unmasked ? <Eye size={17} /> : <EyeOff size={17} />}
+          </button>
+          <button
+            type="button"
             onClick={handleRotate}
             aria-label="Putar 90 Derajat"
             title="Putar 90° (R)"
@@ -305,9 +329,25 @@ export const ImageViewerModal: React.FC<ImageViewerModalProps> = ({
             src={currentImage.url}
             alt={currentImage.name || 'Lampiran'}
             draggable={false}
-            className="max-h-[82vh] max-w-[96vw] object-contain rounded-lg shadow-2xl pointer-events-none"
+            className={`max-h-[82vh] max-w-[96vw] object-contain rounded-lg shadow-2xl pointer-events-none transition-all duration-200 ${
+              !unmasked ? 'blur-md scale-105' : ''
+            }`}
           />
         </div>
+
+        {/* Master Sensor Overlay saat belum dibuka */}
+        {!unmasked && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-950/40 backdrop-blur-2xs z-20 p-4">
+            <button
+              type="button"
+              onClick={handleToggleMask}
+              className="px-4 py-2.5 rounded-2xl bg-slate-900/90 hover:bg-slate-800 border border-slate-700 text-white font-bold text-xs flex items-center gap-2 shadow-2xl active:scale-95 transition-all cursor-pointer"
+            >
+              <EyeOff size={16} className="text-primary" />
+              <span>Buka Sensor Pasien</span>
+            </button>
+          </div>
+        )}
 
         {/* Previous Button */}
         {images.length > 1 && currentIndex > 0 && (

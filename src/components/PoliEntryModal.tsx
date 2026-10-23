@@ -142,7 +142,7 @@ export default function PoliEntryModal({
       }
     } catch (err: any) {
       console.error('Gagal ekstrak AI poli:', err)
-      setExtractError(err?.message || 'Gagal memproses gambar dengan AI. Periksa API key Anda di Pengaturan.')
+      setExtractError(err?.message || 'Gagal memproses gambar. Periksa konfigurasi API di Pengaturan.')
     } finally {
       setIsExtracting(false)
     }
@@ -318,7 +318,7 @@ export default function PoliEntryModal({
                 }`}
               >
                 <Camera size={15} />
-                <span>Foto Monitor / Register (AI)</span>
+                <span>Foto Monitor / Register</span>
               </button>
               <button
                 type="button"
@@ -359,7 +359,7 @@ export default function PoliEntryModal({
                     Ambil Foto Layar Monitor e-RM / Buku Register
                   </span>
                   <span className="text-[11px] text-slate-400 mt-0.5 text-center">
-                    AI akan otomatis membaca nama, nomor RM, dan jaminan pasien
+                    Sistem otomatis membaca nama, nomor RM, dan jaminan pasien
                   </span>
                 </div>
               ) : (
@@ -397,7 +397,7 @@ export default function PoliEntryModal({
                     ) : (
                       <>
                         <Sparkles size={16} />
-                        <span>{patients.length > 0 ? 'Ekstrak Ulang dengan AI' : 'Ekstrak Pasien dengan AI'}</span>
+                        <span>{patients.length > 0 ? 'Ekstrak Ulang dari Foto' : 'Ekstrak Pasien dari Foto'}</span>
                       </>
                     )}
                   </button>

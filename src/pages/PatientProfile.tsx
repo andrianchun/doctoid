@@ -5,7 +5,8 @@ import {
   ArrowLeft, Pill, HeartPulse, ClipboardCopy, X, Send,
   Loader2, LogOut, RotateCcw, Check, History, Sparkles, Activity, ShieldCheck, Stethoscope,
   Mic, Eye, EyeOff, Pencil, Trash2, Plus, CheckSquare, Square,
-  FlaskConical, Image as ImageIcon, Upload, AlertTriangle, ArrowLeftRight
+  FlaskConical, Image as ImageIcon, Upload, AlertTriangle, ArrowLeftRight,
+  FileText, Volume2
 } from 'lucide-react'
 import {
   db,
@@ -41,6 +42,37 @@ import CustomSelect, { type SelectOption } from '../components/CustomSelect'
 import { PemfisVisualizer } from '../components/PemfisVisualizer'
 import { ClinicalMediaCard } from '../components/ClinicalMediaCard'
 import { ImageViewerModal, type ViewerImage } from '../components/ImageViewerModal'
+import { isNonTherapyText } from '../parser'
+
+// Helper untuk mencocokkan item PDX dengan hasil pemeriksaan penunjang yang sudah tercatat
+function findMatchingPenunjang(pdxName: string, penunjangs: PenunjangItem[]): PenunjangItem | undefined {
+  if (!pdxName || !penunjangs?.length) return undefined
+  const pLower = pdxName.toLowerCase().replace(/[^a-z0-9]/g, ' ').trim()
+  
+  return penunjangs.find((pj) => {
+    const pjLower = pj.nama_pemeriksaan.toLowerCase().replace(/[^a-z0-9]/g, ' ').trim()
+    if (pjLower === pLower) return true
+    if (pjLower.includes(pLower) || pLower.includes(pjLower)) return true
+    
+    // Cek sinonim modalitas diagnostik utama
+    const isEkg = /\b(?:ekg|ecg|jantung)\b/.test(pLower) && /\b(?:ekg|ecg|jantung)\b/.test(pjLower)
+    if (isEkg) return true
+    
+    const isCt = /\b(?:ct|scan|kepala|otak|msct)\b/.test(pLower) && /\b(?:ct|scan|kepala|otak|msct)\b/.test(pjLower)
+    if (isCt) return true
+    
+    const isDl = /\b(?:darah|lengkap|dl|lab|leukosit|trombosit)\b/.test(pLower) && /\b(?:darah|lengkap|dl|lab|laboratorium)\b/.test(pjLower)
+    if (isDl) return true
+
+    const isKimia = /\b(?:kimia|gda|gds|gdp|elektrolit|se|profil|lipid|fungsi|ginjal|hati)\b/.test(pLower) && /\b(?:kimia|gda|gds|gdp|elektrolit|se|lab|laboratorium)\b/.test(pjLower)
+    if (isKimia) return true
+
+    const isThorax = /\b(?:thorax|toraks|cxr|rontgen|dada)\b/.test(pLower) && /\b(?:thorax|toraks|cxr|rontgen|dada)\b/.test(pjLower)
+    if (isThorax) return true
+    
+    return false
+  })
+}
 
 const PARENTERAL = /\binj\b|injeksi|drip|\biv\b|infus|\bamp\b|bolus|syringe|titrasi|pump|nebul/i
 
@@ -201,6 +233,7 @@ function TerapiRow({
   noteId,
   noteDate,
   resultText,
+  penunjangMatch,
   onEdit,
   onDelete,
   onToggleStatus,
@@ -210,13 +243,17 @@ function TerapiRow({
   noteId: number
   noteDate: string
   resultText?: string
+  penunjangMatch?: PenunjangItem
   onEdit?: (item: TerapiItem, index: number, noteId: number) => void
   onDelete?: (index: number, noteId: number) => void
   onToggleStatus?: (index: number, noteId: number) => void
 }) {
   const isDiagnostic = item.kategori === 'Diagnostik'
   const baru = item.status === 'aktif' && item.tgl_mulai === noteDate
-  const isStopped = item.status === 'stop'
+  const hasPenunjangResult = Boolean(
+    penunjangMatch && (penunjangMatch.status === 'selesai' || penunjangMatch.hasil?.trim() || penunjangMatch.attachments?.length)
+  )
+  const isStopped = item.status === 'stop' || hasPenunjangResult
 
   return (
     <div className="group flex items-center justify-between py-1.5 px-2 rounded-xl hover:bg-surface/60 transition-colors gap-2">
@@ -237,16 +274,20 @@ function TerapiRow({
         )}
         <div className="min-w-0 flex-1">
           {isDiagnostic ? (
-            <p className="text-xs leading-snug">
+            <p className="text-xs leading-snug flex items-center gap-1.5 flex-wrap">
               <span className={`font-bold ${isStopped ? 'line-through text-ink-muted/70' : 'text-ink'}`}>
                 {item.nama_item}
               </span>
-              {resultText ? (
-                <span className="text-primary font-medium ml-1.5">: {resultText}</span>
+              {hasPenunjangResult ? (
+                <span className="text-emerald-700 font-bold text-[10px] bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200/60 flex items-center gap-0.5">
+                  Ada Hasil ✓
+                </span>
+              ) : resultText ? (
+                <span className="text-primary font-medium ml-1">: {resultText}</span>
               ) : item.dosis_keterangan ? (
-                <span className="text-ink-muted ml-1.5">({item.dosis_keterangan})</span>
+                <span className="text-ink-muted ml-1">({item.dosis_keterangan})</span>
               ) : (
-                <span className="text-amber-600 font-medium ml-1.5 text-[11px]">(Menunggu hasil)</span>
+                <span className="text-amber-600 font-medium ml-1 text-[11px]">(Menunggu hasil)</span>
               )}
             </p>
           ) : isStopped ? (
@@ -991,11 +1032,54 @@ export default function PatientProfile() {
   }
 
   const latest = notes[notes.length - 1]
-  const farmako = latest?.P.filter((p) => p.kategori === 'Farmakologi') ?? []
-  const nonFarmako = latest?.P.filter((p) => p.kategori === 'Non-Farmakologi') ?? []
-  const diagnostik = latest?.P.filter((p) => p.kategori === 'Diagnostik') ?? []
-  const monitoring = latest?.P.filter((p) => p.kategori === 'Monitoring') ?? []
-  const edukasi = latest?.P.filter((p) => p.kategori === 'Edukasi') ?? []
+  
+  // Bersihkan item non-terapi (seperti "Jawaban / Advis Dokter:*", "Raseno", dll.)
+  const cleanP = useMemo(() => {
+    return (latest?.P ?? []).filter((p) => !isNonTherapyText(p.nama_item))
+  }, [latest?.P])
+
+  const farmako = useMemo(() => cleanP.filter((p) => p.kategori === 'Farmakologi'), [cleanP])
+  const nonFarmako = useMemo(() => cleanP.filter((p) => p.kategori === 'Non-Farmakologi'), [cleanP])
+  const diagnostik = useMemo(() => cleanP.filter((p) => p.kategori === 'Diagnostik'), [cleanP])
+  const monitoring = useMemo(() => cleanP.filter((p) => p.kategori === 'Monitoring'), [cleanP])
+  const edukasi = useMemo(() => cleanP.filter((p) => p.kategori === 'Edukasi'), [cleanP])
+
+  // Auto-sanitasi: bersihkan item non-terapi dan auto-centang PDx yang sudah ada hasilnya
+  useEffect(() => {
+    if (!latest?.id || !latest.P?.length) return
+    let changed = false
+    
+    // 1. Buang sampah non-terapi (seperti "Jawaban / Advis Dokter:*", "Raseno", dsb.)
+    const filtered = latest.P.filter((p) => {
+      if (isNonTherapyText(p.nama_item)) {
+        changed = true
+        return false
+      }
+      return true
+    })
+
+    // 2. Auto-centang PDx jika pemeriksaan penunjang sudah ada hasilnya
+    const updated = filtered.map((p) => {
+      if (p.kategori === 'Diagnostik' && p.status === 'aktif') {
+        const match = findMatchingPenunjang(p.nama_item, penunjangList)
+        if (match && (match.status === 'selesai' || match.hasil?.trim() || match.attachments?.length)) {
+          changed = true
+          return {
+            ...p,
+            status: 'stop' as const,
+            tgl_stop: p.tgl_mulai || getLocalDateString(),
+          }
+        }
+      }
+      return p
+    })
+
+    if (changed) {
+      db.progressNotes.update(latest.id, { P: updated }).catch((err) => {
+        console.warn('Gagal auto-update sanitasi note:', err)
+      })
+    }
+  }, [latest?.id, latest?.P, penunjangList])
 
   const cleanUsia = (patient.usia || '').replace(/\s*(th|tahun)\b/gi, '').trim()
 
@@ -1459,18 +1543,22 @@ export default function PatientProfile() {
               <Stethoscope size={14} /> Plan Diagnostik & Prosedur (PDX)
             </p>
             <div className="space-y-1 pl-1 divide-y divide-surface">
-              {diagnostik.map((it, i) => (
-                <TerapiRow
-                  key={i}
-                  item={it}
-                  index={latest!.P.indexOf(it)}
-                  noteId={latest!.id!}
-                  noteDate={latest!.tanggal}
-                  onEdit={openEditTerapi}
-                  onDelete={handleDeleteTerapi}
-                  onToggleStatus={handleToggleTerapiStatus}
-                />
-              ))}
+              {diagnostik.map((it, i) => {
+                const match = findMatchingPenunjang(it.nama_item, penunjangList)
+                return (
+                  <TerapiRow
+                    key={i}
+                    item={it}
+                    index={latest!.P.indexOf(it)}
+                    noteId={latest!.id!}
+                    noteDate={latest!.tanggal}
+                    penunjangMatch={match}
+                    onEdit={openEditTerapi}
+                    onDelete={handleDeleteTerapi}
+                    onToggleStatus={handleToggleTerapiStatus}
+                  />
+                )
+              })}
             </div>
           </div>
         )}
@@ -1821,25 +1909,59 @@ export default function PatientProfile() {
                 )}
 
                 {item.attachments && item.attachments.length > 0 && (
-                  <div className="flex items-center gap-2 pt-1 flex-wrap">
-                    {item.attachments.map((att, attIdx) => (
-                      <button
-                        key={attIdx}
-                        type="button"
-                        onClick={() => {
-                          const imgAtts = (item.attachments || []).map((a) => ({ url: a.dataUrl, name: `${item.nama_pemeriksaan} - ${a.name}`, type: a.type }))
-                          setViewerState({
-                            isOpen: true,
-                            images: imgAtts,
-                            initialIndex: attIdx,
-                          })
-                        }}
-                        className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-white border border-slate-200 text-[11px] text-ink font-medium hover:border-primary cursor-pointer transition-colors shadow-2xs"
-                      >
-                        <ImageIcon size={12} className="text-primary" />
-                        <span className="truncate max-w-[120px]">{att.name}</span>
-                      </button>
-                    ))}
+                  <div className="pt-1.5 space-y-1">
+                    <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
+                      {item.attachments.map((att, attIdx) => {
+                        const isImg = att.type?.startsWith('image/') || att.dataUrl?.startsWith('data:image/')
+                        return (
+                          <button
+                            key={attIdx}
+                            type="button"
+                            onClick={() => {
+                              const imgAtts = (item.attachments || []).map((a) => ({
+                                url: a.dataUrl,
+                                name: `${item.nama_pemeriksaan} - ${a.name}`,
+                                type: a.type,
+                              }))
+                              setViewerState({
+                                isOpen: true,
+                                images: imgAtts,
+                                initialIndex: attIdx,
+                              })
+                            }}
+                            className="relative size-16 sm:size-20 rounded-2xl border border-slate-200 bg-slate-100 overflow-hidden shrink-0 group shadow-2xs hover:shadow-xs transition-all active:scale-95 cursor-pointer text-left focus:outline-none"
+                            title={att.name || item.nama_pemeriksaan}
+                          >
+                            {isImg ? (
+                              <>
+                                <img
+                                  src={att.dataUrl}
+                                  alt={att.name || 'Lampiran'}
+                                  className={`size-full object-cover transition-all duration-200 group-hover:scale-105 ${
+                                    !unmasked ? 'blur-md scale-110' : ''
+                                  }`}
+                                />
+                                {!unmasked && (
+                                  <div className="absolute inset-0 flex items-center justify-center bg-slate-900/30 backdrop-blur-2xs">
+                                    <EyeOff size={14} className="text-white/90 drop-shadow-sm" />
+                                  </div>
+                                )}
+                              </>
+                            ) : att.type === 'application/pdf' ? (
+                              <div className="size-full flex flex-col items-center justify-center p-1 bg-rose-50 text-rose-700">
+                                <FileText size={18} className="mb-0.5" />
+                                <span className="text-[9px] font-bold truncate max-w-full px-1">PDF</span>
+                              </div>
+                            ) : (
+                              <div className="size-full flex flex-col items-center justify-center p-1 bg-amber-50 text-amber-700">
+                                <Volume2 size={18} className="mb-0.5" />
+                                <span className="text-[9px] font-bold truncate max-w-full px-1">Audio</span>
+                              </div>
+                            )}
+                          </button>
+                        )
+                      })}
+                    </div>
                   </div>
                 )}
               </div>
@@ -1986,16 +2108,16 @@ export default function PatientProfile() {
       </div>
       )}
 
-      {/* Floating Action Button Diskusi AI */}
+      {/* Floating Action Button Diskusi Kasus */}
       <button
         onClick={() => setChatOpen(true)}
-        aria-label="Konsultasi AI tentang pasien ini"
+        aria-label="Diskusi klinis tentang pasien ini"
         className="fixed bottom-24 right-5 z-40 flex size-14 cursor-pointer items-center justify-center rounded-3xl bg-gradient-to-br from-primary to-primary-deep text-white shadow-2xl shadow-primary/40 active:scale-95 transition-all"
       >
         <Sparkles size={24} />
       </button>
 
-      {/* Dialog Chat AI */}
+      {/* Dialog Chat Kasus */}
       {chatOpen && (
         <div
           className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 backdrop-blur-sm animate-in fade-in overscroll-contain touch-none select-none"
@@ -2007,7 +2129,7 @@ export default function PatientProfile() {
           >
             <div className="flex items-center justify-between border-b border-surface p-4">
               <div>
-                <p className="h2 text-sm font-bold text-ink">Diskusi Kasus AI</p>
+                <p className="h2 text-sm font-bold text-ink">Diskusi Kasus Klinis</p>
                 <p className="caption text-xs text-ink-muted">EBM & Rasionalisasi Klinis — data identitas disensor</p>
               </div>
               <button onClick={() => setChatOpen(false)} aria-label="Tutup diskusi" className="flex size-9 cursor-pointer items-center justify-center rounded-full text-ink-muted hover:bg-surface transition-colors">
@@ -2037,7 +2159,7 @@ export default function PatientProfile() {
               {busy && <Loader2 size={18} className="animate-spin text-primary mx-auto my-2" />}
               {pendingEdit && (
                 <div className="rounded-2xl border border-emerald-300 bg-emerald-50 p-3.5 text-xs space-y-2">
-                  <p className="font-bold text-emerald-900">AI mengusulkan pembaruan terapi:</p>
+                  <p className="font-bold text-emerald-900">Usulan pembaruan terapi:</p>
                   <p className="font-mono text-xs text-emerald-800 bg-white/80 p-2 rounded-xl border border-emerald-200">{pendingEdit}</p>
                   <button
                     onClick={terapkanEdit}
@@ -3211,22 +3333,36 @@ export default function PatientProfile() {
                 </div>
                 {penunjangForm.attachments.length > 0 && (
                   <div className="flex items-center gap-2 pt-2 flex-wrap">
-                    {penunjangForm.attachments.map((att, idx) => (
-                      <div
-                        key={idx}
-                        className="flex items-center gap-1.5 pl-2 pr-1 py-1 rounded-xl bg-slate-100 border border-slate-200 text-[11px] text-ink"
-                      >
-                        <ImageIcon size={12} className="text-primary shrink-0" />
-                        <span className="truncate max-w-[120px]">{att.name}</span>
-                        <button
-                          type="button"
-                          onClick={() => handleRemovePenunjangAttachment(idx)}
-                          className="p-0.5 text-ink-muted hover:text-rose-600 rounded cursor-pointer"
+                    {penunjangForm.attachments.map((att, idx) => {
+                      const isImg = att.type?.startsWith('image/') || att.dataUrl?.startsWith('data:image/')
+                      return (
+                        <div
+                          key={idx}
+                          className="relative size-16 rounded-2xl border border-slate-200 bg-slate-100 overflow-hidden shrink-0 group shadow-2xs"
                         >
-                          <X size={12} />
-                        </button>
-                      </div>
-                    ))}
+                          {isImg ? (
+                            <img
+                              src={att.dataUrl}
+                              alt={att.name || 'Lampiran'}
+                              className="size-full object-cover"
+                            />
+                          ) : (
+                            <div className="size-full flex flex-col items-center justify-center p-1 bg-slate-100 text-slate-600">
+                              <FileText size={16} />
+                              <span className="text-[8px] font-bold truncate max-w-full px-0.5">{att.name}</span>
+                            </div>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => handleRemovePenunjangAttachment(idx)}
+                            className="absolute top-1 right-1 size-5 rounded-full bg-rose-600 text-white flex items-center justify-center shadow-xs hover:bg-rose-700 transition-colors cursor-pointer"
+                            title="Hapus berkas"
+                          >
+                            <X size={10} />
+                          </button>
+                        </div>
+                      )
+                    })}
                   </div>
                 )}
               </div>

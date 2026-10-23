@@ -3,7 +3,6 @@ import {
   FileText,
   Play,
   Pause,
-  Eye,
   EyeOff,
   X,
   Volume2,
@@ -11,6 +10,8 @@ import {
   Maximize2,
 } from 'lucide-react'
 import { ImageViewerModal } from './ImageViewerModal'
+import { useUi } from '../store'
+import { verifyBiometric } from '../webauthn'
 
 export interface ClinicalMediaItem {
   id?: string
@@ -30,15 +31,21 @@ interface ClinicalMediaCardProps {
 export const ClinicalMediaCard: React.FC<ClinicalMediaCardProps> = ({
   item,
   onDelete,
-  defaultBlurred = true,
 }) => {
-  // Video kejang dan foto klinis dilindungi blur secara default demi privasi pasien
+  const { unmasked, setUnmasked } = useUi()
+  // Sensor foto/video murni mengikuti status sensor privasi data pasien (cukup 1 tombol utama)
   const isVisualMedia = item.type.startsWith('image/') || item.type.startsWith('video/')
-  const [isBlurred, setIsBlurred] = useState(isVisualMedia ? defaultBlurred : false)
+  const isBlurred = isVisualMedia && !unmasked
   const [isPlayingAudio, setIsPlayingAudio] = useState(false)
   const [audioRef, setAudioRef] = useState<HTMLAudioElement | null>(null)
   const [showVideoModal, setShowVideoModal] = useState(false)
   const [showViewer, setShowViewer] = useState(false)
+
+  const handleMasterUnlock = async () => {
+    if (await verifyBiometric()) {
+      setUnmasked(true)
+    }
+  }
 
   const toggleAudio = () => {
     if (!audioRef) return
@@ -66,12 +73,13 @@ export const ClinicalMediaCard: React.FC<ClinicalMediaCardProps> = ({
           {isBlurred ? (
             <button
               type="button"
-              onClick={() => setIsBlurred(false)}
+              onClick={handleMasterUnlock}
               className="absolute inset-0 flex flex-col items-center justify-center bg-slate-900/60 p-1 text-center cursor-pointer hover:bg-slate-900/40 transition-colors"
+              title="Buka Sensor Privasi (Biometrik)"
             >
               <EyeOff size={16} className="text-white mb-0.5" />
               <span className="text-[9px] font-bold text-white leading-tight">Video Kejang</span>
-              <span className="text-[8px] text-white/80">Ketuk Buka</span>
+              <span className="text-[8px] text-white/80">Buka Sensor</span>
             </button>
           ) : (
             <div className="absolute inset-0 flex items-center justify-center bg-black/30 group-hover:bg-black/20 transition-colors">
@@ -84,18 +92,6 @@ export const ClinicalMediaCard: React.FC<ClinicalMediaCardProps> = ({
                 <Play size={14} className="ml-0.5 fill-primary" />
               </button>
             </div>
-          )}
-
-          {/* Tombol Toggle Blur Mata */}
-          {!isBlurred && (
-            <button
-              type="button"
-              onClick={() => setIsBlurred(true)}
-              className="absolute bottom-1 left-1 bg-black/60 text-white rounded-full p-1 hover:bg-black/80 transition-colors cursor-pointer"
-              title="Kunci / Blur Kembali"
-            >
-              <Eye size={11} />
-            </button>
           )}
 
           {/* Tombol Hapus */}
@@ -260,35 +256,23 @@ export const ClinicalMediaCard: React.FC<ClinicalMediaCardProps> = ({
         {isBlurred ? (
           <button
             type="button"
-            onClick={() => setIsBlurred(false)}
+            onClick={handleMasterUnlock}
             className="absolute inset-0 flex flex-col items-center justify-center bg-slate-900/50 p-1 text-center cursor-pointer hover:bg-slate-900/40 transition-colors"
+            title="Buka Sensor Privasi (Biometrik)"
           >
             <EyeOff size={16} className="text-white mb-0.5" />
             <span className="text-[9px] font-bold text-white">Privasi</span>
-            <span className="text-[8px] text-white/80">Ketuk Buka</span>
+            <span className="text-[8px] text-white/80">Buka Sensor</span>
           </button>
         ) : (
-          <>
-            <button
-              type="button"
-              onClick={() => setShowViewer(true)}
-              className="absolute inset-0 flex items-center justify-center bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
-              title="Buka & Zoom Galeri"
-            >
-              <Maximize2 size={16} className="text-white drop-shadow-md" />
-            </button>
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation()
-                setIsBlurred(true)
-              }}
-              className="absolute bottom-1 left-1 bg-black/60 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 hover:bg-black/80 transition-all cursor-pointer z-10"
-              title="Kunci / Blur Kembali"
-            >
-              <Eye size={11} />
-            </button>
-          </>
+          <button
+            type="button"
+            onClick={() => setShowViewer(true)}
+            className="absolute inset-0 flex items-center justify-center bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+            title="Buka & Zoom Galeri"
+          >
+            <Maximize2 size={16} className="text-white drop-shadow-md" />
+          </button>
         )}
 
         {onDelete && (
