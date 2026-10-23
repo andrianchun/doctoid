@@ -60,7 +60,7 @@ echo "=== WA BOT CODE UPDATED & RESTARTED SUCCESSFULLY ==="
         fingerprint,
         items: [{ key: 'startup-script', value: startupScript }],
       }),
-      signal: AbortSignal.timeout(15000),
+      signal: AbortSignal.timeout(30000),
     }
   )
   console.log('setMetadata response status:', setRes.status)

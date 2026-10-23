@@ -17,7 +17,8 @@ export interface ClinicalMediaItem {
   id?: string
   name: string
   type: string
-  dataUrl: string
+  dataUrl?: string
+  url?: string
   kategori?: 'pemfis' | 'penunjang'
   tag?: 'EKG' | 'Radiologi' | 'Lab' | 'Pemfis' | 'Lainnya'
 }
@@ -294,7 +295,7 @@ export const ClinicalMediaCard: React.FC<ClinicalMediaCardProps> = ({
         <ImageViewerModal
           isOpen={showViewer}
           onClose={() => setShowViewer(false)}
-          images={[{ url: item.dataUrl, name: item.name, type: item.type }]}
+          images={[{ url: item.dataUrl || item.url || '', name: item.name, type: item.type }]}
         />
       )}
     </>

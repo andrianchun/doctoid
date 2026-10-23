@@ -710,28 +710,32 @@ async function syncInboxToFirestore(inboxList) {
     let payloadStr = JSON.stringify(payload)
 
     // Jaminan Firestore 1MB (1,048,576 bytes):
-    // Jika ukuran payload mendekati 750KB:
-    // Batasi lampiran pada item-item lama (indeks >= 2) maksimal 3 lampiran,
-    // TANPA MENGHAPUS dataUrl (foto-foto lama tetap UTUH dan TIDAK RUSAK!)
-    if (payloadStr.length > 750000) {
-      for (let i = 2; i < pendingItems.length; i++) {
-        if (pendingItems[i].attachments && pendingItems[i].attachments.length > 3) {
-          pendingItems[i].attachments = pendingItems[i].attachments.slice(0, 3)
+    // Kompresi presisi WebP 480px q45 agar SEMUA lampiran (bahkan jika ada 10 foto)
+    // TETAP UTUH 100% tanpa ada satupun yang dipotong/dihapus (Anti-Korupsi Lampiran!)
+    for (const it of pendingItems) {
+      if (it.attachments) {
+        for (const a of it.attachments) {
+          if (a.dataUrl && a.dataUrl.length > 45000) {
+            try {
+              const b64 = a.dataUrl.split(',')[1]
+              if (b64) {
+                const buf = Buffer.from(b64, 'base64')
+                const comp = await sharp(buf)
+                  .resize(480, 480, { fit: 'inside', withoutEnlargement: true })
+                  .webp({ quality: 45 })
+                  .toBuffer()
+                a.dataUrl = `data:image/webp;base64,${comp.toString('base64')}`
+              }
+            } catch {}
+          }
         }
       }
-      payload = buildPayload(pendingItems)
-      payloadStr = JSON.stringify(payload)
     }
+    payload = buildPayload(pendingItems)
+    payloadStr = JSON.stringify(payload)
 
-    // Jika masih > 750KB, batasi item index 1 maksimal 4 lampiran
-    if (payloadStr.length > 750000 && pendingItems[1]?.attachments?.length > 4) {
-      pendingItems[1].attachments = pendingItems[1].attachments.slice(0, 4)
-      payload = buildPayload(pendingItems)
-      payloadStr = JSON.stringify(payload)
-    }
-
-    // Jika masih > 750KB, batasi total item pending ke 5 item teratas
-    if (payloadStr.length > 750000 && pendingItems.length > 5) {
+    // Jika total payload masih > 850KB, batasi jumlah pasien pending menjadi 5 pasien teratas
+    if (payloadStr.length > 850000 && pendingItems.length > 5) {
       pendingItems = pendingItems.slice(0, 5)
       payload = buildPayload(pendingItems)
       payloadStr = JSON.stringify(payload)

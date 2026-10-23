@@ -386,21 +386,29 @@ export default function Brainstorm() {
             parsedSoapData = { S: item.raw_text }
           }
 
-          // PRIORITAS UTAMA ADVIS DOKTER: Jika pesan memuat balasan/advis dokter,
-          // ekstrak A (Diagnosis DPJP) dan P (Terapi DPJP) dari advis untuk menggantikan terapi sementara IGD!
+          // GABUNGKAN ADVIS DOKTER & KONSUL PERAWAT:
+          // Dokter minta: "masukin semua aja ya, nanti mending diedit / didelete pas udah masuk daripada bingung"
           if (advis) {
             const advisParsed = localParse(advis, regexRules)
-            if (advisParsed.data.A && advisParsed.data.A.length > 0) {
-              parsedSoapData.A = advisParsed.data.A
-            }
-            if (advisParsed.data.P && advisParsed.data.P.length > 0) {
-              parsedSoapData.P = advisParsed.data.P
-            } else {
-              // Jika advis berbentuk daftar baris obat/planning tanpa header P:
+            let advisA = advisParsed.data.A || []
+            let advisP = advisParsed.data.P || []
+            if (advisP.length === 0) {
               const directP = parsePlanningLines(advis.split('\n'), today())
-              if (directP.length > 0) {
-                parsedSoapData.P = directP
-              }
+              if (directP.length > 0) advisP = directP
+            }
+
+            // A (Diagnosis): Tempatkan diagnosis advis dokter di posisi utama, disusul diagnosis IGD
+            if (advisA.length > 0) {
+              const existingDiagNames = new Set(advisA.map((a) => a.nama_diagnosis.trim().toLowerCase()))
+              const consultA = (parsedSoapData.A || []).filter((a) => !existingDiagNames.has(a.nama_diagnosis.trim().toLowerCase()))
+              parsedSoapData.A = [...advisA, ...consultA]
+            }
+
+            // P (Terapi): Gabungkan terapi advis dokter di atas, disusul seluruh terapi IGD
+            if (advisP.length > 0) {
+              const existingPlanNames = new Set(advisP.map((p) => p.nama_item.trim().toLowerCase()))
+              const consultP = (parsedSoapData.P || []).filter((p) => !existingPlanNames.has(p.nama_item.trim().toLowerCase()))
+              parsedSoapData.P = [...advisP, ...consultP]
             }
           }
         } catch (err) {
@@ -517,8 +525,8 @@ export default function Brainstorm() {
 
       set(formPatch)
 
-      // Bersihkan prompt box bawah agar tidak menduplikasi teks yang sudah masuk ke form
-      setRaw('')
+      // Simpan teks mentah asli chat WhatsApp ke kotak prompt bawah sebagai referensi cadangan dokter
+      setRaw(item.raw_text || '')
 
       if (processedAttachments.length > 0) {
         setAttachments((prev) => {
