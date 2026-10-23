@@ -6,7 +6,7 @@ import {
   Loader2, LogOut, RotateCcw, Check, History, Sparkles, Activity, ShieldCheck, Stethoscope,
   Mic, Eye, EyeOff, Pencil, Trash2, Plus, CheckSquare, Square,
   FlaskConical, Image as ImageIcon, Upload, AlertTriangle, ArrowLeftRight,
-  FileText, Volume2
+  FileText, Volume2, Play
 } from 'lucide-react'
 import {
   db,
@@ -1912,31 +1912,42 @@ export default function PatientProfile() {
                   <div className="pt-1.5 space-y-1">
                     <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
                       {item.attachments.map((att, attIdx) => {
-                        const isImg = att.type?.startsWith('image/') || att.dataUrl?.startsWith('data:image/')
+                        const isVid = att.type?.startsWith('video/') || att.url?.endsWith('.mp4') || att.url?.endsWith('.webm') || (att as any).is_video
+                        const isImg = !isVid && (att.type?.startsWith('image/') || att.dataUrl?.startsWith('data:image/') || Boolean(att.url))
                         return (
                           <button
                             key={attIdx}
                             type="button"
                             onClick={() => {
-                              const imgAtts = (item.attachments || []).map((a) => ({
-                                url: a.dataUrl,
+                              const mediaAtts = (item.attachments || []).map((a) => ({
+                                url: a.url || a.dataUrl,
                                 name: `${item.nama_pemeriksaan} - ${a.name}`,
                                 type: a.type,
                               }))
                               setViewerState({
                                 isOpen: true,
-                                images: imgAtts,
+                                images: mediaAtts,
                                 initialIndex: attIdx,
                               })
                             }}
                             className="relative size-16 sm:size-20 rounded-2xl border border-slate-200 bg-slate-100 overflow-hidden shrink-0 group shadow-2xs hover:shadow-xs transition-all active:scale-95 cursor-pointer text-left focus:outline-none"
                             title={att.name || item.nama_pemeriksaan}
                           >
-                            {isImg ? (
+                            {isVid ? (
+                              <div className="size-full flex flex-col items-center justify-center p-1 bg-slate-900 text-white">
+                                <Play size={16} className="fill-white ml-0.5" />
+                                <span className="text-[9px] font-bold truncate max-w-full px-1">Video</span>
+                              </div>
+                            ) : isImg ? (
                               <>
                                 <img
-                                  src={att.dataUrl}
+                                  src={att.url || att.dataUrl}
                                   alt={att.name || 'Lampiran'}
+                                  onError={(e) => {
+                                    if (att.dataUrl && e.currentTarget.src !== att.dataUrl) {
+                                      e.currentTarget.src = att.dataUrl
+                                    }
+                                  }}
                                   className={`size-full object-cover transition-all duration-200 group-hover:scale-105 ${
                                     !unmasked ? 'blur-md scale-110' : ''
                                   }`}

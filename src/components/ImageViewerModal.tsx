@@ -325,14 +325,26 @@ export const ImageViewerModal: React.FC<ImageViewerModalProps> = ({
           }}
           className="max-h-full max-w-full flex items-center justify-center will-change-transform"
         >
-          <img
-            src={currentImage.url}
-            alt={currentImage.name || 'Lampiran'}
-            draggable={false}
-            className={`max-h-[82vh] max-w-[96vw] object-contain rounded-lg shadow-2xl pointer-events-none transition-all duration-200 ${
-              !unmasked ? 'blur-md scale-105' : ''
-            }`}
-          />
+          {currentImage.type?.startsWith('video/') || currentImage.url?.endsWith('.mp4') || currentImage.url?.endsWith('.webm') ? (
+            <video
+              src={currentImage.url}
+              controls
+              autoPlay
+              playsInline
+              className={`max-h-[82vh] max-w-[96vw] rounded-lg shadow-2xl transition-all duration-200 pointer-events-auto ${
+                !unmasked ? 'blur-md scale-105' : ''
+              }`}
+            />
+          ) : (
+            <img
+              src={currentImage.url}
+              alt={currentImage.name || 'Lampiran'}
+              draggable={false}
+              className={`max-h-[82vh] max-w-[96vw] object-contain rounded-lg shadow-2xl pointer-events-none transition-all duration-200 ${
+                !unmasked ? 'blur-md scale-105' : ''
+              }`}
+            />
+          )}
         </div>
 
         {/* Master Sensor Overlay saat belum dibuka */}

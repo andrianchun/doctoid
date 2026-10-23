@@ -609,19 +609,23 @@ export async function syncWaInboxToDexie() {
         const textChanged = Boolean(item.raw_text && item.raw_text !== existing.raw_text)
         const existingDataLen = (existing.attachments?.[0]?.dataUrl || '').length
         const incomingDataLen = (item.attachments?.[0]?.dataUrl || '').length
-        const attachUpdated = newAttachCount !== oldAttachCount || (incomingDataLen > existingDataLen)
+        const incomingHasUrls = (item.attachments || []).some((a: any) => Boolean(a.url))
+        const existingHasUrls = (existing.attachments || []).some((a: any) => Boolean(a.url))
+        const attachUpdated = newAttachCount !== oldAttachCount || (incomingDataLen > existingDataLen) || (incomingHasUrls && !existingHasUrls)
 
         if (attachUpdated || textChanged) {
-          // JANGAN menimpa lampiran lokal yang valid dengan lampiran kosong/rusak dari cloud
-          const localHasValidImages = (existing.attachments || []).some(
-            (a: any) => (a.dataUrl || '').length > 50
-          )
-          const remoteHasValidImages = (item.attachments || []).some(
-            (a: any) => (a.dataUrl || '').length > 50
-          )
-          const resolvedAttachments = (localHasValidImages && !remoteHasValidImages)
-            ? existing.attachments
-            : (item.attachments || existing.attachments)
+          let resolvedAttachments = item.attachments || existing.attachments
+          // Jika server membawa URL Full-HD WebP/WebM, gabungkan dengan preview lokal agar instan & jernih
+          if (incomingHasUrls && existing.attachments && existing.attachments.length > 0) {
+            resolvedAttachments = (item.attachments || []).map((newAtt: any, idx: number) => {
+              const oldAtt = existing.attachments?.[idx]
+              return {
+                ...newAtt,
+                dataUrl: newAtt.dataUrl || oldAtt?.dataUrl || '',
+                url: newAtt.url || oldAtt?.url || '',
+              }
+            })
+          }
 
           await db.inboxQueue.update(existing.id!, {
             raw_text: item.raw_text || existing.raw_text,

@@ -389,16 +389,32 @@ async function initBaileys() {
             const b64 = buffer.toString('base64')
 
             if (isImage) {
+              const fileId = `${Date.now()}_${Math.random().toString(36).substring(7)}`
+              const fileName = `Foto_${fileId}.webp`
+              mediaName = fileName
               mediaType = 'image/webp'
-              mediaName = `Foto_${Date.now()}.webp`
+
+              const mediaDir = path.join(PUBLIC_DIR, 'media')
+              if (!fs.existsSync(mediaDir)) fs.mkdirSync(mediaDir, { recursive: true })
+              const filePath = path.join(mediaDir, fileName)
+
               try {
-                // Kompresi presisi 640x640 q50: sangat tajam untuk lab & EKG, namun sangat ringan (~15KB)
-                const comp = await sharp(buffer)
-                  .resize(640, 640, { fit: 'inside', withoutEnlargement: true })
-                  .webp({ quality: 50 })
+                // Simpan berkas WebP Full-HD di server (1600px q82) - sangat jernih setara original WhatsApp!
+                const highResWebp = await sharp(buffer)
+                  .resize(1600, 1600, { fit: 'inside', withoutEnlargement: true })
+                  .webp({ quality: 82 })
                   .toBuffer()
-                mediaDataUrl = `data:image/webp;base64,${comp.toString('base64')}`
-                console.log(`✓ Foto berhasil dikompresi ke WebP: ${(buffer.length/1024).toFixed(0)} KB -> ${(comp.length/1024).toFixed(0)} KB`)
+
+                fs.writeFileSync(filePath, highResWebp)
+                mediaUrl = `http://35.255.95.161:3001/media/${fileName}`
+                console.log(`✓ Foto Full-HD WebP berhasil disimpan ke disk server: ${fileName} (${(highResWebp.length/1024).toFixed(0)} KB)`)
+
+                // Buat dataUrl WebP yang tajam (1080px q72) untuk antrean konsulan
+                const previewWebp = await sharp(highResWebp)
+                  .resize(1080, 1080, { fit: 'inside', withoutEnlargement: true })
+                  .webp({ quality: 72 })
+                  .toBuffer()
+                mediaDataUrl = `data:image/webp;base64,${previewWebp.toString('base64')}`
               } catch (e) {
                 console.warn('Kompresi webp gagal, fallback ke jpeg:', e.message)
                 mediaType = 'image/jpeg'
@@ -709,20 +725,22 @@ async function syncInboxToFirestore(inboxList) {
     let payload = buildPayload(pendingItems)
     let payloadStr = JSON.stringify(payload)
 
-    // Jaminan Firestore 1MB (1,048,576 bytes):
-    // Kompresi presisi WebP 480px q45 agar SEMUA lampiran (bahkan jika ada 10 foto)
-    // TETAP UTUH 100% tanpa ada satupun yang dipotong/dihapus (Anti-Korupsi Lampiran!)
+    // Jaminan Firestore 1MB: Jika berkas memiliki URL streaming/server,
+    // kosongkan dataUrl untuk Firestore agar dokumen tetap sangat ringan (<30KB)
+    // dan foto dapat diakses dalam resolusi penuh Full-HD WebP tanpa batasan ukuran!
     for (const it of pendingItems) {
       if (it.attachments) {
         for (const a of it.attachments) {
-          if (a.dataUrl && a.dataUrl.length > 45000) {
+          if (a.url) {
+            a.dataUrl = ''
+          } else if (a.dataUrl && a.dataUrl.length > 55000) {
             try {
               const b64 = a.dataUrl.split(',')[1]
               if (b64) {
                 const buf = Buffer.from(b64, 'base64')
                 const comp = await sharp(buf)
-                  .resize(480, 480, { fit: 'inside', withoutEnlargement: true })
-                  .webp({ quality: 45 })
+                  .resize(960, 960, { fit: 'inside', withoutEnlargement: true })
+                  .webp({ quality: 65 })
                   .toBuffer()
                 a.dataUrl = `data:image/webp;base64,${comp.toString('base64')}`
               }
@@ -932,12 +950,26 @@ const server = http.createServer(async (req, res) => {
 
   const url = new URL(req.url, `http://${req.headers.host}`)
 
-  // GET /media/:file (Streaming video & berkas media klinis)
+  // GET /media/:file (Streaming video & berkas foto/media klinis)
   if (req.method === 'GET' && url.pathname.startsWith('/media/')) {
     const fileName = path.basename(url.pathname)
     const filePath = path.join(PUBLIC_DIR, 'media', fileName)
     if (fs.existsSync(filePath)) {
       const stat = fs.statSync(filePath)
+      const ext = path.extname(fileName).toLowerCase()
+      const mimeTypes = {
+        '.webp': 'image/webp',
+        '.jpg': 'image/jpeg',
+        '.jpeg': 'image/jpeg',
+        '.png': 'image/png',
+        '.mp4': 'video/mp4',
+        '.webm': 'video/webm',
+        '.opus': 'audio/ogg',
+        '.ogg': 'audio/ogg',
+        '.pdf': 'application/pdf',
+      }
+      const contentType = mimeTypes[ext] || 'application/octet-stream'
+
       const range = req.headers.range
       if (range) {
         const parts = range.replace(/bytes=/, '').split('-')
@@ -949,14 +981,15 @@ const server = http.createServer(async (req, res) => {
           'Content-Range': `bytes ${start}-${end}/${stat.size}`,
           'Accept-Ranges': 'bytes',
           'Content-Length': chunksize,
-          'Content-Type': 'video/mp4',
+          'Content-Type': contentType,
         })
         fileStream.pipe(res)
       } else {
         res.writeHead(200, {
           'Content-Length': stat.size,
-          'Content-Type': 'video/mp4',
+          'Content-Type': contentType,
           'Accept-Ranges': 'bytes',
+          'Cache-Control': 'public, max-age=86400',
         })
         fs.createReadStream(filePath).pipe(res)
       }
@@ -1341,6 +1374,41 @@ const server = http.createServer(async (req, res) => {
   res.end('Not Found')
 })
 
+async function migrateAttachmentsToMediaDir() {
+  const mediaDir = path.join(PUBLIC_DIR, 'media')
+  if (!fs.existsSync(mediaDir)) fs.mkdirSync(mediaDir, { recursive: true })
+  if (!fs.existsSync(INBOX_JSON_PATH)) return
+  try {
+    let inboxList = JSON.parse(fs.readFileSync(INBOX_JSON_PATH, 'utf-8'))
+    let modified = false
+    for (const it of inboxList) {
+      if (!it.attachments) continue
+      for (const a of it.attachments) {
+        if (!a.url && a.dataUrl && a.dataUrl.startsWith('data:image/')) {
+          const fileId = `${a.id || Math.random().toString(36).substring(7)}`
+          const fileName = `Foto_${fileId}.webp`
+          const filePath = path.join(mediaDir, fileName)
+          const b64 = a.dataUrl.split(',')[1]
+          if (b64) {
+            try {
+              const buf = Buffer.from(b64, 'base64')
+              fs.writeFileSync(filePath, buf)
+              a.url = `http://35.255.95.161:3001/media/${fileName}`
+              modified = true
+            } catch {}
+          }
+        }
+      }
+    }
+    if (modified) {
+      fs.writeFileSync(INBOX_JSON_PATH, JSON.stringify(inboxList, null, 2), 'utf-8')
+      console.log('✓ Seluruh lampiran berhasil dimigrasikan ke URL WebP Full HD!')
+    }
+  } catch (e) {
+    console.warn('Migrasi media error:', e.message)
+  }
+}
+
 const PORT = 3001
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`=====================================================`)
@@ -1349,5 +1417,6 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log(`   http://192.168.1.45:${PORT} (Akses dari HP via Wi-Fi)`)
   console.log(`=====================================================`)
   broadcastState()
+  migrateAttachmentsToMediaDir().catch(() => {})
   initBaileys()
 })

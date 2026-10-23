@@ -60,11 +60,12 @@ export const ClinicalMediaCard: React.FC<ClinicalMediaCardProps> = ({
 
   // Tipe Berkas: Video (mis. Video Kejang)
   if (item.type.startsWith('video/')) {
+    const videoSrc = item.url || item.dataUrl
     return (
       <>
         <div className="relative group size-20 sm:size-24 rounded-2xl bg-slate-900 border border-slate-300 overflow-hidden shrink-0 flex flex-col items-center justify-center shadow-xs">
           <video
-            src={item.dataUrl}
+            src={videoSrc}
             className={`size-full object-cover transition-all duration-200 ${
               isBlurred ? 'blur-md scale-110' : ''
             }`}
@@ -132,7 +133,7 @@ export const ClinicalMediaCard: React.FC<ClinicalMediaCardProps> = ({
 
               <div className="rounded-2xl overflow-hidden bg-black flex items-center justify-center max-h-[70vh]">
                 <video
-                  src={item.dataUrl}
+                  src={videoSrc}
                   controls
                   autoPlay
                   loop
@@ -157,7 +158,7 @@ export const ClinicalMediaCard: React.FC<ClinicalMediaCardProps> = ({
       <div className="relative group h-14 sm:h-16 px-3 rounded-2xl bg-amber-50 border border-amber-200 shrink-0 flex items-center gap-2.5 shadow-xs">
         <audio
           ref={(node) => setAudioRef(node)}
-          src={item.dataUrl}
+          src={item.url || item.dataUrl}
           onEnded={() => setIsPlayingAudio(false)}
           className="hidden"
         />
@@ -200,7 +201,7 @@ export const ClinicalMediaCard: React.FC<ClinicalMediaCardProps> = ({
           {item.name || 'Dokumen Lab.pdf'}
         </span>
         <a
-          href={item.dataUrl}
+          href={item.url || item.dataUrl}
           target="_blank"
           rel="noopener noreferrer"
           className="mt-1 px-2 py-0.5 rounded-md bg-rose-600 text-white text-[9px] font-bold hover:bg-rose-700 transition-colors"
@@ -226,8 +227,13 @@ export const ClinicalMediaCard: React.FC<ClinicalMediaCardProps> = ({
     <>
       <div className="relative group size-20 sm:size-24 rounded-2xl bg-slate-100 border border-slate-300 overflow-hidden shrink-0 flex flex-col items-center justify-center shadow-xs">
         <img
-          src={item.dataUrl}
+          src={item.url || item.dataUrl}
           alt={item.name}
+          onError={(e) => {
+            if (item.dataUrl && e.currentTarget.src !== item.dataUrl) {
+              e.currentTarget.src = item.dataUrl
+            }
+          }}
           onClick={() => {
             if (!isBlurred) setShowViewer(true)
           }}
@@ -295,7 +301,7 @@ export const ClinicalMediaCard: React.FC<ClinicalMediaCardProps> = ({
         <ImageViewerModal
           isOpen={showViewer}
           onClose={() => setShowViewer(false)}
-          images={[{ url: item.dataUrl || item.url || '', name: item.name, type: item.type }]}
+          images={[{ url: item.url || item.dataUrl || '', name: item.name, type: item.type }]}
         />
       )}
     </>

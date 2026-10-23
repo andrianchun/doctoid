@@ -130,7 +130,7 @@ export interface ProgressNote {
   A: DiagnosisItem[]
   P: TerapiItem[]
   catatan?: string // Catatan bebas di luar SOAP (rencana KRS, konsul, extra, dll)
-  attachments?: { name: string; type: string; dataUrl: string; kategori: 'pemfis' | 'penunjang'; tag?: AttachmentTag }[]
+  attachments?: { name: string; type: string; dataUrl: string; url?: string; kategori: 'pemfis' | 'penunjang'; tag?: AttachmentTag }[]
   metrics?: ClinicalMetrics
 }
 
@@ -194,7 +194,7 @@ export interface PenunjangItem {
   hasil: string // mis. "Hb 12.8, Leu 11.200, Plt 285.000" atau "Infark luas hemisfer kiri"
   status: 'selesai' | 'menunggu' // 'selesai' = ada hasil, 'menunggu' = menunggu hasil
   catatan?: string // indikasi / keterangan tambahan
-  attachments?: { id?: string; name: string; type: string; dataUrl: string }[]
+  attachments?: { id?: string; name: string; type: string; dataUrl: string; url?: string }[]
   created_at?: string
   updated_at?: string
 }
@@ -224,7 +224,7 @@ export interface InboxItem {
   sender_name?: string
   sender_phone?: string
   raw_text?: string
-  attachments?: { id?: string; name: string; type: string; dataUrl: string; kategori?: 'pemfis' | 'penunjang'; tag?: AttachmentTag }[]
+  attachments?: { id?: string; name: string; type: string; dataUrl: string; url?: string; kategori?: 'pemfis' | 'penunjang'; tag?: AttachmentTag }[]
   parsed_data?: {
     nama_depan?: string
     no_rm?: string

@@ -180,7 +180,7 @@ export default function Brainstorm() {
   const [komentarAnalisis, setKomentarAnalisis] = useState('')
 
   type Kategori = 'pemfis' | 'penunjang'
-  const [attachments, setAttachments] = useState<{ id: string, name: string, type: string, dataUrl: string, kategori: Kategori, tag?: AttachmentTag }[]>([])
+  const [attachments, setAttachments] = useState<{ id: string, name: string, type: string, dataUrl: string, url?: string, kategori: Kategori, tag?: AttachmentTag }[]>([])
   const [viewerState, setViewerState] = useState<{
     isOpen: boolean
     images: ViewerImage[]
@@ -420,7 +420,7 @@ export default function Brainstorm() {
       }
 
       // 2. Analisis AI Vision untuk lampiran (Klasifikasi 4 Badge, PDx, & Temuan Abnormal Lab ↑ / ↓)
-      let processedAttachments: { id: string; name: string; type: string; dataUrl: string; kategori: Kategori; tag?: AttachmentTag }[] = []
+      let processedAttachments: { id: string; name: string; type: string; dataUrl: string; url?: string; kategori: Kategori; tag?: AttachmentTag }[] = []
       let visionPdx: TerapiItem[] = []
       let visionPenunjangText = ''
 
@@ -441,6 +441,7 @@ export default function Brainstorm() {
               name: ca.name || 'Lampiran',
               type: ca.type || 'image/jpeg',
               dataUrl: ca.dataUrl,
+              url: (ca as any).url || item.attachments?.[idx]?.url,
               kategori: (ca.kategori as Kategori) || 'penunjang',
               tag: ca.tag,
             }))
@@ -463,6 +464,7 @@ export default function Brainstorm() {
             name: att.name || 'Lampiran',
             type: att.type || 'image/jpeg',
             dataUrl: att.dataUrl,
+            url: att.url,
             kategori: (att.kategori as Kategori) || 'penunjang',
             tag: att.tag,
           }))
@@ -530,8 +532,12 @@ export default function Brainstorm() {
 
       if (processedAttachments.length > 0) {
         setAttachments((prev) => {
-          const existingUrls = new Set(prev.map((a) => a.dataUrl))
-          const unique = processedAttachments.filter((pa) => !existingUrls.has(pa.dataUrl))
+          const existingKeys = new Set(prev.map((a) => a.url || a.dataUrl || a.id))
+          const unique = processedAttachments.filter((pa) => {
+            const key = pa.url || pa.dataUrl || pa.id
+            if (!key) return true
+            return !existingKeys.has(key)
+          })
           return [...prev, ...unique]
         })
       }
@@ -944,7 +950,7 @@ export default function Brainstorm() {
 
         // Gabungkan Lampiran
         const existingAtts = existingTodayNote.attachments || []
-        const newAtts = attachments.map((a) => ({ name: a.name, type: a.type, dataUrl: a.dataUrl, kategori: a.kategori }))
+        const newAtts = attachments.map((a) => ({ name: a.name, type: a.type, dataUrl: a.dataUrl, url: a.url, kategori: a.kategori, tag: a.tag }))
         const mergedAtts = [...existingAtts, ...newAtts]
 
         const metrics = extractClinicalMetrics({
@@ -978,7 +984,7 @@ export default function Brainstorm() {
           O_penunjang: form.O_penunjang.trim(),
           A: form.A.filter((d) => d.nama_diagnosis.trim()),
           P: form.P,
-          attachments: attachments.map((a) => ({ name: a.name, type: a.type, dataUrl: a.dataUrl, kategori: a.kategori })),
+          attachments: attachments.map((a) => ({ name: a.name, type: a.type, dataUrl: a.dataUrl, url: a.url, kategori: a.kategori, tag: a.tag })),
           metrics,
         })
       }
@@ -1027,7 +1033,7 @@ export default function Brainstorm() {
             nama_pemeriksaan: namaBaku,
             hasil: form.O_penunjang || 'Dokumen hasil pemeriksaan terlampir',
             status: 'selesai',
-            attachments: atts.map((att) => ({ name: att.name, type: att.type, dataUrl: att.dataUrl })),
+            attachments: atts.map((att) => ({ id: att.id, name: att.name, type: att.type, dataUrl: att.dataUrl, url: att.url })),
             created_at: new Date().toISOString(),
             updated_at: new Date().toISOString(),
           })
@@ -1553,7 +1559,7 @@ export default function Brainstorm() {
       patient_id: targetPatientId,
       tanggal: noteDate,
       S: form.S, O_pemfis: form.O_pemfis, O_penunjang: form.O_penunjang, A: form.A, P: form.P,
-      attachments: attachments.map(a => ({ name: a.name, type: a.type, dataUrl: a.dataUrl, kategori: a.kategori })),
+      attachments: attachments.map(a => ({ name: a.name, type: a.type, dataUrl: a.dataUrl, url: a.url, kategori: a.kategori, tag: a.tag })),
       metrics,
     })
 
@@ -1601,7 +1607,7 @@ export default function Brainstorm() {
           nama_pemeriksaan: namaBaku,
           hasil: form.O_penunjang || 'Dokumen hasil pemeriksaan terlampir',
           status: 'selesai',
-          attachments: atts.map((att) => ({ name: att.name, type: att.type, dataUrl: att.dataUrl })),
+          attachments: atts.map((att) => ({ id: att.id, name: att.name, type: att.type, dataUrl: att.dataUrl, url: att.url })),
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
         })
@@ -2970,18 +2976,13 @@ export default function Brainstorm() {
                                 <div
                                   key={att.id || idx}
                                   onClick={() => {
-                                    if (isVid && att.url) {
-                                      window.open(att.url, '_blank')
-                                      return
-                                    }
-                                    if (isImg && (att.dataUrl || att.url)) {
-                                      const imgAtts = (item.attachments || [])
-                                        .filter((x: any) => !x.type?.startsWith('video/') && !x.url?.endsWith('.mp4') && (x.type?.startsWith('image/') || x.dataUrl?.startsWith('data:image/') || x.url))
-                                        .map((x: any) => ({ url: x.dataUrl || x.url, name: x.name, type: x.type }))
-                                      const cIdx = imgAtts.findIndex((x: any) => (x.url === (att.dataUrl || att.url)))
+                                    if (att.dataUrl || att.url) {
+                                      const allAtts = (item.attachments || [])
+                                        .map((x: any) => ({ url: x.url || x.dataUrl, name: x.name, type: x.type }))
+                                      const cIdx = allAtts.findIndex((x: any) => (x.url === (att.url || att.dataUrl)))
                                       setViewerState({
                                         isOpen: true,
-                                        images: imgAtts,
+                                        images: allAtts,
                                         initialIndex: Math.max(0, cIdx),
                                       })
                                     }
@@ -3002,8 +3003,14 @@ export default function Brainstorm() {
                                   ) : isImg && (att.dataUrl || att.url) ? (
                                     <>
                                       <img
-                                        src={att.dataUrl || att.url}
+                                        src={att.url || att.dataUrl}
                                         alt={att.name || 'Lampiran'}
+                                        onError={(e) => {
+                                          if (att.dataUrl && e.currentTarget.src !== att.dataUrl) {
+                                            e.currentTarget.src = att.dataUrl
+                                          }
+                                        }}
+                                        loading="lazy"
                                         className="w-full h-full object-cover group-hover:scale-105 transition-transform"
                                       />
                                       <div className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
