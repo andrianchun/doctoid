@@ -1475,17 +1475,17 @@ export default function RawatInap() {
         </div>
 
         {/* Metrik Rawat Inap & Progress Visite Hari Ini */}
-        <div className="grid grid-cols-2 gap-2 pt-2 border-t border-white/15">
-          <div className="rounded-2xl bg-white/10 backdrop-blur-md p-3 border border-white/15">
-            <span className="text-[11px] font-bold text-white/80 block">Pasien Dirawat</span>
-            <p className="text-2xl font-black text-white mt-1 leading-none">
+        <div className="grid grid-cols-2 divide-x divide-white/20 pt-2.5 border-t border-white/15">
+          <div className="pr-4">
+            <span className="text-[11px] font-semibold text-white/80 block">Pasien Dirawat</span>
+            <p className="text-2xl sm:text-3xl font-black text-white mt-1 leading-none">
               {aktif?.length ?? 0}
             </p>
           </div>
 
-          <div className="rounded-2xl bg-white/10 backdrop-blur-md p-3 border border-white/15">
-            <span className="text-[11px] font-bold text-white/80 block">Visite Hari Ini</span>
-            <p className="text-2xl font-black text-white mt-1 leading-none">
+          <div className="pl-4">
+            <span className="text-[11px] font-semibold text-white/80 block">Visite Hari Ini</span>
+            <p className="text-2xl sm:text-3xl font-black text-white mt-1 leading-none">
               {visitedTodayCount} <span className="text-xs font-semibold text-white/70">/ {aktif?.length ?? 0}</span>
             </p>
           </div>
