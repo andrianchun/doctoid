@@ -55,18 +55,15 @@ function DownloadProgress({ progress, isApk }: { progress: number; isApk?: boole
   )
 }
 
+import { DOCTOID_D_ICON } from '../assets/doctoidIconD'
+
 function DoctoidBrandIcon({ className = 'size-20' }: { className?: string }) {
   return (
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" className={`${className} shrink-0 drop-shadow-md`}>
-      <defs>
-        <linearGradient id="docto-brand-grad" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0%" stopColor="#5B7FFF" />
-          <stop offset="100%" stopColor="#3D5AF1" />
-        </linearGradient>
-      </defs>
-      <rect width="512" height="512" rx="112" fill="url(#docto-brand-grad)" />
-      <path d="M96 256h80l40-104 80 208 40-104h80" fill="none" stroke="#fff" strokeWidth="36" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
+    <img
+      src={DOCTOID_D_ICON}
+      alt="Doctoid"
+      className={`${className} shadow-xl shadow-primary/25 border border-white/20 p-2 bg-gradient-to-br from-white/10 to-white/5 backdrop-blur-md object-contain shrink-0`}
+    />
   )
 }
 
