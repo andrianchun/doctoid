@@ -77,7 +77,8 @@ export function isValidPatientName(candidate?: string): boolean {
     'suhu', 'temp', 'temperature', 'tensi', 'nadi', 'pulse', 'respirasi',
     'vital', 'spo2', 'gcs', 'gda', 'gds', 'gdp', 'pemfis', 'subjektif',
     'objektif', 'assessment', 'planning', 'diagnosa', 'diagnosis', 'terapi',
-    'laboratorium', 'radiologi', 'dpjp', 'pasien', 'identitas', 'catatan'
+    'laboratorium', 'radiologi', 'dpjp', 'pasien', 'identitas', 'catatan',
+    'igd', 'atas', 'nama', 'konsul', 'mohon', 'izin'
   ])
   if (words.some((w) => forbiddenKeywords.has(w))) {
     return false

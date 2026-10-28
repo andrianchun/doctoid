@@ -57,6 +57,7 @@ interface PlanCheckItem {
 
 interface PatientPlansGroup {
   patient: Patient
+  formattedDx?: string
   penunjang: PlanCheckItem[]
   terapi: PlanCheckItem[]
   totalCount: number
@@ -90,11 +91,16 @@ export default function Dasbor() {
   })
   const [faskesDropdownOpen, setFaskesDropdownOpen] = useState(false)
   const faskesDropdownRef = useRef<HTMLDivElement>(null)
+  const [timeRangeDropdownOpen, setTimeRangeDropdownOpen] = useState(false)
+  const timeRangeDropdownRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (faskesDropdownRef.current && !faskesDropdownRef.current.contains(e.target as Node)) {
         setFaskesDropdownOpen(false)
+      }
+      if (timeRangeDropdownRef.current && !timeRangeDropdownRef.current.contains(e.target as Node)) {
+        setTimeRangeDropdownOpen(false)
       }
     }
     document.addEventListener('mousedown', handleClickOutside)
@@ -130,11 +136,6 @@ export default function Dasbor() {
     if (!filterHospitalId) return activePatients
     return activePatients.filter(p => p.hospital_id === filterHospitalId)
   }, [activePatients, filterHospitalId])
-
-  const filteredAllPatients = useMemo(() => {
-    if (!filterHospitalId) return allPatients
-    return allPatients.filter(p => p.hospital_id === filterHospitalId)
-  }, [allPatients, filterHospitalId])
 
   const filteredPoliLogs = useMemo(() => {
     if (!filterHospitalId) return poliLogs
@@ -189,12 +190,12 @@ export default function Dasbor() {
     return poliLogs.filter(p => selectedHospitalIds.includes(p.hospital_id))
   }, [poliLogs, selectedHospitalIds])
 
-  // Total SELURUH pasien yang pernah ditangani (Kumulatif Ranap + Poli All-Time)
+  // Total SELURUH pasien yang pernah ditangani (Kumulatif Ranap + Poli All-Time, seluruh faskes tanpa kena filter)
   const totalPasienAllTime = useMemo(() => {
-    const ranapAllCount = filteredAllPatients.length
-    const poliAllCount = filteredPoliLogs.reduce((acc, curr) => acc + (curr.jumlah_pasien || 0), 0)
+    const ranapAllCount = allPatients.length
+    const poliAllCount = poliLogs.reduce((acc, curr) => acc + (curr.jumlah_pasien || 0), 0)
     return ranapAllCount + poliAllCount
-  }, [filteredAllPatients, filteredPoliLogs])
+  }, [allPatients, poliLogs])
 
   // Beban Kasus PieChart per Faskes (Total Kumulatif Seluruh Pasien Ranap + Poli per Faskes)
   const hospitalStats = useMemo(() => {
@@ -702,12 +703,59 @@ export default function Dasbor() {
         }
       }
 
+      // Format diagnosis gabungan (utama + sekunder) dalam 1 baris rapi
+      const dxList: string[] = []
+      const seenDx = new Set<string>()
+
+      if (p.diagnosis_utama) {
+        const parts = p.diagnosis_utama.split(/[\n;,]+/)
+        for (const part of parts) {
+          const cleaned = part.trim().replace(/^(?:[-•*]|\d+[.)])\s*/, '')
+          if (cleaned && !seenDx.has(cleaned.toLowerCase())) {
+            seenDx.add(cleaned.toLowerCase())
+            dxList.push(cleaned)
+          }
+        }
+      }
+
+      if (note?.A) {
+        if (Array.isArray(note.A)) {
+          for (const item of note.A) {
+            const name = (typeof item === 'string' ? item : item?.nama_diagnosis)?.trim()
+            if (name) {
+              const cleaned = name.replace(/^(?:[-•*]|\d+[.)])\s*/, '')
+              if (cleaned && !seenDx.has(cleaned.toLowerCase())) {
+                seenDx.add(cleaned.toLowerCase())
+                dxList.push(cleaned)
+              }
+            }
+          }
+        } else if (typeof note.A === 'string') {
+          const parts = (note.A as string).split(/[\n;,]+/)
+          for (const part of parts) {
+            const cleaned = part.trim().replace(/^(?:[-•*]|\d+[.)])\s*/, '')
+            if (cleaned && !seenDx.has(cleaned.toLowerCase())) {
+              seenDx.add(cleaned.toLowerCase())
+              dxList.push(cleaned)
+            }
+          }
+        }
+      }
+
+      let formattedDx = ''
+      if (dxList.length === 1) {
+        formattedDx = dxList[0]
+      } else if (dxList.length > 1) {
+        formattedDx = dxList.map(d => `• ${d}`).join('  ')
+      }
+
       const totalCount = penunjang.length + terapi.length
       const hasUrgent = penunjang.some(it => it.isUrgent) || terapi.some(it => it.isUrgent)
 
       if (totalCount > 0) {
         groups.push({
           patient: p,
+          formattedDx,
           penunjang,
           terapi,
           totalCount,
@@ -1104,109 +1152,133 @@ export default function Dasbor() {
 
       {/* SECTION: GRAFIK TREN PASIEN (RANAP & POLI) */}
       <div className="rounded-3xl bg-white border border-slate-200/90 shadow-xs p-4 sm:p-5">
-        <div className="pb-3 border-b border-slate-100 space-y-2">
-          {/* Baris 1: Dropdown RS di Atas Rata Kanan */}
-          <div className="flex items-center justify-end">
-            {/* Dropdown Faskes Multi-Select (Di atas rata kanan) */}
-            <div className="relative" ref={faskesDropdownRef}>
+        <div className="pb-3 border-b border-slate-100 flex items-center justify-between gap-1.5">
+          {/* Sisi Kiri: Dropdown Faskes Multi-Select */}
+          <div className="relative shrink-0" ref={faskesDropdownRef}>
+            <button
+              type="button"
+              onClick={() => {
+                setFaskesDropdownOpen(prev => !prev)
+                setTimeRangeDropdownOpen(false)
+              }}
+              className="h-8 flex items-center gap-1.5 px-2.5 rounded-xl bg-slate-100 hover:bg-slate-200/80 border border-slate-200/60 text-xs font-semibold text-slate-700 transition-colors cursor-pointer"
+            >
+              <span className="truncate max-w-[120px] sm:max-w-[200px]">
+                {selectedFaskesLabel}
+              </span>
+              <ChevronDown size={12} className={`text-slate-400 transition-transform ${faskesDropdownOpen ? 'rotate-180' : ''}`} />
+            </button>
+
+            {faskesDropdownOpen && (
+              <div className="absolute left-0 top-full mt-1.5 w-60 rounded-2xl bg-white border border-slate-200 shadow-xl z-50 p-1.5 space-y-0.5 animate-in fade-in zoom-in-95 duration-150">
+                <button
+                  type="button"
+                  onClick={selectAllHospitals}
+                  className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-xl hover:bg-slate-50 text-xs font-semibold text-slate-700 cursor-pointer text-left"
+                >
+                  <span>Semua Faskes</span>
+                  {(selectedHospitalIds.length === 0 || selectedHospitalIds.length === hospitals.length) && (
+                    <Check size={14} className="text-primary font-bold" />
+                  )}
+                </button>
+                <div className="border-t border-slate-100 my-1" />
+                {hospitals.map(h => {
+                  const isChecked = selectedHospitalIds.length === 0 || selectedHospitalIds.includes(h.id!)
+                  return (
+                    <button
+                      key={h.id}
+                      type="button"
+                      onClick={() => toggleHospital(h.id!)}
+                      className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-xl hover:bg-slate-50 text-xs font-medium text-slate-700 cursor-pointer text-left"
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span
+                          className="size-2 rounded-full shrink-0"
+                          style={{ backgroundColor: h.kode_warna || '#3B82F6' }}
+                        />
+                        <span className="truncate">{h.nama}</span>
+                      </div>
+                      <div className={`size-3.5 rounded-md border flex items-center justify-center transition-colors shrink-0 ml-2 ${
+                        isChecked ? 'bg-primary border-primary text-white' : 'border-slate-300 bg-white'
+                      }`}>
+                        {isChecked && <Check size={10} strokeWidth={3} />}
+                      </div>
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* Sisi Kanan: Rentang Waktu (Dropdown: Mingguan, Bulanan, Tahunan) & Mode Visual */}
+          <div className="flex items-center gap-1.5 shrink-0">
+            {/* Dropdown Rentang Waktu */}
+            <div className="relative shrink-0" ref={timeRangeDropdownRef}>
               <button
                 type="button"
-                onClick={() => setFaskesDropdownOpen(prev => !prev)}
-                className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-slate-100 hover:bg-slate-200/80 text-xs font-semibold text-slate-700 transition-colors cursor-pointer"
+                onClick={() => {
+                  setTimeRangeDropdownOpen(prev => !prev)
+                  setFaskesDropdownOpen(false)
+                }}
+                className="h-8 flex items-center gap-1.5 px-2.5 rounded-xl bg-slate-100 hover:bg-slate-200/80 border border-slate-200/60 text-xs font-semibold text-slate-700 transition-colors cursor-pointer"
               >
-                <span className="truncate max-w-[140px] sm:max-w-[200px]">
-                  {selectedFaskesLabel}
+                <span>
+                  {timeRange === 'minggu' ? 'Mingguan' : timeRange === 'bulan' ? 'Bulanan' : 'Tahunan'}
                 </span>
-                <ChevronDown size={12} className={`text-slate-400 transition-transform ${faskesDropdownOpen ? 'rotate-180' : ''}`} />
+                <ChevronDown size={12} className={`text-slate-400 transition-transform ${timeRangeDropdownOpen ? 'rotate-180' : ''}`} />
               </button>
 
-              {faskesDropdownOpen && (
-                <div className="absolute right-0 top-full mt-1.5 w-60 rounded-2xl bg-white border border-slate-200 shadow-xl z-50 p-1.5 space-y-0.5 animate-in fade-in zoom-in-95 duration-150">
-                  <button
-                    type="button"
-                    onClick={selectAllHospitals}
-                    className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-xl hover:bg-slate-50 text-xs font-semibold text-slate-700 cursor-pointer text-left"
-                  >
-                    <span>Semua Faskes</span>
-                    {(selectedHospitalIds.length === 0 || selectedHospitalIds.length === hospitals.length) && (
-                      <Check size={14} className="text-primary font-bold" />
-                    )}
-                  </button>
-                  <div className="border-t border-slate-100 my-1" />
-                  {hospitals.map(h => {
-                    const isChecked = selectedHospitalIds.length === 0 || selectedHospitalIds.includes(h.id!)
+              {timeRangeDropdownOpen && (
+                <div className="absolute right-0 top-full mt-1.5 w-32 rounded-2xl bg-white border border-slate-200 shadow-xl z-50 p-1.5 space-y-0.5 animate-in fade-in zoom-in-95 duration-150">
+                  {(['minggu', 'bulan', 'tahun'] as const).map(tr => {
+                    const isSelected = timeRange === tr
+                    const label = tr === 'minggu' ? 'Mingguan' : tr === 'bulan' ? 'Bulanan' : 'Tahunan'
                     return (
                       <button
-                        key={h.id}
+                        key={tr}
                         type="button"
-                        onClick={() => toggleHospital(h.id!)}
-                        className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-xl hover:bg-slate-50 text-xs font-medium text-slate-700 cursor-pointer text-left"
+                        onClick={() => {
+                          setTimeRange(tr)
+                          setTimeRangeDropdownOpen(false)
+                        }}
+                        className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-xl text-xs font-semibold transition-colors cursor-pointer text-left ${
+                          isSelected ? 'bg-primary/10 text-primary-deep' : 'hover:bg-slate-50 text-slate-700'
+                        }`}
                       >
-                        <div className="flex items-center gap-2 min-w-0">
-                          <span
-                            className="size-2 rounded-full shrink-0"
-                            style={{ backgroundColor: h.kode_warna || '#3B82F6' }}
-                          />
-                          <span className="truncate">{h.nama}</span>
-                        </div>
-                        <div className={`size-3.5 rounded-md border flex items-center justify-center transition-colors shrink-0 ml-2 ${
-                          isChecked ? 'bg-primary border-primary text-white' : 'border-slate-300 bg-white'
-                        }`}>
-                          {isChecked && <Check size={10} strokeWidth={3} />}
-                        </div>
+                        <span>{label}</span>
+                        {isSelected && <Check size={14} className="text-primary font-bold" />}
                       </button>
                     )
                   })}
                 </div>
               )}
             </div>
-          </div>
 
-          {/* Baris 2: Sejajar di Bawahnya (Rentang Waktu & Ikon Mode Visual Rata Kanan) */}
-          <div className="flex items-center justify-end gap-2">
-            {/* Rentang Waktu: Minggu, Bulan, Tahun */}
-            <div className="flex items-center gap-0.5 bg-slate-100 p-0.5 rounded-full border border-slate-200/60">
-              {(['minggu', 'bulan', 'tahun'] as const).map(tr => (
-                <button
-                  key={tr}
-                  type="button"
-                  onClick={() => setTimeRange(tr)}
-                  className={`px-2.5 py-1 rounded-full text-xs font-bold transition-all cursor-pointer ${
-                    timeRange === tr
-                      ? 'bg-white text-slate-800 shadow-xs'
-                      : 'text-slate-500 hover:text-slate-800'
-                  }`}
-                >
-                  {tr === 'minggu' ? 'Minggu' : tr === 'bulan' ? 'Bulan' : 'Tahun'}
-                </button>
-              ))}
-            </div>
-
-            {/* Visual Mode: Ikon Garis Area vs Ikon Batang (Ala Darka) */}
-            <div className="flex items-center gap-0.5 bg-slate-100 p-0.5 rounded-full border border-slate-200/60">
+            {/* Visual Mode: Ikon Garis Area vs Ikon Batang */}
+            <div className="h-8 flex items-center gap-0.5 bg-slate-100 p-0.5 rounded-xl border border-slate-200/60">
               <button
                 type="button"
                 onClick={() => setChartType('area')}
-                className={`p-1.5 rounded-full transition-colors cursor-pointer ${
+                className={`h-7 w-7 rounded-lg flex items-center justify-center transition-colors cursor-pointer ${
                   chartType === 'area'
                     ? 'bg-white text-primary shadow-xs'
                     : 'text-slate-400 hover:text-slate-600'
                 }`}
                 title="Grafik Garis Area"
               >
-                <LineChartIcon size={14} />
+                <LineChartIcon size={15} strokeWidth={2.2} />
               </button>
               <button
                 type="button"
                 onClick={() => setChartType('bar')}
-                className={`p-1.5 rounded-full transition-colors cursor-pointer ${
+                className={`h-7 w-7 rounded-lg flex items-center justify-center transition-colors cursor-pointer ${
                   chartType === 'bar'
                     ? 'bg-white text-primary shadow-xs'
                     : 'text-slate-400 hover:text-slate-600'
                 }`}
                 title="Grafik Batang"
               >
-                <BarChart3Icon size={14} />
+                <BarChart3Icon size={15} strokeWidth={2.2} />
               </button>
             </div>
           </div>
@@ -1463,19 +1535,17 @@ export default function Dasbor() {
 
       {/* SECTION: DAFTAR PLANNING */}
       <div className="rounded-3xl bg-white border border-slate-200/90 shadow-xs p-4 sm:p-5">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
-          <div className="flex items-center gap-2">
-            <h2 className="text-sm sm:text-base font-bold text-slate-800">
-              Daftar Planning
-            </h2>
-          </div>
+        <div className="flex items-center justify-between gap-2 pb-3 border-b border-slate-100">
+          <h2 className="text-sm sm:text-base font-bold text-slate-800 truncate">
+            Daftar Planning
+          </h2>
 
           {/* Kategori Tabs: Semua, Penunjang, Terapi */}
-          <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl self-start sm:self-auto">
+          <div className="flex items-center gap-0.5 bg-slate-100 p-0.5 rounded-full border border-slate-200/60 shrink-0">
             <button
               type="button"
               onClick={() => setPlanTab('semua')}
-              className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer shrink-0 ${
+              className={`px-2.5 py-1 rounded-full text-xs font-bold transition-all cursor-pointer ${
                 planTab === 'semua'
                   ? 'bg-white text-slate-800 shadow-xs'
                   : 'text-slate-500 hover:text-slate-800'
@@ -1486,7 +1556,7 @@ export default function Dasbor() {
             <button
               type="button"
               onClick={() => setPlanTab('penunjang')}
-              className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer shrink-0 ${
+              className={`px-2.5 py-1 rounded-full text-xs font-bold transition-all cursor-pointer ${
                 planTab === 'penunjang'
                   ? 'bg-white text-teal-800 shadow-xs'
                   : 'text-slate-500 hover:text-teal-800'
@@ -1497,7 +1567,7 @@ export default function Dasbor() {
             <button
               type="button"
               onClick={() => setPlanTab('terapi')}
-              className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer shrink-0 ${
+              className={`px-2.5 py-1 rounded-full text-xs font-bold transition-all cursor-pointer ${
                 planTab === 'terapi'
                   ? 'bg-white text-amber-800 shadow-xs'
                   : 'text-slate-500 hover:text-amber-800'
@@ -1518,31 +1588,38 @@ export default function Dasbor() {
           <div className="divide-y divide-slate-100">
             {filteredPatientPlans.map((group) => (
               <div key={group.patient.id} className="py-3.5 space-y-2">
-                {/* Header Pasien: Nama dan Diagnosis Utama (Tanpa Clutter) */}
-                <div className="flex items-center justify-between gap-2">
-                  <button
-                    type="button"
-                    onClick={() => navigate(`/pasien/${group.patient.id}`)}
-                    className="text-left group/p cursor-pointer min-w-0 flex items-center gap-1.5 flex-wrap"
-                  >
-                    <span className="text-xs sm:text-sm font-bold text-slate-800 group-hover/p:text-primary transition-colors">
-                      <Masked value={group.patient.nama_depan || 'Pasien'} type="name" />
-                    </span>
-                    {group.patient.diagnosis_utama && (
-                      <span className="text-xs text-slate-500 font-medium">
-                        · {group.patient.diagnosis_utama}
+                {/* Header Pasien: Nama di baris 1, Diagnosis seragam di bawahnya (sebaris) */}
+                <div className="space-y-0.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <button
+                      type="button"
+                      onClick={() => navigate(`/pasien/${group.patient.id}`)}
+                      className="text-left group/p cursor-pointer min-w-0"
+                    >
+                      <span className="text-xs sm:text-sm font-bold text-slate-800 group-hover/p:text-primary transition-colors truncate block">
+                        <Masked value={group.patient.nama_depan || 'Pasien'} type="name" />
                       </span>
-                    )}
-                  </button>
+                    </button>
 
-                  <button
-                    type="button"
-                    onClick={() => navigate(`/pasien/${group.patient.id}`)}
-                    className="text-[11px] font-semibold text-primary hover:text-primary-deep flex items-center gap-0.5 shrink-0 cursor-pointer"
-                  >
-                    <span>Buka</span>
-                    <ChevronRight size={13} />
-                  </button>
+                    <button
+                      type="button"
+                      onClick={() => navigate(`/pasien/${group.patient.id}`)}
+                      className="text-[11px] font-semibold text-primary hover:text-primary-deep flex items-center gap-0.5 shrink-0 cursor-pointer"
+                    >
+                      <span>Buka</span>
+                      <ChevronRight size={13} />
+                    </button>
+                  </div>
+
+                  {group.formattedDx && (
+                    <p
+                      onClick={() => navigate(`/pasien/${group.patient.id}`)}
+                      className="text-xs text-slate-500 font-medium truncate cursor-pointer hover:text-slate-700 transition-colors"
+                      title={group.formattedDx}
+                    >
+                      {group.formattedDx}
+                    </p>
+                  )}
                 </div>
 
                 {/* Daftar Item Checklist per Kategori */}
@@ -1557,20 +1634,20 @@ export default function Dasbor() {
                       )}
                       <div className="space-y-1">
                         {group.penunjang.map(item => (
-                          <div key={item.id} className="flex items-center justify-between gap-3 py-1 group/row">
-                            <div className="flex items-center gap-2.5 min-w-0">
+                          <div key={item.id} className="flex items-start justify-between gap-2.5 py-1.5 group/row">
+                            <div className="flex items-start gap-2.5 min-w-0 flex-1">
                               <button
                                 type="button"
                                 onClick={() => handleCompletePlan(item)}
-                                className="size-4.5 rounded-full border-2 border-slate-300 hover:border-emerald-500 hover:bg-emerald-50 active:scale-90 transition-all shrink-0 cursor-pointer flex items-center justify-center"
+                                className="mt-0.5 size-4.5 rounded-full border-2 border-slate-300 hover:border-emerald-500 hover:bg-emerald-50 active:scale-90 transition-all shrink-0 cursor-pointer flex items-center justify-center"
                                 title="Tandai selesai"
                               />
-                              <span className="text-xs font-medium text-slate-800 truncate">
+                              <span className="text-xs font-medium text-slate-800 line-clamp-2 leading-snug break-words">
                                 {item.judul}
                               </span>
                             </div>
                             {item.badgeLabel && (
-                              <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold shrink-0 ${item.badgeClass}`}>
+                              <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold shrink-0 self-start mt-0.5 ${item.badgeClass}`}>
                                 {item.badgeLabel}
                               </span>
                             )}
@@ -1590,20 +1667,20 @@ export default function Dasbor() {
                       )}
                       <div className="space-y-1">
                         {group.terapi.map(item => (
-                          <div key={item.id} className="flex items-center justify-between gap-3 py-1 group/row">
-                            <div className="flex items-center gap-2.5 min-w-0">
+                          <div key={item.id} className="flex items-start justify-between gap-2.5 py-1.5 group/row">
+                            <div className="flex items-start gap-2.5 min-w-0 flex-1">
                               <button
                                 type="button"
                                 onClick={() => handleCompletePlan(item)}
-                                className="size-4.5 rounded-full border-2 border-slate-300 hover:border-emerald-500 hover:bg-emerald-50 active:scale-90 transition-all shrink-0 cursor-pointer flex items-center justify-center"
+                                className="mt-0.5 size-4.5 rounded-full border-2 border-slate-300 hover:border-emerald-500 hover:bg-emerald-50 active:scale-90 transition-all shrink-0 cursor-pointer flex items-center justify-center"
                                 title="Tandai selesai"
                               />
-                              <span className="text-xs font-medium text-slate-800 truncate">
+                              <span className="text-xs font-medium text-slate-800 line-clamp-2 leading-snug break-words">
                                 {item.judul}
                               </span>
                             </div>
                             {item.badgeLabel && (
-                              <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold shrink-0 ${item.badgeClass}`}>
+                              <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold shrink-0 self-start mt-0.5 ${item.badgeClass}`}>
                                 {item.badgeLabel}
                               </span>
                             )}

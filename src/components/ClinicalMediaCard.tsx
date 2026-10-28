@@ -227,11 +227,11 @@ export const ClinicalMediaCard: React.FC<ClinicalMediaCardProps> = ({
     <>
       <div className="relative group size-20 sm:size-24 rounded-2xl bg-slate-100 border border-slate-300 overflow-hidden shrink-0 flex flex-col items-center justify-center shadow-xs">
         <img
-          src={item.url || item.dataUrl}
+          src={item.dataUrl || item.url}
           alt={item.name}
           onError={(e) => {
-            if (item.dataUrl && e.currentTarget.src !== item.dataUrl) {
-              e.currentTarget.src = item.dataUrl
+            if (item.url && e.currentTarget.src !== item.url) {
+              e.currentTarget.src = item.url
             }
           }}
           onClick={() => {
@@ -301,7 +301,7 @@ export const ClinicalMediaCard: React.FC<ClinicalMediaCardProps> = ({
         <ImageViewerModal
           isOpen={showViewer}
           onClose={() => setShowViewer(false)}
-          images={[{ url: item.url || item.dataUrl || '', name: item.name, type: item.type }]}
+          images={[{ url: item.url || item.dataUrl || '', dataUrl: item.dataUrl, name: item.name, type: item.type }]}
         />
       )}
     </>

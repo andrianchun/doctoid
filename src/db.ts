@@ -226,6 +226,7 @@ export interface InboxItem {
   raw_text?: string
   attachments?: { id?: string; name: string; type: string; dataUrl: string; url?: string; kategori?: 'pemfis' | 'penunjang'; tag?: AttachmentTag }[]
   parsed_data?: {
+    title?: string
     nama_depan?: string
     no_rm?: string
     usia?: string

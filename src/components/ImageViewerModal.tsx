@@ -18,6 +18,7 @@ import { verifyBiometric } from '../webauthn'
 
 export interface ViewerImage {
   url: string
+  dataUrl?: string
   name?: string
   type?: string
 }
@@ -337,8 +338,14 @@ export const ImageViewerModal: React.FC<ImageViewerModalProps> = ({
             />
           ) : (
             <img
-              src={currentImage.url}
+              src={currentImage.url || (currentImage as any).dataUrl}
               alt={currentImage.name || 'Lampiran'}
+              onError={(e) => {
+                const fallback = (currentImage as any).dataUrl
+                if (fallback && e.currentTarget.src !== fallback) {
+                  e.currentTarget.src = fallback
+                }
+              }}
               draggable={false}
               className={`max-h-[82vh] max-w-[96vw] object-contain rounded-lg shadow-2xl pointer-events-none transition-all duration-200 ${
                 !unmasked ? 'blur-md scale-105' : ''

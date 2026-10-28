@@ -4,6 +4,7 @@ import { LocalNotifications } from '@capacitor/local-notifications'
 import { PushNotifications } from '@capacitor/push-notifications'
 import { db } from '../db'
 import { triggerCloudSync } from '../sync'
+import { extractDemografi } from '../parser'
 
 let notifPermissionRequested = false
 let pushInitialized = false
@@ -423,8 +424,20 @@ if (typeof window !== 'undefined') {
 }
 
 export async function sendLocalNotification(item: any) {
-  const patientName = item.parsed_data?.nama_depan || item.sender_name || 'Konsul Pasien Baru'
-  const rawAge = item.parsed_data?.usia || ''
+  let patientName = item.parsed_data?.nama_depan || ''
+  let rawAge = item.parsed_data?.usia || ''
+
+  if (!patientName || /atas nama|igd/i.test(patientName)) {
+    const demo = extractDemografi(item.raw_text || '')
+    if (demo.nama_depan) {
+      patientName = `${demo.title ? demo.title + ' ' : ''}${demo.nama_depan}`.trim()
+      if (demo.usia && !rawAge) rawAge = demo.usia
+    }
+  } else if (item.parsed_data?.title) {
+    patientName = `${item.parsed_data.title} ${patientName}`.trim()
+  }
+
+  if (!patientName) patientName = item.sender_name || 'Konsul Pasien Baru'
   const formattedAge = rawAge ? ` (${rawAge.replace(/\s*tahun/i, ' th').trim()})` : ''
   const title = `${patientName}${formattedAge}`.trim()
   const snippet = item.raw_text

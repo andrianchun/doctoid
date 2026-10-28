@@ -186,6 +186,151 @@ async function setupDoctoGroupBranding(groupId, currentSubject = '', customIconB
   saveBotConfig()
 }
 
+function isValidWaName(candidate) {
+  if (!candidate || candidate.length < 2 || candidate.length > 40) return false
+  const lower = candidate.toLowerCase().trim()
+  const BAD_TERMS = [
+    'igd', 'atas nama', 'atas', 'nama', 'pasien', 'konsul', 'mohon', 'izin', 'dokter', 'perawat',
+    'bidan', 'jaga', 'ruangan', 'bangsal', 'suhu', 'temp', 'temperature', 'tensi', 'td', 'nadi',
+    'hr', 'rr', 'respirasi', 'spo2', 'gcs', 'ku', 'gda', 'gds', 'subjektif', 'objektif',
+    'assessment', 'planning', 'terapi', 'ttv', 'bpjs', 'umum', 'asuransi', 'inhealth', 'rujukan'
+  ]
+  if (BAD_TERMS.some((term) => lower === term || lower.startsWith(term + ' ') || lower.endsWith(' ' + term) || lower.includes(' atas nama') || lower.includes('igd '))) {
+    return false
+  }
+  if (/[:()[\]{}=0-9]/.test(candidate)) return false
+  return true
+}
+
+function extractWaPatientInfo(text) {
+  if (!text || typeof text !== 'string') return { title: '', nama_depan: '', usia: '', no_rm: '', jaminan: '' }
+
+  let title = ''
+  let nama_depan = ''
+  let usia = ''
+  let no_rm = ''
+  let jaminan = ''
+
+  const lines = text.split(/\r?\n/)
+
+  // 1. Cek baris bergaris miring (format standar konsul medis: "*Tn Suyanto / 69 th / BPJS*")
+  for (const line of lines) {
+    const cleanLine = line.replace(/[*_~#]/g, '').trim()
+    if (!cleanLine.includes('/')) continue
+    if (/(?:^|\s)\[\d{1,2}[/-]\d{1,2}/.test(line) || /https?:\/\//i.test(line)) continue
+    // Abaikan baris TTV misal "TD 120/80"
+    if (/^\s*(?:td|tensi|ttv|vital|suhu|temp|nadi|hr|rr|spo2)\b/i.test(cleanLine) || /^\s*\d{2,3}\/\d{2,3}\b/i.test(cleanLine)) continue
+
+    const segs = cleanLine.split('/').map((s) => s.trim()).filter(Boolean)
+    if (segs.length < 2) continue
+
+    for (const seg of segs) {
+      // Usia
+      const ageM = seg.match(/\b(\d{1,3})\s*(?:th|thn|tahun|bln|bulan|hari|yo)\b/i)
+      if (ageM && !usia) {
+        const n = parseInt(ageM[1], 10)
+        if (n > 0 && n <= 125) {
+          usia = `${n} th`
+          continue
+        }
+      }
+
+      // Jaminan
+      const jmM = seg.match(/\b(BPJS(?:[\s\w]*)|JKN|KIS|Umum|Asuransi|Inhealth)\b/i)
+      if (jmM && !jaminan) {
+        const jm = jmM[1].toUpperCase()
+        if (jm.includes('BPJS') || jm.includes('JKN') || jm.includes('KIS')) jaminan = 'BPJS'
+        else if (jm.includes('UMUM')) jaminan = 'Umum'
+        else if (jm.includes('ASURANSI') || jm.includes('INHEALTH')) jaminan = 'Asuransi'
+        continue
+      }
+
+      // No RM
+      const rmM = seg.match(/\b(?:no\.?\s*rm|rm)?\s*([0-9]{2}[-./][0-9]{2}[-./][0-9]{2}|[0-9]{4,10})\b/i)
+      if (rmM && !no_rm && /[-./]|\d{5,}/.test(rmM[1])) {
+        no_rm = rmM[1].trim()
+        continue
+      }
+
+      // Gender token (L/P)
+      if (/^(?:l|p|laki-laki|perempuan|pria|wanita)$/i.test(seg)) continue
+
+      // Nama pasien
+      if (!nama_depan) {
+        const titleM = seg.match(/^(dr|dok|dokter|Tn|Ny|Sdri|Sdr|An|By)\.?\s*(.+)$/i)
+        let cGelar = ''
+        let cNama = seg
+        if (titleM) {
+          cGelar = titleM[1].toLowerCase()
+          cNama = titleM[2].trim()
+        } else {
+          cNama = cNama.replace(/^(?:nama(?:\s*pasien)?|pasien|px|identitas)\s*[:-]?\s*/i, '').trim()
+        }
+        cNama = cNama.replace(/\b(?:usia|umur|th|thn|tahun|rm|no\.?\s*rm)\b.*$/i, '').trim()
+        if (isValidWaName(cNama)) {
+          if (cGelar) {
+            title = (cGelar === 'dr' || cGelar === 'dok' || cGelar === 'dokter')
+              ? 'dr.'
+              : cGelar.charAt(0).toUpperCase() + cGelar.slice(1) + (titleM[1].endsWith('.') ? '' : '.')
+          }
+          nama_depan = cNama.replace(/[/,*_–—|]/g, '').trim()
+        }
+      }
+    }
+  }
+
+  // 2. Cek label "atas nama", "a.n.", "a/n", "nama:", "pasien:"
+  if (!nama_depan) {
+    const anMatch = text.match(/(?:(?:pasien\s+(?:igd|bangsal|ruangan|[A-Za-z0-9\s]+?)\s+)?(?:atas\s*nama|a\.?n\.?|nama(?:\s*pasien)?|identitas)\s*[:=–-]?\s*[*_~#]*\s*)(?:(dr|dok|dokter|Tn|Ny|Sdri|Sdr|An|By)\.?\s*)?([A-Za-z][A-Za-z'.-]+(?:[ \t]+[A-Za-z'.-]+){0,3})/i)
+    if (anMatch) {
+      const cGelar = anMatch[1]
+      let cNama = anMatch[2].trim()
+      cNama = cNama.replace(/\b(?:usia|umur|th|thn|tahun|rm|no\.?\s*rm)\b.*$/i, '').trim()
+      if (isValidWaName(cNama)) {
+        if (cGelar) {
+          title = cGelar.charAt(0).toUpperCase() + cGelar.slice(1).toLowerCase() + (cGelar.endsWith('.') ? '' : '.')
+        }
+        nama_depan = cNama
+      }
+    }
+  }
+
+  // 3. Fallback gelar mandiri di teks (mis. "*Tn Suyanto*", "Ny. Siti")
+  if (!nama_depan) {
+    for (const line of lines) {
+      if (/dokter\s*(?:jaga|spesialis|ruangan|igd|konsulen|dpjp)|pemeriksa\s*:|asal\s*rujukan|mohon\s*ijin|mohon\s*izin/i.test(line)) continue
+      const titleM = line.match(/[*_~#]*\s*\b(dr|dok|dokter|Tn|Ny|Sdri|Sdr|An|By)\.?\s*([A-Za-z'.-]+(?:[ \t]+[A-Za-z'.-]+){0,3})/i)
+      if (titleM) {
+        const cGelar = titleM[1].toLowerCase()
+        let cNama = titleM[2].replace(/[/,*_–—|]/g, '').trim()
+        cNama = cNama.replace(/\b(?:usia|umur|th|thn|tahun|rm|no\.?\s*rm)\b.*$/i, '').trim()
+        if (isValidWaName(cNama)) {
+          title = (cGelar === 'dr' || cGelar === 'dok' || cGelar === 'dokter')
+            ? 'dr.'
+            : cGelar.charAt(0).toUpperCase() + cGelar.slice(1) + (titleM[1].endsWith('.') ? '' : '.')
+          nama_depan = cNama
+          break
+        }
+      }
+    }
+  }
+
+  // 4. Fallback usia & RM jika belum terdeteksi dari baris slash
+  if (!usia) {
+    const uM = text.match(/\b(\d{1,3})\s*(?:th|thn|tahun|yo|bulan)\b/i)
+    if (uM) {
+      const n = parseInt(uM[1], 10)
+      if (n > 0 && n <= 125) usia = `${n} th`
+    }
+  }
+  if (!no_rm) {
+    const rM = text.match(/(?:RM|No\.?\s*RM|Rekam\s*Medis)\s*[:\.]?\s*([0-9\-\.\/]{4,15})/i)
+    if (rM) no_rm = rM[1].trim()
+  }
+
+  return { title, nama_depan, usia, no_rm, jaminan }
+}
+
 async function initBaileys() {
   if (!botState.active) {
     console.log('Bot dalam mode NONAKTIF (OFF). Menunda inisialisasi.')
@@ -453,32 +598,23 @@ async function initBaileys() {
         // Deteksi apakah pengirim pesan adalah dokter sendiri
         const isFromDoctor = Boolean(msg.key.fromMe || (participantPhone && participantPhone === myPhone))
 
-        // Ekstraksi otomatis nama, no RM, dan usia jika tertera di teks
-        const titleMatch = textContent.match(/(?:Tn\.|Ny\.|Sdr\.|Sdri\.|An\.|By\.)\s*([A-Za-z\s]{2,30})/i)
-        const namaLabelMatch = textContent.match(/(?:Nama|Pasien)\s*[:\.]?\s*([A-Z][a-zA-Z\s]{2,25})/i)
-        const rmMatch = textContent.match(/(?:RM|No\.?\s*RM|Rekam\s*Medis)\s*[:\.]?\s*([0-9\-\.\/]{4,15})/i)
-        const usiaMatch = textContent.match(/(\d{1,3})\s*(?:th|tahun|yo|bulan)/i)
+        // Ekstraksi otomatis identitas pasien klinis secara cerdas
+        const parsedInfo = extractWaPatientInfo(textContent)
+        const extractedName = parsedInfo.nama_depan
 
         // Cek apakah pesan ini membawa identitas pasien baru (awalan konsulan baru)
         const hasNewPatientHeader = Boolean(
-          titleMatch ||
-          namaLabelMatch ||
+          extractedName ||
           /(?:mohon izin konsul|izin konsul|konsul pasien|pasien baru|identitas pasien)\b/i.test(textContent) ||
           /(?:subjektif|keluhan utama|rps)\s*[:\.]/i.test(textContent)
         )
 
-        let extractedName = titleMatch ? titleMatch[0].trim() : (namaLabelMatch ? namaLabelMatch[1].trim() : '')
-        if (extractedName) {
-          const lower = extractedName.toLowerCase()
-          const INVALID_BOT_NAME_TERMS = ['suhu', 'temp', 'temperature', 'tensi', 'td', 'nadi', 'hr', 'rr', 'respirasi', 'spo2', 'gcs', 'ku', 'gda', 'gds', 'subjektif', 'objektif', 'assessment', 'planning']
-          if (INVALID_BOT_NAME_TERMS.some((t) => lower.includes(t)) || /[:()[\]{}=0-9]/.test(extractedName)) {
-            extractedName = ''
-          }
-        }
         const parsedData = {
+          title: parsedInfo.title || '',
           nama_depan: extractedName,
-          no_rm: rmMatch ? rmMatch[1].trim() : '',
-          usia: usiaMatch ? usiaMatch[0].trim() : '',
+          no_rm: parsedInfo.no_rm || '',
+          usia: parsedInfo.usia || '',
+          jaminan: parsedInfo.jaminan || '',
         }
 
         const inboxItem = {
@@ -560,9 +696,15 @@ async function initBaileys() {
                 recentItem.raw_text += '\n\n' + inboxItem.raw_text
               }
 
-              // Jika item sebelumnya belum punya nama/usia/no_rm tapi pesan baru punya, update
+              // Jika item sebelumnya belum punya nama/usia/no_rm atau membawa nama keliru, update
               if (!recentItem.parsed_data) recentItem.parsed_data = {}
-              if (inboxItem.parsed_data?.nama_depan && !recentItem.parsed_data.nama_depan) {
+              if (inboxItem.parsed_data?.title && !recentItem.parsed_data.title) {
+                recentItem.parsed_data.title = inboxItem.parsed_data.title
+              }
+              if (
+                inboxItem.parsed_data?.nama_depan &&
+                (!recentItem.parsed_data.nama_depan || /atas nama|igd/i.test(recentItem.parsed_data.nama_depan))
+              ) {
                 recentItem.parsed_data.nama_depan = inboxItem.parsed_data.nama_depan
               }
               if (inboxItem.parsed_data?.usia && !recentItem.parsed_data.usia) {
@@ -570,6 +712,9 @@ async function initBaileys() {
               }
               if (inboxItem.parsed_data?.no_rm && !recentItem.parsed_data.no_rm) {
                 recentItem.parsed_data.no_rm = inboxItem.parsed_data.no_rm
+              }
+              if (inboxItem.parsed_data?.jaminan && !recentItem.parsed_data.jaminan) {
+                recentItem.parsed_data.jaminan = inboxItem.parsed_data.jaminan
               }
             }
             if (inboxItem.attachments && inboxItem.attachments.length > 0) {
@@ -703,10 +848,10 @@ async function syncInboxToFirestore(inboxList) {
       return { stringValue: String(val) }
     }
 
-    // Ambil maksimal 8 item pending
+    // Ambil maksimal 15 item pending
     let pendingItems = inboxList
       .filter((i) => i.status === 'pending')
-      .slice(0, 8)
+      .slice(0, 15)
       .map((it) => JSON.parse(JSON.stringify(it)))
 
     function buildPayload(items) {
@@ -727,21 +872,32 @@ async function syncInboxToFirestore(inboxList) {
     let payload = buildPayload(pendingItems)
     let payloadStr = JSON.stringify(payload)
 
-    // Jaminan Firestore 1MB: Jika berkas memiliki URL streaming/server,
-    // kosongkan dataUrl untuk Firestore agar dokumen tetap sangat ringan (<30KB)
-    // dan foto dapat diakses dalam resolusi penuh Full-HD WebP tanpa batasan ukuran!
+    // Jaminan Lampiran Anti-Rusak & Batas Dokumen Firestore 1MB:
+    // Selalu sertakan dataUrl WebP terkompresi efisien (~25-35KB per foto) agar foto BISA DIBUKA LANGSUNG
+    // di HP APK maupun browser tanpa risiko kegagalan koneksi HTTP, mixed-content, atau firewall port operator seluler.
     for (const it of pendingItems) {
       if (it.attachments) {
         for (const a of it.attachments) {
-          if (a.url) {
-            a.dataUrl = ''
-          } else if (a.dataUrl && a.dataUrl.length > 55000) {
+          if (!a.dataUrl && a.url) {
+            try {
+              const fName = path.basename(a.url)
+              const localPath = path.join(PUBLIC_DIR, 'media', fName)
+              if (fs.existsSync(localPath)) {
+                const fBuf = fs.readFileSync(localPath)
+                const comp = await sharp(fBuf)
+                  .resize(800, 800, { fit: 'inside', withoutEnlargement: true })
+                  .webp({ quality: 65 })
+                  .toBuffer()
+                a.dataUrl = `data:image/webp;base64,${comp.toString('base64')}`
+              }
+            } catch {}
+          } else if (a.dataUrl && a.dataUrl.length > 45000) {
             try {
               const b64 = a.dataUrl.split(',')[1]
               if (b64) {
                 const buf = Buffer.from(b64, 'base64')
                 const comp = await sharp(buf)
-                  .resize(960, 960, { fit: 'inside', withoutEnlargement: true })
+                  .resize(800, 800, { fit: 'inside', withoutEnlargement: true })
                   .webp({ quality: 65 })
                   .toBuffer()
                 a.dataUrl = `data:image/webp;base64,${comp.toString('base64')}`
@@ -853,7 +1009,10 @@ async function sendFcmPushNotification(item) {
       return
     }
 
-    const patientName = item.parsed_data?.nama_depan || item.sender_name || 'Konsul Pasien Baru'
+    const titlePrefix = item.parsed_data?.title ? `${item.parsed_data.title} ` : ''
+    const patientName = item.parsed_data?.nama_depan
+      ? `${titlePrefix}${item.parsed_data.nama_depan}`.trim()
+      : item.sender_name || 'Konsul Pasien Baru'
     const rawAge = item.parsed_data?.usia || ''
     const formattedAge = rawAge ? ` (${rawAge.replace(/\s*tahun/i, ' th').trim()})` : ''
     const title = `${patientName}${formattedAge}`.trim()
@@ -1376,7 +1535,7 @@ const server = http.createServer(async (req, res) => {
   res.end('Not Found')
 })
 
-async function migrateAttachmentsToMediaDir() {
+async function sanitizeAndMigrateInbox() {
   const mediaDir = path.join(PUBLIC_DIR, 'media')
   if (!fs.existsSync(mediaDir)) fs.mkdirSync(mediaDir, { recursive: true })
   if (!fs.existsSync(INBOX_JSON_PATH)) return
@@ -1384,19 +1543,54 @@ async function migrateAttachmentsToMediaDir() {
     let inboxList = JSON.parse(fs.readFileSync(INBOX_JSON_PATH, 'utf-8'))
     let modified = false
     for (const it of inboxList) {
-      if (!it.attachments) continue
-      for (const a of it.attachments) {
-        if (!a.url && a.dataUrl && a.dataUrl.startsWith('data:image/')) {
-          const fileId = `${a.id || Math.random().toString(36).substring(7)}`
-          const fileName = `Foto_${fileId}.webp`
-          const filePath = path.join(mediaDir, fileName)
-          const b64 = a.dataUrl.split(',')[1]
-          if (b64) {
+      // 1. Sanitasi identitas pasien (perbaiki jika sebelumnya keliru "IGD atas nama")
+      if (!it.parsed_data?.nama_depan || /atas nama|igd/i.test(it.parsed_data.nama_depan)) {
+        const info = extractWaPatientInfo(it.raw_text)
+        if (info.nama_depan) {
+          it.parsed_data = {
+            ...(it.parsed_data || {}),
+            title: info.title || it.parsed_data?.title || '',
+            nama_depan: info.nama_depan,
+            usia: info.usia || it.parsed_data?.usia || '',
+            no_rm: info.no_rm || it.parsed_data?.no_rm || '',
+            jaminan: info.jaminan || it.parsed_data?.jaminan || '',
+          }
+          modified = true
+          console.log(`✓ Koreksi otomatis nama konsulan: "${info.nama_depan}" (${info.usia})`)
+        }
+      }
+
+      // 2. Pastikan file tersimpan di media disk dan dataUrl selalu ada & tidak rusak
+      if (it.attachments) {
+        for (const a of it.attachments) {
+          if (!a.url && a.dataUrl && a.dataUrl.startsWith('data:image/')) {
+            const fileId = `${a.id || Math.random().toString(36).substring(7)}`
+            const fileName = `Foto_${fileId}.webp`
+            const filePath = path.join(mediaDir, fileName)
+            const b64 = a.dataUrl.split(',')[1]
+            if (b64) {
+              try {
+                const buf = Buffer.from(b64, 'base64')
+                fs.writeFileSync(filePath, buf)
+                a.url = `http://35.255.95.161:3001/media/${fileName}`
+                modified = true
+              } catch {}
+            }
+          }
+          // Jika a.url ada tetapi a.dataUrl kosong, buatkan preview dataUrl dari file lokal
+          if (a.url && (!a.dataUrl || a.dataUrl.length === 0)) {
             try {
-              const buf = Buffer.from(b64, 'base64')
-              fs.writeFileSync(filePath, buf)
-              a.url = `http://35.255.95.161:3001/media/${fileName}`
-              modified = true
+              const fName = path.basename(a.url)
+              const filePath = path.join(mediaDir, fName)
+              if (fs.existsSync(filePath)) {
+                const fBuf = fs.readFileSync(filePath)
+                const comp = await sharp(fBuf)
+                  .resize(800, 800, { fit: 'inside', withoutEnlargement: true })
+                  .webp({ quality: 65 })
+                  .toBuffer()
+                a.dataUrl = `data:image/webp;base64,${comp.toString('base64')}`
+                modified = true
+              }
             } catch {}
           }
         }
@@ -1404,10 +1598,18 @@ async function migrateAttachmentsToMediaDir() {
     }
     if (modified) {
       fs.writeFileSync(INBOX_JSON_PATH, JSON.stringify(inboxList, null, 2), 'utf-8')
-      console.log('✓ Seluruh lampiran berhasil dimigrasikan ke URL WebP Full HD!')
+      const distInbox = path.join(ROOT_DIR, 'dist', 'wa-inbox.json')
+      try {
+        if (fs.existsSync(path.dirname(distInbox))) {
+          fs.writeFileSync(distInbox, JSON.stringify(inboxList, null, 2), 'utf-8')
+        }
+      } catch {}
+      console.log('✓ Seluruh data antrean konsulan WA & lampiran berhasil disanitasi & diperbaiki!')
     }
+    // Sinkronkan antrean ke Cloud Firestore agar langsung terbaca di APK & Web
+    await syncInboxToFirestore(inboxList).catch((err) => console.warn('Sync firestore inbox startup warning:', err.message))
   } catch (e) {
-    console.warn('Migrasi media error:', e.message)
+    console.warn('Sanitasi inbox error:', e.message)
   }
 }
 
@@ -1419,6 +1621,6 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log(`   http://192.168.1.45:${PORT} (Akses dari HP via Wi-Fi)`)
   console.log(`=====================================================`)
   broadcastState()
-  migrateAttachmentsToMediaDir().catch(() => {})
+  sanitizeAndMigrateInbox().catch(() => {})
   initBaileys()
 })

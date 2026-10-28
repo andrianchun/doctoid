@@ -2,13 +2,13 @@ import { useState, useRef, useEffect } from 'react'
 import {
   ShieldCheck, RefreshCw, Lock as LockIcon, Trash2, Loader2, Fingerprint,
   KeyRound, Download, Upload, Database, CheckCircle2, Sparkles, DownloadCloud,
-  Cloud, AlertTriangle
+  Cloud, AlertTriangle, ArrowDownToLine, ArrowUpToLine
 } from 'lucide-react'
 import { Capacitor } from '@capacitor/core'
 import { CapacitorUpdater } from '@capgo/capacitor-updater'
 import { useUi } from '../store'
 import {
-  syncUserCloud, selfDestruct,
+  syncUserCloud, forcePushCloud, forcePullCloud, getDeviceId, selfDestruct,
   downloadBackupJson, restoreBackupJson
 } from '../sync'
 import { loginWithGoogle } from '../auth'
@@ -20,6 +20,10 @@ const inputCls =
 export default function SecuritySection({ notify }: { notify: (m: string) => void }) {
   const { user, setUser, setIsUnlocked } = useUi()
   const [busy, setBusy] = useState(false)
+  const [syncBusy, setSyncBusy] = useState(false)
+  const [lastSyncTime, setLastSyncTime] = useState<number>(
+    Number(localStorage.getItem('doctoid_last_push') ?? 0)
+  )
   const [bioOn, setBioOn] = useState(localStorage.getItem('doctoid_bio_enabled') === 'true')
   const [pinInput, setPinInput] = useState('')
   const [hasPin, setHasPin] = useState(!!localStorage.getItem('doctoid_screen_pin'))
@@ -183,6 +187,47 @@ export default function SecuritySection({ notify }: { notify: (m: string) => voi
       }
     } finally {
       setBusy(false)
+    }
+  }
+
+  useEffect(() => {
+    const handleSyncEvent = () => {
+      setLastSyncTime(Number(localStorage.getItem('doctoid_last_push') ?? 0))
+    }
+    window.addEventListener('doctoid_data_synced', handleSyncEvent)
+    return () => window.removeEventListener('doctoid_data_synced', handleSyncEvent)
+  }, [])
+
+  const handleForcePull = async () => {
+    if (!user) return
+    setSyncBusy(true)
+    try {
+      const res = await forcePullCloud(user.uid)
+      if (res.success) {
+        setLastSyncTime(Number(localStorage.getItem('doctoid_last_push') ?? Date.now()))
+        notify(res.message)
+      } else {
+        notify(`Gagal tarik cloud: ${res.message}`)
+      }
+    } catch (err: any) {
+      notify(`Gagal tarik cloud: ${err.message || 'Error'}`)
+    } finally {
+      setSyncBusy(false)
+    }
+  }
+
+  const handleForcePush = async () => {
+    if (!user) return
+    if (!window.confirm('Kirim seluruh data lokal perangkat ini ke Cloud? Pastikan data lokal ini adalah versi yang paling akurat.')) return
+    setSyncBusy(true)
+    try {
+      await forcePushCloud(user.uid)
+      setLastSyncTime(Number(localStorage.getItem('doctoid_last_push') ?? Date.now()))
+      notify('Data lokal berhasil dikirim ke Cloud ✓')
+    } catch (err: any) {
+      notify(`Gagal kirim cloud: ${err.message || 'Error'}`)
+    } finally {
+      setSyncBusy(false)
     }
   }
 
@@ -429,7 +474,7 @@ export default function SecuritySection({ notify }: { notify: (m: string) => voi
         </div>
 
         {user ? (
-          <div className="rounded-2xl bg-surface/70 p-3.5 space-y-2.5 border border-surface">
+          <div className="rounded-2xl bg-surface/70 p-3.5 space-y-3 border border-surface">
             <div className="flex items-center gap-3">
               {user.photoURL ? (
                 <img src={user.photoURL} alt="Avatar" className="size-10 rounded-xl object-cover ring-2 ring-primary/20" />
@@ -444,14 +489,40 @@ export default function SecuritySection({ notify }: { notify: (m: string) => voi
               </div>
             </div>
 
-            <p className="caption text-xs text-ink-muted leading-relaxed pt-1.5 border-t border-surface">
+            <div className="pt-2 border-t border-slate-200/70 text-[11px] text-ink-muted flex items-center justify-between">
+              <span>ID Perangkat: <span className="font-mono font-semibold text-ink">{getDeviceId().slice(0, 8)}</span></span>
+              <span>Terakhir: <span className="font-semibold text-ink">{lastSyncTime ? new Date(lastSyncTime).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : 'Baru saja'}</span></span>
+            </div>
+
+            <p className="caption text-xs text-ink-muted leading-relaxed">
               Data pasien, Faskes, ruangan, dan catatan medis tersinkronisasi otomatis secara dua arah (real-time) antar perangkat.
             </p>
+
+            <div className="flex gap-2 pt-1">
+              <button
+                type="button"
+                onClick={handleForcePull}
+                disabled={syncBusy}
+                className="flex-1 flex cursor-pointer items-center justify-center gap-1.5 rounded-xl bg-surface hover:bg-surface/80 border border-slate-200 text-ink px-3 py-2 text-xs font-bold transition-all disabled:opacity-50"
+              >
+                {syncBusy ? <Loader2 size={13} className="animate-spin text-primary" /> : <ArrowDownToLine size={13} className="text-primary" />}
+                <span>Tarik dari Cloud (Pull)</span>
+              </button>
+              <button
+                type="button"
+                onClick={handleForcePush}
+                disabled={syncBusy}
+                className="flex-1 flex cursor-pointer items-center justify-center gap-1.5 rounded-xl bg-primary/10 hover:bg-primary/20 text-primary-deep px-3 py-2 text-xs font-bold transition-all disabled:opacity-50"
+              >
+                {syncBusy ? <Loader2 size={13} className="animate-spin text-primary" /> : <ArrowUpToLine size={13} className="text-primary" />}
+                <span>Kirim ke Cloud (Push)</span>
+              </button>
+            </div>
           </div>
         ) : (
           <div className="rounded-2xl bg-amber-50/80 p-3.5 space-y-2.5 border border-amber-200/60">
             <p className="text-xs font-semibold text-amber-900 leading-relaxed">
-              Anda belum login akun Google di perangkat ini. Masuk dengan Google agar data otomatis tersinkronisasi secara real-time.
+              Anda belum login akun Google di perangkat ini. Masuk dengan Google agar data otomatis tersinkronisasi secara real-time antar PC dan HP.
             </p>
             <button
               type="button"

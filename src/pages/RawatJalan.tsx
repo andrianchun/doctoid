@@ -4,7 +4,7 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import {
   Stethoscope, Plus, Search,
   Edit3, Trash2, Eye, EyeOff, Settings as SettingsIcon,
-  ChevronDown, ChevronUp, X
+  ChevronDown, ChevronUp, X, BedDouble
 } from 'lucide-react'
 import { db, type PoliLog, type Hospital } from '../db'
 import { useUi } from '../store'
@@ -78,6 +78,23 @@ export default function RawatJalan() {
       await db.poliLogs.delete(log.id)
       notify('Sesi poli berhasil dihapus')
     }
+  }
+
+  const handleMrsFromPoli = (patientItem: { nama: string; no_rm?: string; jaminan?: 'BPJS' | 'Umum' | 'Asuransi'; keterangan?: string }, log: PoliLog) => {
+    navigate('/brainstorm', {
+      state: {
+        fromPoli: true,
+        poliPatient: {
+          nama: patientItem.nama,
+          no_rm: patientItem.no_rm || '',
+          jaminan: patientItem.jaminan || 'BPJS',
+          hospital_id: log.hospital_id,
+          keterangan: patientItem.keterangan || '',
+          tgl_mrs: log.tanggal || getLocalDateString(),
+        },
+        poliPhotoUrl: log.foto_urls?.[0] || null,
+      },
+    })
   }
 
   // Perhitungan tanggal
@@ -625,17 +642,28 @@ export default function RawatJalan() {
                                 {p.keterangan && <span>• {p.keterangan}</span>}
                               </div>
                             </div>
-                            <span
-                              className={`px-2 py-0.5 rounded-full text-[10px] font-bold shrink-0 ${
-                                p.jaminan === 'Umum'
-                                  ? 'bg-amber-100 text-amber-800'
-                                  : p.jaminan === 'Asuransi'
-                                  ? 'bg-purple-100 text-purple-800'
-                                  : 'bg-emerald-100 text-emerald-800'
-                              }`}
-                            >
-                              {p.jaminan || 'BPJS'}
-                            </span>
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              <span
+                                className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                  p.jaminan === 'Umum'
+                                    ? 'bg-amber-100 text-amber-800'
+                                    : p.jaminan === 'Asuransi'
+                                    ? 'bg-purple-100 text-purple-800'
+                                    : 'bg-emerald-100 text-emerald-800'
+                                }`}
+                              >
+                                {p.jaminan || 'BPJS'}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => handleMrsFromPoli(p, log)}
+                                className="text-[10.5px] font-bold text-teal-800 bg-teal-50 hover:bg-teal-100 border border-teal-200/80 rounded-xl px-2 py-1 flex items-center gap-1 shadow-2xs active:scale-95 transition-all cursor-pointer"
+                                title="Rujuk ke Rawat Inap (MRS)"
+                              >
+                                <BedDouble size={11} />
+                                <span>MRS</span>
+                              </button>
+                            </div>
                           </div>
                         ))}
                       </div>

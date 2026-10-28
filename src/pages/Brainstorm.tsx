@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useMemo, useCallback } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useLocation } from 'react-router-dom'
 import { createPortal } from 'react-dom'
 import { Capacitor, registerPlugin } from '@capacitor/core'
 import { App as CapApp } from '@capacitor/app'
@@ -22,7 +22,8 @@ const ShareReceiver: ShareReceiverPlugin | null = Capacitor.isNativePlatform()
 import {
   Mic,
   Loader2, X, ChevronDown, Send,
-  Search, Paperclip, Bell, ScanEye, RotateCw, Play
+  Search, Paperclip, Bell, ScanEye, RotateCw, Play,
+  Camera, FileImage, Sparkles
 } from 'lucide-react'
 import { db, type Jaminan, type TerapiItem, type DiagnosisItem, type RegexField, type Patient, type RawatEpisode, type PeranRawat, type InboxItem, type AttachmentTag } from '../db'
 import { DEPT_ALIH_RAWAT } from './PatientProfile'
@@ -33,7 +34,7 @@ import CustomSelect from '../components/CustomSelect'
 import { PemfisVisualizer } from '../components/PemfisVisualizer'
 import { ClinicalMediaCard } from '../components/ClinicalMediaCard'
 import { ImageViewerModal, type ViewerImage } from '../components/ImageViewerModal'
-import { lineToTerapi, localParse, parsePlanningLines, classifyFragment, synthesizeRegexRule, isGenderToken, isNonTherapyText, type LocalParseResult } from '../parser'
+import { lineToTerapi, localParse, parsePlanningLines, classifyFragment, synthesizeRegexRule, isGenderToken, isNonTherapyText, extractDemografi, type LocalParseResult } from '../parser'
 import { rapikan, analisisKasus } from '../ai'
 import { buatKonteks, catatTerapi, saranTerapi, type Suggestion } from '../styleLearning'
 import { formatDate, hariKe, getLocalDateString } from '../utils/dateFormat'
@@ -48,7 +49,8 @@ import {
   dismissAllInboxItems,
   syncWaInboxToDexie,
 } from '../utils/waInboxSync'
-import { splitTitleAndName, cleanNamaDepan } from '../utils/patientName'
+import { splitTitleAndName, cleanNamaDepan, isValidPatientName } from '../utils/patientName'
+import { convertToWebP } from '../utils/mediaCompress'
 
 const today = () => getLocalDateString()
 
@@ -171,6 +173,7 @@ const fileToBase64 = async (file: File): Promise<string> => {
 
 export default function Brainstorm() {
   const navigate = useNavigate()
+  const location = useLocation()
   const [raw, setRaw] = useState('')
   const [form, setForm] = useState<FormState>(emptyForm())
   const [busy, setBusy] = useState<'' | 'ocr' | 'ai' | 'analisis'>('')
@@ -365,25 +368,33 @@ export default function Brainstorm() {
         try {
           const { consult, advis } = splitConsultAndAdvis(item.raw_text || '')
           const { data, success } = localParse(consult || item.raw_text, regexRules)
-          if (success) {
-            const { title: resolvedTitle, nama_depan: resolvedNama } = splitTitleAndName(
-              data.nama_depan || form.nama_depan,
-              (data.title as any) || form.title
-            )
-            parsedSoapData = {
-              title: resolvedTitle,
-              nama_depan: resolvedNama,
-              usia: data.usia || form.usia,
-              no_rm: data.no_rm || form.no_rm,
-              jaminan: (data.jaminan as any) || form.jaminan,
-              S: data.S || form.S,
-              O_pemfis: data.O_pemfis || form.O_pemfis,
-              O_penunjang: data.O_penunjang || form.O_penunjang,
-              A: data.A && data.A.length > 0 ? data.A : form.A,
-              P: data.P && data.P.length > 0 ? data.P : form.P,
-            }
-          } else if (!item.parsed_data) {
-            parsedSoapData = { S: item.raw_text }
+          // SELALU ekstrak demografi secara mendalam dari teks konsul (mendukung baris slash, Tn/Ny tanpa titik, dll)
+          const demografi = extractDemografi(consult || item.raw_text, regexRules)
+
+          const candidateName = (data.nama_depan && isValidPatientName(data.nama_depan))
+            ? data.nama_depan
+            : (demografi.nama_depan && isValidPatientName(demografi.nama_depan))
+            ? demografi.nama_depan
+            : (item.parsed_data?.nama_depan && isValidPatientName(item.parsed_data.nama_depan) && !/atas nama|igd/i.test(item.parsed_data.nama_depan))
+            ? item.parsed_data.nama_depan
+            : form.nama_depan
+
+          const { title: resolvedTitle, nama_depan: resolvedNama } = splitTitleAndName(
+            candidateName,
+            (data.title || demografi.title || form.title) as any
+          )
+
+          parsedSoapData = {
+            title: resolvedTitle as any,
+            nama_depan: resolvedNama,
+            usia: data.usia || demografi.usia || item.parsed_data?.usia || form.usia,
+            no_rm: data.no_rm || demografi.no_rm || item.parsed_data?.no_rm || form.no_rm,
+            jaminan: (data.jaminan || demografi.jaminan || item.parsed_data?.jaminan || form.jaminan) as any,
+            S: data.S || (success ? '' : item.raw_text) || form.S,
+            O_pemfis: data.O_pemfis || form.O_pemfis,
+            O_penunjang: data.O_penunjang || form.O_penunjang,
+            A: data.A && data.A.length > 0 ? data.A : form.A,
+            P: data.P && data.P.length > 0 ? data.P : form.P,
           }
 
           // GABUNGKAN ADVIS DOKTER & KONSUL PERAWAT:
@@ -505,7 +516,7 @@ export default function Brainstorm() {
         .filter((p) => !isNonTherapyText(p.nama_item))
         .filter((p) => !(p.kategori === 'Diagnostik' && isAlreadyInPenunjang(p.nama_item)))
 
-      const rawName = item.parsed_data?.nama_depan || parsedSoapData.nama_depan || form.nama_depan
+      const rawName = parsedSoapData.nama_depan || form.nama_depan
       const { title: resolvedTitle, nama_depan: resolvedNama } = splitTitleAndName(
         rawName,
         (parsedSoapData.title as any) || form.title
@@ -831,6 +842,52 @@ export default function Brainstorm() {
       window.history.replaceState({}, document.title, window.location.pathname + window.location.hash)
     }
   }, [regexRules])
+
+  // Handle navigasi masuk dari Poli (Rawat Jalan) untuk pasien yang diputuskan MRS
+  useEffect(() => {
+    const state = location.state as any
+    if (state?.fromPoli && state?.poliPatient) {
+      const p = state.poliPatient
+      const { title: resolvedTitle, nama_depan: resolvedNama } = splitTitleAndName(p.nama)
+
+      setForm((prev) => ({
+        ...prev,
+        title: resolvedTitle || prev.title,
+        nama_depan: resolvedNama || prev.nama_depan,
+        no_rm: p.no_rm || prev.no_rm,
+        jaminan: (p.jaminan as any) || prev.jaminan || 'BPJS',
+        tgl_mrs: p.tgl_mrs || prev.tgl_mrs,
+        tgl_onset: p.tgl_mrs || prev.tgl_onset,
+        S: p.keterangan ? (prev.S && prev.S !== '-' ? `${prev.S}\n\nKeluhan Poli: ${p.keterangan}` : `Keluhan Poli: ${p.keterangan}`) : prev.S,
+      }))
+
+      if (p.hospital_id) {
+        setHospitalId(p.hospital_id)
+      }
+
+      if (state.poliPhotoUrl) {
+        setAttachments((prev) => {
+          const exists = prev.some((a) => a.dataUrl === state.poliPhotoUrl)
+          if (exists) return prev
+          return [
+            ...prev,
+            {
+              id: Math.random().toString(36).substring(7),
+              name: `Berkas_Poli_${p.nama}`,
+              type: 'image/jpeg',
+              dataUrl: state.poliPhotoUrl,
+              kategori: 'penunjang',
+              tag: 'Lab',
+            },
+          ]
+        })
+      }
+
+      flashHighlight(['nama_depan', 'no_rm', 'jaminan', 'S'], 'amber')
+      notify(`Pasien ${p.nama} dari Poli disiapkan untuk MRS. Silakan lengkapi atau foto layar SIMRS.`)
+      window.history.replaceState({}, document.title, window.location.pathname)
+    }
+  }, [location.state])
 
   // Autosave draft (debounced) tiap ada perubahan, supaya pindah tab gak ngilangin isian
   useEffect(() => {
@@ -1175,19 +1232,107 @@ export default function Brainstorm() {
     return () => window.removeEventListener('paste', onWindowPaste)
   }, [handlePaste])
 
-  const runOcr = async (file: File) => {
-    setBusy('ocr')
+  const runProcessSimrsImage = async (file: File) => {
+    setBusy('ai')
     try {
-      const { default: Tesseract } = await import('tesseract.js')
-      const { data } = await Tesseract.recognize(file, 'ind')
-      setRaw((r) => (r ? r + '\n' : '') + data.text.trim())
-      notify('Berhasil mengekstrak teks.')
+      notify('Menganalisis foto layar SIMRS / berkas SPRI...')
+      // 1. Kompresi gambar menjadi WebP max 1600px untuk kecepatan transmisi & ketajaman teks SIMRS
+      const webp = await convertToWebP(file, 1600, 0.85)
+
+      // 2. Siapkan prompt konteks spesifik untuk layar monitor komputer SIMRS / SPRI admisi MRS
+      const selectedHosp = hospitals.find((h) => h.id === hospitalId)
+      const contextPrompt = selectedHosp
+        ? `Faskes RS: ${selectedHosp.nama}\nFoto Layar Monitor Komputer SIMRS / Lembar SPRI Admisi Masuk Rumah Sakit (MRS)`
+        : `Foto Layar Monitor Komputer SIMRS / Lembar SPRI Admisi Masuk Rumah Sakit (MRS)`
+
+      // 3. Panggil rapikan multimodal AI
+      const r = await rapikan(contextPrompt, [{ type: 'image/webp', dataUrl: webp }], false)
+
+      const tglMrs = r.tgl_mrs || today()
+      const tglOnset = r.tgl_onset || tglMrs
+
+      // 4. Update form state dengan data hasil parse
+      const { title: resolvedTitle, nama_depan: resolvedNama } = splitTitleAndName(
+        r.nama_depan || form.nama_depan,
+        (r.title as any) || form.title
+      )
+
+      lastParsedRef.current = {
+        raw: '[Foto Layar SIMRS]',
+        hospitalId: hospitalId || undefined,
+        fields: {
+          nama_depan: resolvedNama,
+          no_rm: r.no_rm || '',
+          usia: r.usia || '',
+        },
+      }
+
+      setForm((prev) => ({
+        ...prev,
+        title: resolvedTitle,
+        nama_depan: resolvedNama,
+        usia: r.usia || prev.usia,
+        no_rm: r.no_rm || prev.no_rm,
+        jaminan: (r.jaminan as any) || prev.jaminan || 'BPJS',
+        tgl_mrs: tglMrs,
+        tgl_onset: tglOnset,
+        S: r.S ? (prev.S && prev.S.trim() !== '-' && prev.S.trim() !== '' ? prev.S + '\n\n' + r.S : r.S) : prev.S,
+        O_pemfis: r.O_pemfis ? (prev.O_pemfis ? prev.O_pemfis + '\n\n' + r.O_pemfis : r.O_pemfis) : prev.O_pemfis,
+        O_penunjang: r.O_penunjang ? (prev.O_penunjang ? prev.O_penunjang + '\n\n' + r.O_penunjang : r.O_penunjang) : prev.O_penunjang,
+        A: r.A && r.A.length > 0 ? r.A : prev.A,
+        P: r.P && r.P.length > 0
+          ? r.P.map((it) => ({
+              ...it,
+              tgl_mulai: tglMrs,
+              tgl_stop: null,
+              status: 'aktif' as const,
+            }))
+          : prev.P,
+      }))
+
+      // Simpan regex baru jika AI menemukan pola pengenalan baru
+      if (r.regex_baru) {
+        await simpanRegexBaru(r.regex_baru)
+      }
+
+      // Arsipkan foto ke Lampiran Penunjang agar dokter memiliki arsip visual asli
+      setAttachments((prev) => [
+        ...prev,
+        {
+          id: Math.random().toString(36).substring(7),
+          name: `SIMRS_${getLocalDateString()}`,
+          type: 'image/webp',
+          dataUrl: webp,
+          kategori: 'penunjang',
+          tag: 'Lab',
+        },
+      ])
+
+      flashHighlight(['nama_depan', 'usia', 'no_rm', 'S', 'O_pemfis', 'O_penunjang', 'A', 'P'], 'amber')
+      notify('Layar SIMRS berhasil diparsing ke data pasien MRS!')
     } catch (e: any) {
-      alert(e.message)
+      console.warn('Gagal memproses gambar SIMRS via AI multimodal:', e)
+      // Fallback ke Tesseract OCR jika offline atau API error
+      try {
+        setBusy('ocr')
+        notify('AI Vision terkendala, mencoba OCR lokal (Tesseract)...')
+        const { default: Tesseract } = await import('tesseract.js')
+        const { data } = await Tesseract.recognize(file, 'ind')
+        if (data.text.trim()) {
+          setRaw((r) => (r ? r + '\n' : '') + data.text.trim())
+          notify('Teks terekstrak ke kotak input mentah.')
+        } else {
+          notify('Teks tidak terdeteksi di gambar.')
+        }
+      } catch (errFallback: any) {
+        notify('Gagal membaca gambar: ' + (e?.message || 'Error'))
+      }
     } finally {
       setBusy('')
     }
   }
+
+  const runOcr = runProcessSimrsImage
 
   const handleClearConfirmed = async () => {
     setShowClearConfirmModal(false)
@@ -1726,6 +1871,43 @@ export default function Brainstorm() {
               <X size={18} />
             </button>
           )}
+        </div>
+      </div>
+
+      {/* Bilah Impor Cepat Layar SIMRS / SPRI Admisi MRS */}
+      <div className="flex items-center justify-between gap-2 bg-gradient-to-r from-blue-50/90 to-indigo-50/80 border border-blue-200/70 rounded-2xl px-3.5 py-2.5 shadow-2xs">
+        <div className="flex items-center gap-2 min-w-0">
+          <Sparkles size={14} className="text-primary shrink-0 animate-pulse" />
+          <div className="min-w-0">
+            <span className="text-xs font-bold text-slate-800 block truncate">
+              Impor Layar SIMRS / SPRI
+            </span>
+            <span className="text-[10px] text-slate-500 block truncate">
+              Auto-parse Identitas, S, O, A, dan P untuk pasien MRS
+            </span>
+          </div>
+        </div>
+        <div className="flex items-center gap-1.5 shrink-0">
+          <button
+            type="button"
+            disabled={busy === 'ai' || busy === 'ocr'}
+            onClick={() => ocrCameraRef.current?.click()}
+            className="text-xs font-bold bg-white hover:bg-slate-50 text-primary border border-primary/30 rounded-xl px-2.5 py-1.5 flex items-center gap-1 shadow-2xs active:scale-95 transition-all cursor-pointer disabled:opacity-50"
+            title="Foto monitor komputer SIMRS atau lembar SPRI admisi"
+          >
+            {busy === 'ai' ? <Loader2 size={12} className="animate-spin text-primary" /> : <Camera size={12} />}
+            <span>Foto Layar</span>
+          </button>
+          <button
+            type="button"
+            disabled={busy === 'ai' || busy === 'ocr'}
+            onClick={() => ocrGalleryRef.current?.click()}
+            className="text-xs font-bold bg-white hover:bg-slate-50 text-indigo-700 border border-indigo-200 rounded-xl px-2.5 py-1.5 flex items-center gap-1 shadow-2xs active:scale-95 transition-all cursor-pointer disabled:opacity-50"
+            title="Pilih foto monitor SIMRS dari galeri"
+          >
+            <FileImage size={12} />
+            <span>Galeri</span>
+          </button>
         </div>
       </div>
 
@@ -2638,7 +2820,7 @@ export default function Brainstorm() {
             {(busy === 'ocr' || listening || busy === 'ai' || busy === 'analisis') && (
               <div className="mb-2 flex items-center justify-center gap-2 caption font-medium text-ink bg-white/95 backdrop-blur-md px-3.5 py-1.5 rounded-full shadow-lg border border-primary/25 w-max mx-auto animate-in fade-in duration-150">
                 {busy === 'ocr' && <><Loader2 size={13} className="animate-spin text-primary" /> <span className="text-primary font-bold">Mengekstrak teks...</span></>}
-                {busy === 'ai' && <><Loader2 size={13} className="animate-spin text-primary" /> <span className="text-primary font-bold">Sedang merapikan catatan...</span></>}
+                {busy === 'ai' && <><Loader2 size={13} className="animate-spin text-primary" /> <span className="text-primary font-bold">Memproses dengan AI...</span></>}
                 {busy === 'analisis' && <><Loader2 size={13} className="animate-spin text-blue-600" /> <span className="text-blue-600 font-bold">Sedang menganalisis kasus...</span></>}
                 {listening && <><Mic size={13} className="animate-pulse text-rose-500" /> <span className="text-rose-500 font-bold">Mendengarkan...</span></>}
               </div>
@@ -2926,17 +3108,30 @@ export default function Brainstorm() {
               ) : (
                 sortedPendingInboxItems.map((item) => {
                   const { consult, advis } = splitConsultAndAdvis(item.raw_text || '')
+                  const fallbackDemo =
+                    !item.parsed_data?.nama_depan || /atas nama|igd/i.test(item.parsed_data.nama_depan)
+                      ? extractDemografi(item.raw_text || '', regexRules)
+                      : null
+
+                  const displayName = fallbackDemo?.nama_depan
+                    ? `${fallbackDemo.title ? fallbackDemo.title + ' ' : ''}${fallbackDemo.nama_depan}`
+                    : item.parsed_data?.nama_depan
+                    ? `${item.parsed_data.title ? item.parsed_data.title + ' ' : ''}${item.parsed_data.nama_depan}`
+                    : item.sender_name || 'Konsul Pasien'
+
+                  const displayAge = fallbackDemo?.usia || item.parsed_data?.usia
+
                   return (
                     <div key={item.id} className="pt-5 first:pt-0 space-y-3">
                       {/* Header item: Pengirim & Waktu */}
                       <div className="flex items-baseline justify-between gap-2">
                         <div className="min-w-0">
                           <span className="text-sm font-bold text-slate-900">
-                            {item.parsed_data?.nama_depan || item.sender_name || 'Konsul Pasien'}
+                            {displayName}
                           </span>
-                          {item.parsed_data?.usia && (
+                          {displayAge && (
                             <span className="ml-1.5 text-xs text-slate-500 font-medium">
-                              ({item.parsed_data.usia.replace(/\s*tahun/i, ' th')})
+                              ({displayAge.replace(/\s*tahun/i, ' th')})
                             </span>
                           )}
                         </div>
@@ -2978,8 +3173,13 @@ export default function Brainstorm() {
                                   onClick={() => {
                                     if (att.dataUrl || att.url) {
                                       const allAtts = (item.attachments || [])
-                                        .map((x: any) => ({ url: x.url || x.dataUrl, name: x.name, type: x.type }))
-                                      const cIdx = allAtts.findIndex((x: any) => (x.url === (att.url || att.dataUrl)))
+                                        .map((x: any) => ({
+                                          url: x.dataUrl || x.url,
+                                          dataUrl: x.dataUrl,
+                                          name: x.name,
+                                          type: x.type
+                                        }))
+                                      const cIdx = allAtts.findIndex((x: any) => (x.url === (att.dataUrl || att.url) || (x.dataUrl && x.dataUrl === att.dataUrl)))
                                       setViewerState({
                                         isOpen: true,
                                         images: allAtts,
@@ -3003,11 +3203,11 @@ export default function Brainstorm() {
                                   ) : isImg && (att.dataUrl || att.url) ? (
                                     <>
                                       <img
-                                        src={att.url || att.dataUrl}
+                                        src={att.dataUrl || att.url}
                                         alt={att.name || 'Lampiran'}
                                         onError={(e) => {
-                                          if (att.dataUrl && e.currentTarget.src !== att.dataUrl) {
-                                            e.currentTarget.src = att.dataUrl
+                                          if (att.url && e.currentTarget.src !== att.url) {
+                                            e.currentTarget.src = att.url
                                           }
                                         }}
                                         loading="lazy"

@@ -1,6 +1,7 @@
 import fs from 'fs'
 import path from 'path'
 import os from 'os'
+import zlib from 'zlib'
 
 async function deploy() {
   const cfgPath = path.join(os.homedir(), '.config', 'configstore', 'firebase-tools.json')
@@ -8,9 +9,9 @@ async function deploy() {
   const accessToken = cfg.tokens.access_token
 
   const serverJsPath = path.resolve('scripts', 'wa-bot', 'server.js')
-  const serverJsContent = fs.readFileSync(serverJsPath, 'utf8')
-  const serverB64 = Buffer.from(serverJsContent).toString('base64')
-  console.log('serverB64 length:', serverB64.length)
+  const serverJsContent = fs.readFileSync(serverJsPath)
+  const serverGzB64 = zlib.gzipSync(serverJsContent).toString('base64')
+  console.log('✓ server.js gzipped base64 length:', serverGzB64.length, 'bytes (limit 64KB)')
 
   const getRes = await fetch(
     'https://compute.googleapis.com/compute/v1/projects/docto-id/zones/us-central1-a/instances/doctoid-wa-bot',
@@ -24,8 +25,8 @@ async function deploy() {
 set -e
 echo "=== UPDATING DOCTOID WA BOT CODE ==="
 mkdir -p /opt/wa-bot
-cat << 'EOF' | base64 -d > /opt/wa-bot/server.js
-${serverB64}
+cat << 'EOF' | base64 -d | gunzip > /opt/wa-bot/server.js
+${serverGzB64}
 EOF
 cd /opt/wa-bot
 if command -v pm2 >/dev/null 2>&1; then
@@ -35,7 +36,7 @@ fi
 echo "=== WA BOT CODE UPDATED & RESTARTED SUCCESSFULLY ==="
 `
 
-  console.log('Sending setMetadata...')
+  console.log('Sending setMetadata (size: ' + startupScript.length + ' chars)...')
   const t0 = Date.now()
   const setRes = await fetch(
     'https://compute.googleapis.com/compute/v1/projects/docto-id/zones/us-central1-a/instances/doctoid-wa-bot/setMetadata',
@@ -67,7 +68,7 @@ echo "=== WA BOT CODE UPDATED & RESTARTED SUCCESSFULLY ==="
     }
   )
   console.log('Reset status:', rRes.status)
-  console.log('✓ VM successfully reset with updated Full-HD WebP/WebM code!')
+  console.log('✓ VM successfully reset with updated code!')
 }
 
 deploy().catch(console.error)

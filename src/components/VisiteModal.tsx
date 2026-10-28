@@ -66,8 +66,8 @@ export default function VisiteModal({
     setIsOcrBusy(true)
     setOcrMessage('Menganalisis foto layar SIMRS / chat WA...')
     try {
-      const webp = await convertToWebP(file, 1200, 0.85)
-      const promptContext = `Pasien: ${formatPatientDisplayName(patient.title, patient.nama_depan)}\nTanggal: ${tanggal}`
+      const webp = await convertToWebP(file, 1600, 0.85)
+      const promptContext = `Pasien: ${formatPatientDisplayName(patient.title, patient.nama_depan)}\nTanggal Visite: ${tanggal}\nFoto Layar Monitor Komputer SIMRS (CPPT / Catatan Perkembangan Pasien Terintegrasi / Instruksi Terapi Harian) atau Screenshot Chat WA Ruangan`
       const r = await rapikan(promptContext, [{ type: 'image/webp', dataUrl: webp }], false)
 
       if (r.S && r.S.trim()) {
