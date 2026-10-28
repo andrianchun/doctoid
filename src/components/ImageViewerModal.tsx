@@ -338,10 +338,14 @@ export const ImageViewerModal: React.FC<ImageViewerModalProps> = ({
             />
           ) : (
             <img
-              src={currentImage.url || (currentImage as any).dataUrl}
+              src={currentImage.dataUrl || currentImage.url}
               alt={currentImage.name || 'Lampiran'}
               onError={(e) => {
-                const fallback = (currentImage as any).dataUrl
+                const norm = (currentImage.url || '').replace(
+                  /http:\/\/(?:localhost|127\.0\.0\.1|192\.168\.\d+\.\d+):3001/i,
+                  'http://35.255.95.161:3001'
+                )
+                const fallback = (currentImage as any).dataUrl || norm
                 if (fallback && e.currentTarget.src !== fallback) {
                   e.currentTarget.src = fallback
                 }

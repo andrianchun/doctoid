@@ -1111,10 +1111,28 @@ const server = http.createServer(async (req, res) => {
 
   const url = new URL(req.url, `http://${req.headers.host}`)
 
-  // GET /media/:file (Streaming video & berkas foto/media klinis)
-  if (req.method === 'GET' && url.pathname.startsWith('/media/')) {
+  // GET/HEAD /media/:file (Streaming video & berkas foto/media klinis)
+  if ((req.method === 'GET' || req.method === 'HEAD') && url.pathname.startsWith('/media/')) {
     const fileName = path.basename(url.pathname)
     const filePath = path.join(PUBLIC_DIR, 'media', fileName)
+
+    if (!fs.existsSync(filePath)) {
+      // Rekonstruksi otomatis jika berkas belum ada di disk tapi tersimpan di inbox dataUrl
+      const matchedAtt = inboxList.flatMap((it) => it.attachments || []).find((a) => {
+        return (a.url && a.url.endsWith(fileName)) || a.name === fileName || (a.id && fileName.includes(a.id))
+      })
+      if (matchedAtt && matchedAtt.dataUrl && matchedAtt.dataUrl.includes('base64,')) {
+        try {
+          const b64 = matchedAtt.dataUrl.split('base64,')[1]
+          if (!fs.existsSync(path.dirname(filePath))) fs.mkdirSync(path.dirname(filePath), { recursive: true })
+          fs.writeFileSync(filePath, Buffer.from(b64, 'base64'))
+          console.log(`✓ Berhasil merekonstruksi media file dari cache dataUrl: ${fileName}`)
+        } catch (e) {
+          console.warn('Gagal rekonstruksi media:', e.message)
+        }
+      }
+    }
+
     if (fs.existsSync(filePath)) {
       const stat = fs.statSync(filePath)
       const ext = path.extname(fileName).toLowerCase()
@@ -1131,6 +1149,18 @@ const server = http.createServer(async (req, res) => {
       }
       const contentType = mimeTypes[ext] || 'application/octet-stream'
 
+      if (req.method === 'HEAD') {
+        res.writeHead(200, {
+          'Content-Length': stat.size,
+          'Content-Type': contentType,
+          'Accept-Ranges': 'bytes',
+          'Access-Control-Allow-Origin': '*',
+          'Cache-Control': 'public, max-age=86400',
+        })
+        res.end()
+        return
+      }
+
       const range = req.headers.range
       if (range) {
         const parts = range.replace(/bytes=/, '').split('-')
@@ -1143,6 +1173,7 @@ const server = http.createServer(async (req, res) => {
           'Accept-Ranges': 'bytes',
           'Content-Length': chunksize,
           'Content-Type': contentType,
+          'Access-Control-Allow-Origin': '*',
         })
         fileStream.pipe(res)
       } else {
@@ -1150,13 +1181,14 @@ const server = http.createServer(async (req, res) => {
           'Content-Length': stat.size,
           'Content-Type': contentType,
           'Accept-Ranges': 'bytes',
+          'Access-Control-Allow-Origin': '*',
           'Cache-Control': 'public, max-age=86400',
         })
         fs.createReadStream(filePath).pipe(res)
       }
       return
     }
-    res.writeHead(404)
+    res.writeHead(404, { 'Access-Control-Allow-Origin': '*', 'Content-Type': 'text/plain' })
     res.end('Media Not Found')
     return
   }
@@ -1560,23 +1592,26 @@ async function sanitizeAndMigrateInbox() {
         }
       }
 
-      // 2. Pastikan file tersimpan di media disk dan dataUrl selalu ada & tidak rusak
+      // 2. Pastikan seluruh berkas lampiran tersimpan di disk media dan dataUrl selalu valid
       if (it.attachments) {
         for (const a of it.attachments) {
-          if (!a.url && a.dataUrl && a.dataUrl.startsWith('data:image/')) {
-            const fileId = `${a.id || Math.random().toString(36).substring(7)}`
-            const fileName = `Foto_${fileId}.webp`
-            const filePath = path.join(mediaDir, fileName)
-            const b64 = a.dataUrl.split(',')[1]
-            if (b64) {
-              try {
-                const buf = Buffer.from(b64, 'base64')
-                fs.writeFileSync(filePath, buf)
-                a.url = `http://35.255.95.161:3001/media/${fileName}`
-                modified = true
-              } catch {}
+          const targetFileName = a.name || (a.url ? path.basename(a.url) : `Foto_${Date.now()}.webp`)
+          const targetFilePath = path.join(mediaDir, targetFileName)
+
+          // Jika berkas belum ada di disk tapi punya dataUrl base64, tulis ke disk sekarang
+          if (!fs.existsSync(targetFilePath) && a.dataUrl && a.dataUrl.includes('base64,')) {
+            try {
+              const b64 = a.dataUrl.split('base64,')[1]
+              if (!fs.existsSync(mediaDir)) fs.mkdirSync(mediaDir, { recursive: true })
+              fs.writeFileSync(targetFilePath, Buffer.from(b64, 'base64'))
+              a.url = `http://35.255.95.161:3001/media/${targetFileName}`
+              modified = true
+              console.log(`✓ Media direkonstruksi & ditulis ke disk server: ${targetFileName}`)
+            } catch (err) {
+              console.warn('Gagal menulis media ke disk:', err.message)
             }
           }
+
           // Jika a.url ada tetapi a.dataUrl kosong, buatkan preview dataUrl dari file lokal
           if (a.url && (!a.dataUrl || a.dataUrl.length === 0)) {
             try {

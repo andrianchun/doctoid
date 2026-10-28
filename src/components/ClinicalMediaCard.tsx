@@ -8,6 +8,7 @@ import {
   Volume2,
   Video as VideoIcon,
   Maximize2,
+  Image as ImageIcon,
 } from 'lucide-react'
 import { ImageViewerModal } from './ImageViewerModal'
 import { useUi } from '../store'
@@ -41,6 +42,14 @@ export const ClinicalMediaCard: React.FC<ClinicalMediaCardProps> = ({
   const [audioRef, setAudioRef] = useState<HTMLAudioElement | null>(null)
   const [showVideoModal, setShowVideoModal] = useState(false)
   const [showViewer, setShowViewer] = useState(false)
+
+  const normalizedUrl = (item.url || '').replace(
+    /http:\/\/(?:localhost|127\.0\.0\.1|192\.168\.\d+\.\d+):3001/i,
+    'http://35.255.95.161:3001'
+  )
+  const initialSrc = item.dataUrl || normalizedUrl
+  const [imgError, setImgError] = useState(!initialSrc)
+  const [triedFallback, setTriedFallback] = useState(false)
 
   const handleMasterUnlock = async () => {
     if (await verifyBiometric()) {
@@ -226,21 +235,39 @@ export const ClinicalMediaCard: React.FC<ClinicalMediaCardProps> = ({
   return (
     <>
       <div className="relative group size-20 sm:size-24 rounded-2xl bg-slate-100 border border-slate-300 overflow-hidden shrink-0 flex flex-col items-center justify-center shadow-xs">
-        <img
-          src={item.dataUrl || item.url}
-          alt={item.name}
-          onError={(e) => {
-            if (item.url && e.currentTarget.src !== item.url) {
-              e.currentTarget.src = item.url
-            }
-          }}
-          onClick={() => {
-            if (!isBlurred) setShowViewer(true)
-          }}
-          className={`size-full object-cover transition-all duration-200 ${
-            isBlurred ? 'blur-md scale-110' : 'cursor-pointer hover:scale-105'
-          }`}
-        />
+        {imgError ? (
+          <div
+            onClick={() => {
+              if (!isBlurred) setShowViewer(true)
+            }}
+            className="size-full flex flex-col items-center justify-center p-2 text-center bg-slate-100 hover:bg-slate-200 cursor-pointer transition-colors"
+            title={item.name || 'Buka Gambar'}
+          >
+            <ImageIcon size={22} className="text-slate-400 mb-1" />
+            <span className="text-[9px] font-semibold text-slate-600 truncate max-w-full leading-tight px-1">
+              {item.name || 'Lampiran'}
+            </span>
+          </div>
+        ) : (
+          <img
+            src={initialSrc}
+            alt={item.name}
+            onError={(e) => {
+              if (!triedFallback && normalizedUrl && e.currentTarget.src !== normalizedUrl) {
+                setTriedFallback(true)
+                e.currentTarget.src = normalizedUrl
+              } else {
+                setImgError(true)
+              }
+            }}
+            onClick={() => {
+              if (!isBlurred) setShowViewer(true)
+            }}
+            className={`size-full object-cover transition-all duration-200 ${
+              isBlurred ? 'blur-md scale-110' : 'cursor-pointer hover:scale-105'
+            }`}
+          />
+        )}
 
         {item.tag && !isBlurred && (
           <div className="absolute top-1 left-1 pointer-events-none z-10">

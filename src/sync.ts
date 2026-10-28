@@ -210,14 +210,14 @@ export async function exportTables(): Promise<Record<string, unknown[]>> {
     }
 
     // 3. progressNotes, penunjang, & poliLogs:
-    // HILANGKAN SELURUH base64 dataUrl besar dari cloud payload (tetap tersimpan utuh di Dexie lokal perangkat).
-    // Firestore Cloud hanya bertugas menyinkronkan data klinis medis, bukan file biner multi-megabyte.
+    // Pertahankan dataUrl berukuran thumbnail (<= 65KB, mis. WebP preview yang sangat tajam & hemat kuota).
+    // Hanya kosongkan jika ukuran dataUrl sangat besar (> 65KB) agar tidak melampaui batas 1 MB Firestore.
     if (t === 'progressNotes') {
       cleanedList = cleanedList.map((item: any) => {
         const safeItem = { ...item }
         if (Array.isArray(safeItem.attachments)) {
           safeItem.attachments = safeItem.attachments.map((att: any) => {
-            if (att.dataUrl && (att.dataUrl.length > 500 || att.dataUrl.startsWith('data:'))) {
+            if (att.dataUrl && att.dataUrl.length > 65000) {
               return { ...att, dataUrl: '' }
             }
             return att
@@ -232,16 +232,16 @@ export async function exportTables(): Promise<Record<string, unknown[]>> {
         const safeItem = { ...item }
         if (Array.isArray(safeItem.attachments)) {
           safeItem.attachments = safeItem.attachments.map((att: any) => {
-            if (att.dataUrl && (att.dataUrl.length > 500 || att.dataUrl.startsWith('data:'))) {
+            if (att.dataUrl && att.dataUrl.length > 65000) {
               return { ...att, dataUrl: '' }
             }
             return att
           })
         }
-        if (safeItem.dataUrl && (safeItem.dataUrl.length > 500 || safeItem.dataUrl.startsWith('data:'))) {
+        if (safeItem.dataUrl && safeItem.dataUrl.length > 65000) {
           safeItem.dataUrl = ''
         }
-        if (safeItem.foto_url && (safeItem.foto_url.length > 500 || safeItem.foto_url.startsWith('data:'))) {
+        if (safeItem.foto_url && safeItem.foto_url.length > 65000) {
           safeItem.foto_url = ''
         }
         return safeItem
@@ -253,7 +253,7 @@ export async function exportTables(): Promise<Record<string, unknown[]>> {
         const safeItem = { ...item }
         if (Array.isArray(safeItem.foto_urls)) {
           safeItem.foto_urls = safeItem.foto_urls.filter(
-            (url: string) => !url.startsWith('data:') && url.length < 500
+            (url: string) => !url.startsWith('data:') || url.length <= 65000
           )
         }
         return safeItem
