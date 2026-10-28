@@ -759,3 +759,63 @@ export function searchStandardDiagnoses(query: string, limit = 6): StandardDiagn
     return false
   }).slice(0, limit)
 }
+
+export interface StandardComplaint {
+  name: string
+  aliases?: string[]
+}
+
+export const STANDARD_COMPLAINTS: StandardComplaint[] = [
+  { name: 'pusing berputar', aliases: ['vertigo', 'pusing muter', 'kliyengan berputar'] },
+  { name: 'mual', aliases: ['enek', 'mau muntah', 'nausea'] },
+  { name: 'muntah', aliases: ['vomit', 'emesis', 'gumoh'] },
+  { name: 'lemah badan separuh kanan', aliases: ['hemiparesis kanan', 'lemah kanan', 'lumpuh kanan', 'badan separuh kanan', 'hemi kanan'] },
+  { name: 'lemah badan separuh kiri', aliases: ['hemiparesis kiri', 'lemah kiri', 'lumpuh kiri', 'badan separuh kiri', 'hemi kiri'] },
+  { name: 'lemah badan separuh', aliases: ['hemiparese', 'hemiparesis', 'lemas separuh', 'lumpuh separuh'] },
+  { name: 'pelo', aliases: ['bicara pelo', 'disartria', 'cadel', 'bicara tidak jelas', 'lidah kaku'] },
+  { name: 'merot', aliases: ['mulut merot', 'mulut mencong', 'mencong', 'wajah miring', 'muka mencong'] },
+  { name: 'nyeri kepala', aliases: ['sakit kepala', 'cephalgia', 'pusing', 'kepala cekot-cekot'] },
+  { name: 'demam', aliases: ['panas', 'febris', 'meriang', 'badan hangat', 'menggigil'] },
+  { name: 'sesak nafas', aliases: ['sesak', 'dyspnea', 'engap', 'megap-megap'] },
+  { name: 'kejang', aliases: ['kelojotan', 'konvulsi', 'step', 'seizure'] },
+  { name: 'penurunan kesadaran', aliases: ['tidak sadar', 'pingsan', 'tidur terus', 'somnolen', 'koma', 'apatis'] },
+  { name: 'kebas separuh kanan', aliases: ['kesemutan kanan', 'baal kanan', 'hemihipestesi kanan'] },
+  { name: 'kebas separuh kiri', aliases: ['kesemutan kiri', 'baal kiri', 'hemihipestesi kiri'] },
+  { name: 'kebas / kesemutan', aliases: ['baal', 'tebal', 'kesemutan', 'mati rasa'] },
+  { name: 'susah menelan', aliases: ['disfagia', 'tersedak', 'sulit menelan', 'sakit menelan'] },
+  { name: 'tersedak', aliases: ['keselek', 'choking'] },
+  { name: 'kaku kuduk', aliases: ['leher kaku', 'meningeal sign'] },
+  { name: 'nyeri dada', aliases: ['dada sesak', 'dada ampeg', 'angina', 'chest pain'] },
+  { name: 'nyeri perut', aliases: ['sakit perut', 'nyeri ulu hati', 'epigastrium', 'kram perut'] },
+  { name: 'BAB belum', aliases: ['belum bab', 'konstipasi', 'sembelit', 'susah bab'] },
+  { name: 'BAB hitam / melena', aliases: ['melena', 'bab darah', 'berak darah', 'tinja hitam'] },
+  { name: 'muntah darah', aliases: ['hematemesis', 'muntah kopi'] },
+  { name: 'diare', aliases: ['mencret', 'bab cair', 'bab encer'] },
+  { name: 'batuk', aliases: ['tussis', 'batuk dahak', 'batuk kering'] },
+  { name: 'batuk darah', aliases: ['hemoptoe', 'dahak darah'] },
+  { name: 'bengkak kedua kaki', aliases: ['edema tungkai', 'kaki bengkak', 'kaki gemuk'] },
+  { name: 'sulit tidur', aliases: ['insomnia', 'gelisah malam', 'tidak bisa tidur'] },
+  { name: 'cegukan', aliases: ['singultus', 'hiccup'] },
+  { name: 'nyeri pinggang', aliases: ['lboy', 'low back pain', 'boyok', 'encok'] },
+  { name: 'gelisah', aliases: ['gaduh gelisah', 'ngamuk', 'disorientasi', 'delirium'] },
+  { name: 'pandangan ganda / diplopia', aliases: ['diplopia', 'melihat dobel', 'kabur'] },
+]
+
+/**
+ * Pencarian prediktif keluhan klinis harian visite
+ */
+export function searchStandardComplaints(query: string, limit = 6): StandardComplaint[] {
+  const q = query.trim().toLowerCase()
+  if (!q) {
+    return STANDARD_COMPLAINTS.slice(0, limit)
+  }
+
+  const results: StandardComplaint[] = []
+  for (const item of STANDARD_COMPLAINTS) {
+    if (item.name.toLowerCase().includes(q) || item.aliases?.some((a) => a.includes(q))) {
+      results.push(item)
+      if (results.length >= limit) break
+    }
+  }
+  return results
+}

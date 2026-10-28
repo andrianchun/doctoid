@@ -3,9 +3,11 @@ import {
   searchStandardDrugs,
   searchStandardProcedures,
   searchStandardDiagnoses,
+  searchStandardComplaints,
   type StandardDrug,
   type StandardProcedure,
   type StandardDiagnosis,
+  type StandardComplaint,
 } from '../utils/clinicalDictionary'
 import { Sparkles, Check, ChevronRight } from 'lucide-react'
 
@@ -17,10 +19,11 @@ export interface PredictiveSelection {
 }
 
 interface PredictiveInputProps {
-  type: 'drug' | 'procedure' | 'diagnosis'
+  type: 'drug' | 'procedure' | 'diagnosis' | 'complaint'
   value: string
   onChange: (val: string) => void
   onSelect?: (item: PredictiveSelection) => void
+  onCustomSubmit?: () => void
   placeholder?: string
   procedureCategory?: 'Laboratorium' | 'Radiologi' | 'Lainnya'
   className?: string
@@ -37,6 +40,7 @@ export default function PredictiveInput({
   value,
   onChange,
   onSelect,
+  onCustomSubmit,
   placeholder,
   procedureCategory,
   className = '',
@@ -57,6 +61,9 @@ export default function PredictiveInput({
 
   // Compute suggestions based on type
   const suggestions = (() => {
+    if (type === 'complaint') {
+      return searchStandardComplaints(value, 6)
+    }
     if (!value || value.trim().length < 2) return []
     if (type === 'drug') {
       return searchStandardDrugs(value, 5)
@@ -83,7 +90,13 @@ export default function PredictiveInput({
   }, [])
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (!isOpen || suggestions.length === 0) return
+    if (!isOpen || suggestions.length === 0) {
+      if (e.key === 'Enter' && onCustomSubmit) {
+        e.preventDefault()
+        onCustomSubmit()
+      }
+      return
+    }
 
     if (e.key === 'ArrowDown') {
       e.preventDefault()
@@ -95,6 +108,9 @@ export default function PredictiveInput({
       if (selectedIndex >= 0 && selectedIndex < suggestions.length) {
         e.preventDefault()
         handlePick(suggestions[selectedIndex])
+      } else if (onCustomSubmit) {
+        e.preventDefault()
+        onCustomSubmit()
       }
     } else if (e.key === 'Escape') {
       setIsOpen(false)
@@ -102,7 +118,20 @@ export default function PredictiveInput({
     }
   }
 
-  const handlePick = (item: StandardDrug | StandardProcedure | StandardDiagnosis) => {
+  const handlePick = (item: StandardDrug | StandardProcedure | StandardDiagnosis | StandardComplaint) => {
+    if (type === 'complaint') {
+      const comp = item as StandardComplaint
+      onChange(comp.name)
+      if (onSelect) {
+        onSelect({
+          name: comp.name,
+          category: 'Keluhan',
+        })
+      }
+      setIsOpen(false)
+      return
+    }
+
     if (type === 'drug') {
       const drug = item as StandardDrug
       if (drug.commonDosages && drug.commonDosages.length > 0 && !activeDrugForDosage) {
@@ -176,7 +205,7 @@ export default function PredictiveInput({
           setActiveDrugForDosage(null)
         }}
         onFocus={() => {
-          if (value.trim().length >= 2) setIsOpen(true)
+          if (type === 'complaint' || value.trim().length >= 2) setIsOpen(true)
         }}
         onKeyDown={handleKeyDown}
         placeholder={placeholder}
@@ -189,7 +218,9 @@ export default function PredictiveInput({
         <div className="absolute left-0 right-0 top-full z-50 mt-1 max-h-72 overflow-y-auto rounded-2xl border border-slate-200/90 bg-white p-1.5 shadow-xl backdrop-blur-md animate-in fade-in duration-100 divide-y divide-slate-100">
           <div className="flex items-center gap-1.5 px-2.5 py-1 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
             <Sparkles size={11} className="text-primary" />
-            <span>Rekomendasi Standar {type === 'drug' ? 'Fornas' : type === 'procedure' ? 'ICD-9-CM' : 'ICD-10'}</span>
+            <span>
+              Rekomendasi {type === 'drug' ? 'Standar Fornas' : type === 'procedure' ? 'ICD-9-CM' : type === 'diagnosis' ? 'ICD-10' : 'Keluhan Visite'}
+            </span>
           </div>
 
           <div className="py-1 space-y-0.5">

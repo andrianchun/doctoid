@@ -234,15 +234,15 @@ export function extractAdmissionComplaints(raw?: string): string[] {
 
   // 3. Motorik / Lemah
   const lemasMatch = positiveText.match(
-    /\b(?:lemah|lemas|lumpuh|hemiparesis|hemiplegia)\s*(separuh\s*badan\s*(?:kiri|kanan)?|tangan\s*dan\s*kaki\s*(?:kiri|kanan)?|ekstr[ei]mitas\s*(?:kiri|kanan)?|sisi\s*(?:kiri|kanan)|kiri|kanan)?/i
+    /\b(?:lemah|lemas|lumpuh|hemiparesis|hemiplegia)\s*(?:badan\s*separuh|separuh\s*badan|ekstr[ei]mitas|sisi)?\s*(kiri|kanan)?/i
   )
   if (lemasMatch) {
-    const detail = (lemasMatch[1] || '').trim()
-    add(`lemah ${detail || 'separuh badan'}`.trim())
+    const sisi = (lemasMatch[1] || '').trim()
+    add(`lemah badan separuh${sisi ? ' ' + sisi : ''}`.trim())
   }
 
   // 4. Bicara
-  if (/\b(?:pelo|disartria)\b/i.test(positiveText)) add('bicara pelo')
+  if (/\b(?:pelo|disartria)\b/i.test(positiveText)) add('pelo')
   else if (/\bafasia\b/i.test(positiveText)) add('afasia')
   else if (/\b(?:bicara\s*berat|sulit\s*bicara)\b/i.test(positiveText)) add('bicara berat')
 
@@ -250,8 +250,8 @@ export function extractAdmissionComplaints(raw?: string): string[] {
   if (/\b(?:susah|sulit|gangguan)\s*menelan\b/i.test(positiveText)) add('susah menelan')
   else if (/\btersedak\b/i.test(positiveText)) add('tersedak')
 
-  // 6. Mulut Mencong
-  if (/\b(?:mencong|merot|wajah\s*asimetris|mulut\s*miring)\b/i.test(positiveText)) add('mulut mencong')
+  // 6. Mulut Mencong / Merot
+  if (/\b(?:merot|mencong|wajah\s*asimetris|mulut\s*miring|mulut\s*mencong)\b/i.test(positiveText)) add('merot')
 
   // 7. Kesadaran & Kejang
   if (/\b(?:penurunan\s*kesadaran|tidak\s*sadar|pingsan|somnolen|mengantuk\s*terus)\b/i.test(positiveText))
@@ -288,6 +288,126 @@ export function extractAdmissionComplaints(raw?: string): string[] {
   }
 
   return items
+}
+
+export type ComplaintStatus = '+' | '↓' | '-' | '↑'
+
+export interface VisiteComplaint {
+  id: string
+  text: string
+  status: ComplaintStatus
+}
+
+/**
+ * Mengekstrak teks S menjadi daftar item keluhan terstruktur untuk VisiteModal.
+ */
+export function parseSubjectiveToComplaints(rawS?: string): VisiteComplaint[] {
+  if (!rawS || !rawS.trim() || rawS.trim() === '-') return []
+
+  const trimmed = rawS.trim()
+
+  // Jika narasi panjang IGD / admission, ekstrak entity keluhan ringkas
+  const isLongAdmissionNarrative =
+    /\b(?:pasien\s*datang|ke\s*igd|diantar|rpd|rpo|alergi|saat\s*ini\s*mengeluh)\b/i.test(trimmed) ||
+    (!trimmed.includes('\n') && trimmed.length > 60)
+
+  if (isLongAdmissionNarrative) {
+    const extracted = extractAdmissionComplaints(trimmed)
+    return extracted.map((name, idx) => ({
+      id: `complaint-${idx}-${Date.now()}`,
+      text: name,
+      status: '+',
+    }))
+  }
+
+  // Jika sudah per baris atau dipisah koma / titik koma
+  const lines = trimmed
+    .split(/[\n;]+/)
+    .map((l) => l.trim())
+    .filter(Boolean)
+
+  const results: VisiteComplaint[] = []
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].replace(/^[-*•+]\s*/, '').trim()
+    if (!line || line === '-') continue
+
+    let status: ComplaintStatus = '+'
+    let cleanText = line
+
+    // Cek memberat (↑)
+    if (/\(?[↑▲]\)?|\b(?:memberat|memburuk|tambah|meningkat)\b/i.test(line)) {
+      status = '↑'
+      cleanText = line
+        .replace(/\(?[↑▲]\)?/g, '')
+        .replace(/\b(?:memberat|memburuk|tambah|meningkat)\b/gi, '')
+        .trim()
+    }
+    // Cek berkurang / membaik (↓)
+    else if (/\(?[↓▼]\)?|\b(?:membaik|berkurang|perbaikan|enakan)\b/i.test(line)) {
+      status = '↓'
+      cleanText = line
+        .replace(/\(?[↓▼]\)?/g, '')
+        .replace(/\b(?:membaik|berkurang|perbaikan|enakan)\b/gi, '')
+        .trim()
+    }
+    // Cek hilang (-)
+    else if (/\(-?\)|-\s*$|\b(?:hilang|reda|tidak\s*ada|sembuh)\b/i.test(line)) {
+      status = '-'
+      cleanText = line
+        .replace(/\(-?\)|-\s*$/g, '')
+        .replace(/\b(?:hilang|reda|tidak\s*ada|sembuh)\b/gi, '')
+        .trim()
+    }
+    // Cek masih ada (+)
+    else if (/\(\+?\)|[+]\s*$|\b(?:menetap|masih\s*ada|tetap)\b/i.test(line)) {
+      status = '+'
+      cleanText = line
+        .replace(/\(\+?\)|[+]\s*$/g, '')
+        .replace(/\b(?:menetap|masih\s*ada|tetap)\b/gi, '')
+        .trim()
+    }
+
+    cleanText = cleanText.replace(/^[+\-•*:]+\s*|[+\-:]+$/g, '').trim()
+    if (cleanText) {
+      results.push({
+        id: `complaint-${i}-${Date.now()}`,
+        text: cleanText,
+        status,
+      })
+    }
+  }
+
+  if (results.length === 0) {
+    const extracted = extractAdmissionComplaints(trimmed)
+    if (extracted.length > 0) {
+      return extracted.map((name, idx) => ({
+        id: `complaint-${idx}-${Date.now()}`,
+        text: name,
+        status: '+',
+      }))
+    }
+    results.push({
+      id: `complaint-0-${Date.now()}`,
+      text: trimmed,
+      status: '+',
+    })
+  }
+
+  return results
+}
+
+/**
+ * Memformat daftar item keluhan visite kembali menjadi teks narasi terstruktur untuk disimpan.
+ */
+export function formatComplaintsToSubjective(complaints: VisiteComplaint[]): string {
+  if (!complaints.length) return '-'
+  return complaints
+    .map((c) => {
+      const statusSymbol = c.status === '+' ? '(+)' : c.status === '↓' ? '(↓)' : c.status === '-' ? '(-)' : '(↑)'
+      return `- ${c.text.trim()} ${statusSymbol}`
+    })
+    .join('\n')
 }
 
 /**

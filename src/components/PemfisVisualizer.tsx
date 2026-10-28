@@ -108,35 +108,35 @@ export const PemfisVisualizer: React.FC<PemfisVisualizerProps> = ({
   return (
     <div className="w-full flex flex-col gap-2">
       {/* Header bar dengan Mode Switcher */}
-      <div className="flex items-center justify-between flex-wrap gap-2">
-        <label className="font-bold text-xs text-slate-900">
+      <div className="flex items-center justify-between gap-2 mb-1">
+        <label className="font-bold text-xs text-slate-800 truncate">
           {label}
         </label>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5 shrink-0">
           {/* Segmented Toggle: Teks vs Visual */}
-          <div className="flex items-center p-0.5 bg-slate-100 rounded-xl text-xs font-bold border border-slate-200">
+          <div className="flex items-center p-0.5 bg-slate-100 rounded-lg text-xs font-semibold border border-slate-200/60">
             <button
               type="button"
               onClick={() => setMode('text')}
-              className={`px-2.5 py-1 rounded-lg transition-all cursor-pointer ${
+              className={`px-2 py-0.5 rounded-md transition-all cursor-pointer text-[11px] ${
                 mode === 'text'
-                  ? 'bg-white text-primary shadow-xs'
+                  ? 'bg-white text-primary font-bold shadow-xs'
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              Narasi Teks
+              Teks
             </button>
             <button
               type="button"
               onClick={handleSwitchToVisual}
-              className={`px-2.5 py-1 rounded-lg transition-all cursor-pointer ${
+              className={`px-2 py-0.5 rounded-md transition-all cursor-pointer text-[11px] ${
                 mode === 'visual'
-                  ? 'bg-primary text-white shadow-xs'
+                  ? 'bg-primary text-white font-bold shadow-xs'
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              Model Visual
+              Visual
             </button>
           </div>
 
@@ -151,7 +151,7 @@ export const PemfisVisualizer: React.FC<PemfisVisualizerProps> = ({
           onChange={(e) => onChange(e.target.value)}
           placeholder={placeholder}
           rows={rows}
-          className={`w-full rounded-2xl border border-slate-200 p-3 text-xs leading-relaxed text-ink placeholder:text-ink-muted/40 focus:border-primary focus:ring-1 focus:ring-primary/20 outline-none resize-y ${highlightClass} ${className}`}
+          className={`w-full rounded-xl border border-slate-200 bg-slate-50/40 p-2.5 text-xs leading-relaxed text-slate-900 placeholder:text-slate-400 focus:bg-white focus:border-primary focus:ring-1 focus:ring-primary/20 outline-none resize-none transition-colors ${highlightClass} ${className}`}
         />
       )}
 

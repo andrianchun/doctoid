@@ -219,13 +219,15 @@ input, textarea, [contenteditable="true"] {
   background: rgba(100, 116, 139, 0.45);
 }
 
-/* Sembunyikan scrollbar untuk elemen dengan kelas .hide-scrollbar */
-.hide-scrollbar::-webkit-scrollbar {
+/* Sembunyikan scrollbar untuk elemen dengan kelas .hide-scrollbar atau .no-scrollbar */
+.hide-scrollbar::-webkit-scrollbar,
+.no-scrollbar::-webkit-scrollbar {
   display: none;
   width: 0;
   height: 0;
 }
-.hide-scrollbar {
+.hide-scrollbar,
+.no-scrollbar {
   -ms-overflow-style: none;
   scrollbar-width: none;
 }

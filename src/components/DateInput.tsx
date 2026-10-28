@@ -12,6 +12,7 @@ export interface DateInputProps {
   id?: string
   name?: string
   autoFocus?: boolean
+  hideIcon?: boolean
 }
 
 function checkShouldOpenUpward(el: HTMLElement | null, minRequiredBelow = 180, minRequiredAbove = 140): boolean {
@@ -68,6 +69,7 @@ export default function DateInput({
   id,
   name,
   autoFocus,
+  hideIcon = false,
 }: DateInputProps) {
   const [text, setText] = useState(() => toDisplayDate(value))
   const [showMenu, setShowMenu] = useState(false)
@@ -186,18 +188,21 @@ export default function DateInput({
         required={required}
         disabled={disabled}
         autoFocus={autoFocus}
-        className={`${className} pr-9 font-medium tracking-wide`}
+        onDoubleClick={hideIcon ? openNativePicker : undefined}
+        className={`w-full font-medium ${hideIcon ? '' : 'pr-6'} ${className}`}
       />
 
-      <button
-        type="button"
-        onClick={toggleMenu}
-        disabled={disabled}
-        className="absolute right-1 top-1/2 -translate-y-1/2 size-7 rounded-lg flex items-center justify-center text-ink-muted hover:text-primary hover:bg-slate-100 transition-colors cursor-pointer"
-        title="Pilih tanggal"
-      >
-        <Calendar size={15} className="text-slate-400 hover:text-primary" />
-      </button>
+      {!hideIcon && (
+        <button
+          type="button"
+          onClick={toggleMenu}
+          disabled={disabled}
+          className="absolute right-0.5 top-1/2 -translate-y-1/2 size-6 rounded-md flex items-center justify-center text-ink-muted hover:text-primary hover:bg-slate-100 transition-colors cursor-pointer"
+          title="Pilih tanggal"
+        >
+          <Calendar size={13} className="text-slate-400 hover:text-primary" />
+        </button>
+      )}
 
       {/* Hidden native date input for when user selects 'Kalender Lengkap' */}
       <input
