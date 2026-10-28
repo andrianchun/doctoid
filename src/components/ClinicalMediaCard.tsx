@@ -30,13 +30,30 @@ interface ClinicalMediaCardProps {
   defaultBlurred?: boolean
 }
 
-export function normalizeMediaUrl(url?: string): string {
-  if (!url) return ''
-  const match = url.match(/\/media\/([^/?#]+)/i)
-  if (match) {
-    return `/media/${match[1]}`
+export function normalizeMediaUrl(url?: string, name?: string): string {
+  if (url && url.startsWith('data:')) return url
+  if (url && url.startsWith('blob:')) return url
+
+  // Tangkap nama berkas media klinis dari URL atau nama file
+  const candidate = `${url || ''} ${name || ''}`
+  const fileMatch = candidate.match(/(?:Foto_|file_|video_|audio_)[^/?#\s]+\.(?:webp|jpg|jpeg|png|mp4|webm|m4a|ogg|opus|pdf)/i)
+  if (fileMatch) {
+    return `https://docto-id.web.app/media/${fileMatch[0]}`
   }
-  return url
+
+  const mediaMatch = (url || '').match(/\/media\/([^/?#\s]+)/i)
+  if (mediaMatch) {
+    return `https://docto-id.web.app/media/${mediaMatch[1]}`
+  }
+
+  if (url && (url.includes(':3001') || url.startsWith('http://35.255.95.161'))) {
+    const filename = url.split('/').pop()?.split('?')[0]
+    if (filename && /\.(webp|jpg|jpeg|png|mp4|webm|m4a|ogg|opus|pdf)$/i.test(filename)) {
+      return `https://docto-id.web.app/media/${filename}`
+    }
+  }
+
+  return url || ''
 }
 
 export const ClinicalMediaCard: React.FC<ClinicalMediaCardProps> = ({
@@ -52,12 +69,8 @@ export const ClinicalMediaCard: React.FC<ClinicalMediaCardProps> = ({
   const [showVideoModal, setShowVideoModal] = useState(false)
   const [showViewer, setShowViewer] = useState(false)
 
-  const normalizedUrl = normalizeMediaUrl(item.url)
-  const remoteVmUrl = (item.url || '').replace(
-    /http:\/\/(?:localhost|127\.0\.0\.1|192\.168\.\d+\.\d+):3001/i,
-    'http://35.255.95.161:3001'
-  )
-  const initialSrc = item.dataUrl || normalizedUrl || remoteVmUrl
+  const normalizedUrl = normalizeMediaUrl(item.url, item.name)
+  const initialSrc = item.dataUrl || normalizedUrl
   const [imgError, setImgError] = useState(!initialSrc)
   const [triedFallback, setTriedFallback] = useState(false)
 

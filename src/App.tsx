@@ -19,7 +19,7 @@ import PatientProfile from './pages/PatientProfile'
 import Settings from './pages/Settings'
 import DoctorProfile from './pages/DoctorProfile'
 import { initAuthListener } from './auth'
-import { checkRevoked, initRealtimeCloudSync, fbConfigured, autoRecoverPreSyncBackup } from './sync'
+import { checkRevoked, initRealtimeCloudSync, fbConfigured, autoRecoverPreSyncBackup, autoRepairMissingAttachmentMedia } from './sync'
 import { useWaInboxSync } from './utils/waInboxSync'
 import { sanitizeExistingPatientNamesInDb } from './utils/patientName'
 import { sanitizeMedicalRecordsInDb } from './utils/sanitizeRecords'
@@ -92,6 +92,7 @@ export default function App() {
     autoRecoverPreSyncBackup()
     sanitizeExistingPatientNamesInDb()
     sanitizeMedicalRecordsInDb()
+    autoRepairMissingAttachmentMedia()
   }, [])
 
   // Auto-lock idle: reset timer di tiap interaksi user, kunci layar jika diam 5 menit

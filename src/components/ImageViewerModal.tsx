@@ -40,6 +40,7 @@ export const ImageViewerModal: React.FC<ImageViewerModalProps> = ({
   const { unmasked, setUnmasked } = useUi()
   const [currentIndex, setCurrentIndex] = useState(initialIndex)
   const [scale, setScale] = useState(1)
+  const [imgError, setImgError] = useState(false)
 
   const handleToggleMask = async () => {
     if (unmasked) {
@@ -66,6 +67,7 @@ export const ImageViewerModal: React.FC<ImageViewerModalProps> = ({
       setScale(1)
       setPosition({ x: 0, y: 0 })
       setRotation(0)
+      setImgError(false)
     }
   }, [isOpen, initialIndex, images.length])
 
@@ -74,6 +76,7 @@ export const ImageViewerModal: React.FC<ImageViewerModalProps> = ({
     setScale(1)
     setPosition({ x: 0, y: 0 })
     setRotation(0)
+    setImgError(false)
   }, [])
 
   const handlePrev = useCallback(() => {
@@ -227,10 +230,11 @@ export const ImageViewerModal: React.FC<ImageViewerModalProps> = ({
   }
 
   const handleDownload = () => {
-    if (!currentImage.url) return
+    const src = currentImage.dataUrl || normalizeMediaUrl(currentImage.url, currentImage.name) || currentImage.url
+    if (!src) return
     const a = document.createElement('a')
-    a.href = currentImage.url
-    a.download = currentImage.name || `lampiran-${Date.now()}.jpg`
+    a.href = src
+    a.download = currentImage.name || `lampiran-${Date.now()}.webp`
     document.body.appendChild(a)
     a.click()
     document.body.removeChild(a)
@@ -337,19 +341,37 @@ export const ImageViewerModal: React.FC<ImageViewerModalProps> = ({
                 !unmasked ? 'blur-md scale-105' : ''
               }`}
             />
+          ) : imgError ? (
+            <div className="flex flex-col items-center justify-center p-6 text-center text-slate-300 bg-slate-900/90 rounded-2xl border border-slate-800 max-w-sm mx-4 space-y-3 shadow-2xl">
+              <span className="text-xs font-bold text-slate-200 truncate max-w-full">
+                {currentImage.name || 'Berkas Lampiran'}
+              </span>
+              <p className="text-[11px] text-slate-400 leading-relaxed">
+                Gambar lampiran sedang disinkronkan dari server atau perangkat sedang offline.
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  setImgError(false)
+                }}
+                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-teal-400 font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer"
+              >
+                <RefreshCw size={14} />
+                <span>Coba Muat Ulang</span>
+              </button>
+            </div>
           ) : (
             <img
-              src={currentImage.dataUrl || normalizeMediaUrl(currentImage.url) || currentImage.url}
+              src={currentImage.dataUrl || normalizeMediaUrl(currentImage.url, currentImage.name) || currentImage.url}
               alt={currentImage.name || 'Lampiran'}
               onError={(e) => {
-                const norm = normalizeMediaUrl(currentImage.url)
-                const vmUrl = (currentImage.url || '').replace(
-                  /http:\/\/(?:localhost|127\.0\.0\.1|192\.168\.\d+\.\d+):3001/i,
-                  'http://35.255.95.161:3001'
-                )
-                const fallback = (currentImage as any).dataUrl || norm || vmUrl
-                if (fallback && e.currentTarget.src !== fallback) {
-                  e.currentTarget.src = fallback
+                const norm = normalizeMediaUrl(currentImage.url, currentImage.name)
+                if (norm && e.currentTarget.src !== norm) {
+                  e.currentTarget.src = norm
+                } else if ((currentImage as any).dataUrl && e.currentTarget.src !== (currentImage as any).dataUrl) {
+                  e.currentTarget.src = (currentImage as any).dataUrl
+                } else {
+                  setImgError(true)
                 }
               }}
               draggable={false}

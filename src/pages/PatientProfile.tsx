@@ -40,7 +40,7 @@ import PredictiveInput from '../components/PredictiveInput'
 import { extractClinicalMetrics } from '../utils/clinicalExtractor'
 import CustomSelect, { type SelectOption } from '../components/CustomSelect'
 import { PemfisVisualizer } from '../components/PemfisVisualizer'
-import { ClinicalMediaCard } from '../components/ClinicalMediaCard'
+import { ClinicalMediaCard, normalizeMediaUrl } from '../components/ClinicalMediaCard'
 import { ImageViewerModal, type ViewerImage } from '../components/ImageViewerModal'
 import { isNonTherapyText } from '../parser'
 
@@ -1920,7 +1920,8 @@ export default function PatientProfile() {
                             type="button"
                             onClick={() => {
                               const mediaAtts = (item.attachments || []).map((a) => ({
-                                url: a.url || a.dataUrl,
+                                url: normalizeMediaUrl(a.url, a.name) || a.dataUrl,
+                                dataUrl: a.dataUrl,
                                 name: `${item.nama_pemeriksaan} - ${a.name}`,
                                 type: a.type,
                               }))
@@ -1941,10 +1942,13 @@ export default function PatientProfile() {
                             ) : isImg ? (
                               <>
                                 <img
-                                  src={att.url || att.dataUrl}
+                                  src={att.dataUrl || normalizeMediaUrl(att.url, att.name) || att.url}
                                   alt={att.name || 'Lampiran'}
                                   onError={(e) => {
-                                    if (att.dataUrl && e.currentTarget.src !== att.dataUrl) {
+                                    const norm = normalizeMediaUrl(att.url, att.name)
+                                    if (norm && e.currentTarget.src !== norm) {
+                                      e.currentTarget.src = norm
+                                    } else if (att.dataUrl && e.currentTarget.src !== att.dataUrl) {
                                       e.currentTarget.src = att.dataUrl
                                     }
                                   }}

@@ -32,7 +32,7 @@ import ResizableTextarea from '../components/ResizableTextarea'
 import AttachmentMenu from '../components/AttachmentMenu'
 import CustomSelect from '../components/CustomSelect'
 import { PemfisVisualizer } from '../components/PemfisVisualizer'
-import { ClinicalMediaCard } from '../components/ClinicalMediaCard'
+import { ClinicalMediaCard, normalizeMediaUrl } from '../components/ClinicalMediaCard'
 import { ImageViewerModal, type ViewerImage } from '../components/ImageViewerModal'
 import { lineToTerapi, localParse, parsePlanningLines, classifyFragment, synthesizeRegexRule, isGenderToken, isNonTherapyText, extractDemografi, type LocalParseResult } from '../parser'
 import { rapikan, analisisKasus } from '../ai'
@@ -447,15 +447,20 @@ export default function Brainstorm() {
             }
           )
           if (visionRes.classifiedAttachments?.length > 0) {
-            processedAttachments = visionRes.classifiedAttachments.map((ca, idx) => ({
-              id: ca.id || `att-${Date.now()}-${idx}`,
-              name: ca.name || 'Lampiran',
-              type: ca.type || 'image/jpeg',
-              dataUrl: ca.dataUrl,
-              url: (ca as any).url || item.attachments?.[idx]?.url,
-              kategori: (ca.kategori as Kategori) || 'penunjang',
-              tag: ca.tag,
-            }))
+            processedAttachments = visionRes.classifiedAttachments.map((ca, idx) => {
+              const rawAtt = item.attachments?.[idx]
+              const rawUrl = (ca as any).url || rawAtt?.url
+              const attName = ca.name || rawAtt?.name || 'Lampiran'
+              return {
+                id: ca.id || `att-${Date.now()}-${idx}`,
+                name: attName,
+                type: ca.type || 'image/jpeg',
+                dataUrl: ca.dataUrl || rawAtt?.dataUrl || '',
+                url: normalizeMediaUrl(rawUrl, attName),
+                kategori: (ca.kategori as Kategori) || 'penunjang',
+                tag: ca.tag,
+              }
+            })
           }
           if (visionRes.pdxSuggestions?.length > 0) {
             visionPdx = visionRes.pdxSuggestions
@@ -474,8 +479,8 @@ export default function Brainstorm() {
             id: att.id || `att-${Date.now()}-${idx}`,
             name: att.name || 'Lampiran',
             type: att.type || 'image/jpeg',
-            dataUrl: att.dataUrl,
-            url: att.url,
+            dataUrl: att.dataUrl || '',
+            url: normalizeMediaUrl(att.url, att.name),
             kategori: (att.kategori as Kategori) || 'penunjang',
             tag: att.tag,
           }))
@@ -3174,12 +3179,13 @@ export default function Brainstorm() {
                                     if (att.dataUrl || att.url) {
                                       const allAtts = (item.attachments || [])
                                         .map((x: any) => ({
-                                          url: x.dataUrl || x.url,
+                                          url: normalizeMediaUrl(x.url, x.name) || x.dataUrl || '',
                                           dataUrl: x.dataUrl,
                                           name: x.name,
                                           type: x.type
                                         }))
-                                      const cIdx = allAtts.findIndex((x: any) => (x.url === (att.dataUrl || att.url) || (x.dataUrl && x.dataUrl === att.dataUrl)))
+                                      const currentNorm = normalizeMediaUrl(att.url, att.name)
+                                      const cIdx = allAtts.findIndex((x: any) => (x.url === currentNorm || (x.dataUrl && x.dataUrl === att.dataUrl)))
                                       setViewerState({
                                         isOpen: true,
                                         images: allAtts,
@@ -3203,11 +3209,14 @@ export default function Brainstorm() {
                                   ) : isImg && (att.dataUrl || att.url) ? (
                                     <>
                                       <img
-                                        src={att.dataUrl || att.url}
+                                        src={att.dataUrl || normalizeMediaUrl(att.url, att.name) || att.url}
                                         alt={att.name || 'Lampiran'}
                                         onError={(e) => {
-                                          if (att.url && e.currentTarget.src !== att.url) {
-                                            e.currentTarget.src = att.url
+                                          const norm = normalizeMediaUrl(att.url, att.name)
+                                          if (norm && e.currentTarget.src !== norm) {
+                                            e.currentTarget.src = norm
+                                          } else if (att.dataUrl && e.currentTarget.src !== att.dataUrl) {
+                                            e.currentTarget.src = att.dataUrl
                                           }
                                         }}
                                         loading="lazy"

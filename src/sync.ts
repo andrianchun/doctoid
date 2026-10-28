@@ -8,6 +8,7 @@ import {
 import { cachePatients, cacheAllPatients, cacheNotes } from './utils/dataCache'
 import { isNonTherapyText } from './parser'
 import { getLocalDateString } from './utils/dateFormat'
+import { normalizeMediaUrl } from './components/ClinicalMediaCard'
 
 /* Zero-knowledge sync & Cloud sync engine dengan proteksi Wipe-Out, Auto-Trigger, & Anti-Pingpong. */
 
@@ -293,7 +294,32 @@ export async function autoRepairMissingAttachmentMedia(): Promise<number> {
       }
     }
 
-    if (mediaMap.size === 0) return 0
+    // Jika antrean lokal kosong/belum memiliki dataUrl WebP, ambil fallback dari wa-inbox.json CDN
+    if (mediaMap.size === 0) {
+      try {
+        const res = await fetch('https://docto-id.web.app/wa-inbox.json', { signal: AbortSignal.timeout(3000) })
+        if (res.ok) {
+          const remoteList = await res.json()
+          if (Array.isArray(remoteList)) {
+            for (const item of remoteList) {
+              if (Array.isArray(item.attachments)) {
+                for (const att of item.attachments) {
+                  if (att.dataUrl && att.dataUrl.startsWith('data:image/')) {
+                    if (att.name) mediaMap.set(att.name, att.dataUrl)
+                    if (att.url) {
+                      mediaMap.set(att.url, att.dataUrl)
+                      const bName = att.url.split('/').pop()?.split('?')[0]
+                      if (bName) mediaMap.set(bName, att.dataUrl)
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      } catch {}
+    }
+
     let repairedCount = 0
 
     // 1. Periksa progressNotes
@@ -302,12 +328,22 @@ export async function autoRepairMissingAttachmentMedia(): Promise<number> {
         let noteChanged = false
         const newAtts = n.attachments.map((att: any) => {
           const bName = att.name || (att.url ? att.url.split('/').pop()?.split('?')[0] : '')
+          const normUrl = normalizeMediaUrl(att.url, att.name)
+          let updatedAtt = { ...att }
+
+          // Perbaiki URL ke CDN HTTPS
+          if (normUrl && normUrl !== att.url) {
+            updatedAtt.url = normUrl
+            noteChanged = true
+          }
+
+          // Pulihkan dataUrl jika hilang
           if (!att.dataUrl && (mediaMap.has(att.name) || mediaMap.has(bName) || (att.url && mediaMap.has(att.url)))) {
             const restored = mediaMap.get(att.name) || mediaMap.get(bName) || mediaMap.get(att.url)!
+            updatedAtt.dataUrl = restored
             noteChanged = true
-            return { ...att, dataUrl: restored }
           }
-          return att
+          return updatedAtt
         })
         if (noteChanged && n.id != null) {
           await db.progressNotes.update(n.id, { attachments: newAtts })
@@ -322,12 +358,22 @@ export async function autoRepairMissingAttachmentMedia(): Promise<number> {
         let penChanged = false
         const newAtts = p.attachments.map((att: any) => {
           const bName = att.name || (att.url ? att.url.split('/').pop()?.split('?')[0] : '')
+          const normUrl = normalizeMediaUrl(att.url, att.name)
+          let updatedAtt = { ...att }
+
+          // Perbaiki URL ke CDN HTTPS
+          if (normUrl && normUrl !== att.url) {
+            updatedAtt.url = normUrl
+            penChanged = true
+          }
+
+          // Pulihkan dataUrl jika hilang
           if (!att.dataUrl && (mediaMap.has(att.name) || mediaMap.has(bName) || (att.url && mediaMap.has(att.url)))) {
             const restored = mediaMap.get(att.name) || mediaMap.get(bName) || mediaMap.get(att.url)!
+            updatedAtt.dataUrl = restored
             penChanged = true
-            return { ...att, dataUrl: restored }
           }
-          return att
+          return updatedAtt
         })
         if (penChanged && p.id != null) {
           await db.penunjang.update(p.id, { attachments: newAtts })
