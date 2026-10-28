@@ -30,6 +30,15 @@ interface ClinicalMediaCardProps {
   defaultBlurred?: boolean
 }
 
+export function normalizeMediaUrl(url?: string): string {
+  if (!url) return ''
+  const match = url.match(/\/media\/([^/?#]+)/i)
+  if (match) {
+    return `/media/${match[1]}`
+  }
+  return url
+}
+
 export const ClinicalMediaCard: React.FC<ClinicalMediaCardProps> = ({
   item,
   onDelete,
@@ -43,11 +52,12 @@ export const ClinicalMediaCard: React.FC<ClinicalMediaCardProps> = ({
   const [showVideoModal, setShowVideoModal] = useState(false)
   const [showViewer, setShowViewer] = useState(false)
 
-  const normalizedUrl = (item.url || '').replace(
+  const normalizedUrl = normalizeMediaUrl(item.url)
+  const remoteVmUrl = (item.url || '').replace(
     /http:\/\/(?:localhost|127\.0\.0\.1|192\.168\.\d+\.\d+):3001/i,
     'http://35.255.95.161:3001'
   )
-  const initialSrc = item.dataUrl || normalizedUrl
+  const initialSrc = item.dataUrl || normalizedUrl || remoteVmUrl
   const [imgError, setImgError] = useState(!initialSrc)
   const [triedFallback, setTriedFallback] = useState(false)
 

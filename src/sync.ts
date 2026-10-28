@@ -282,7 +282,12 @@ export async function autoRepairMissingAttachmentMedia(): Promise<number> {
         for (const att of item.attachments) {
           if (att.dataUrl && att.dataUrl.startsWith('data:image/')) {
             if (att.name) mediaMap.set(att.name, att.dataUrl)
-            if (att.url) mediaMap.set(att.url, att.dataUrl)
+            if (att.url) {
+              mediaMap.set(att.url, att.dataUrl)
+              const bName = att.url.split('/').pop()?.split('?')[0]
+              if (bName) mediaMap.set(bName, att.dataUrl)
+            }
+            if (att.id) mediaMap.set(att.id, att.dataUrl)
           }
         }
       }
@@ -296,8 +301,9 @@ export async function autoRepairMissingAttachmentMedia(): Promise<number> {
       if (Array.isArray(n.attachments)) {
         let noteChanged = false
         const newAtts = n.attachments.map((att: any) => {
-          if (!att.dataUrl && (mediaMap.has(att.name) || (att.url && mediaMap.has(att.url)))) {
-            const restored = mediaMap.get(att.name) || mediaMap.get(att.url)!
+          const bName = att.name || (att.url ? att.url.split('/').pop()?.split('?')[0] : '')
+          if (!att.dataUrl && (mediaMap.has(att.name) || mediaMap.has(bName) || (att.url && mediaMap.has(att.url)))) {
+            const restored = mediaMap.get(att.name) || mediaMap.get(bName) || mediaMap.get(att.url)!
             noteChanged = true
             return { ...att, dataUrl: restored }
           }
@@ -315,8 +321,9 @@ export async function autoRepairMissingAttachmentMedia(): Promise<number> {
       if (Array.isArray(p.attachments)) {
         let penChanged = false
         const newAtts = p.attachments.map((att: any) => {
-          if (!att.dataUrl && (mediaMap.has(att.name) || (att.url && mediaMap.has(att.url)))) {
-            const restored = mediaMap.get(att.name) || mediaMap.get(att.url)!
+          const bName = att.name || (att.url ? att.url.split('/').pop()?.split('?')[0] : '')
+          if (!att.dataUrl && (mediaMap.has(att.name) || mediaMap.has(bName) || (att.url && mediaMap.has(att.url)))) {
+            const restored = mediaMap.get(att.name) || mediaMap.get(bName) || mediaMap.get(att.url)!
             penChanged = true
             return { ...att, dataUrl: restored }
           }

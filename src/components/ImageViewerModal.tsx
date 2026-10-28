@@ -15,6 +15,7 @@ import {
 } from 'lucide-react'
 import { useUi } from '../store'
 import { verifyBiometric } from '../webauthn'
+import { normalizeMediaUrl } from './ClinicalMediaCard'
 
 export interface ViewerImage {
   url: string
@@ -338,14 +339,15 @@ export const ImageViewerModal: React.FC<ImageViewerModalProps> = ({
             />
           ) : (
             <img
-              src={currentImage.dataUrl || currentImage.url}
+              src={currentImage.dataUrl || normalizeMediaUrl(currentImage.url) || currentImage.url}
               alt={currentImage.name || 'Lampiran'}
               onError={(e) => {
-                const norm = (currentImage.url || '').replace(
+                const norm = normalizeMediaUrl(currentImage.url)
+                const vmUrl = (currentImage.url || '').replace(
                   /http:\/\/(?:localhost|127\.0\.0\.1|192\.168\.\d+\.\d+):3001/i,
                   'http://35.255.95.161:3001'
                 )
-                const fallback = (currentImage as any).dataUrl || norm
+                const fallback = (currentImage as any).dataUrl || norm || vmUrl
                 if (fallback && e.currentTarget.src !== fallback) {
                   e.currentTarget.src = fallback
                 }

@@ -72,10 +72,10 @@ archive.on('error', function(err) {
 
 archive.pipe(output);
 
-// Abaikan file OTA/APK, SW, dan manifest di dalam bundle zip native
+// Abaikan file OTA/APK, media disk, SW, dan manifest di dalam bundle zip native
 archive.glob('**/*', {
   cwd: distPath,
-  ignore: ['ota/**', 'apk/**', '*.apk', '**/*.apk', 'sw.js', 'workbox-*.js', 'registerSW.js', 'manifest.webmanifest']
+  ignore: ['ota/**', 'apk/**', 'media/**', '*.apk', '**/*.apk', 'sw.js', 'workbox-*.js', 'registerSW.js', 'manifest.webmanifest']
 });
 
 archive.finalize();

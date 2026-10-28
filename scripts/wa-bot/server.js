@@ -959,6 +959,175 @@ async function syncInboxToFirestore(inboxList) {
   }
 }
 
+function fromFirestoreVal(val) {
+  if (!val) return null
+  if ('stringValue' in val) return val.stringValue
+  if ('integerValue' in val) return Number(val.integerValue)
+  if ('doubleValue' in val) return val.doubleValue
+  if ('booleanValue' in val) return val.booleanValue
+  if ('nullValue' in val) return null
+  if ('arrayValue' in val) return (val.arrayValue.values || []).map(fromFirestoreVal)
+  if ('mapValue' in val) {
+    const res = {}
+    for (const [k, v] of Object.entries(val.mapValue.fields || {})) {
+      res[k] = fromFirestoreVal(v)
+    }
+    return res
+  }
+  return val
+}
+
+async function repairCloudNotes() {
+  const accessToken = await getAccessToken()
+  if (!accessToken) return { error: 'No access token' }
+
+  const firestoreUrl = `https://firestore.googleapis.com/v1/projects/docto-id/databases/(default)/documents/users/${USER_UID}`
+  const snapRes = await fetch(firestoreUrl, {
+    headers: { Authorization: 'Bearer ' + accessToken },
+  })
+  if (!snapRes.ok) return { error: 'Failed to fetch user doc: ' + snapRes.statusText }
+
+  const docData = await snapRes.json()
+  const rawTables = docData.fields?.tables?.mapValue?.fields
+  if (!rawTables) return { error: 'No tables found in user doc' }
+
+  const tables = {}
+  for (const [k, v] of Object.entries(rawTables)) {
+    tables[k] = fromFirestoreVal(v) || []
+  }
+
+  let inboxList = []
+  if (fs.existsSync(INBOX_JSON_PATH)) {
+    try {
+      inboxList = JSON.parse(fs.readFileSync(INBOX_JSON_PATH, 'utf-8'))
+    } catch {}
+  }
+
+  // Bangun media cache dari memory inboxList dan disk
+  const mediaMap = new Map()
+  for (const it of inboxList) {
+    for (const att of it.attachments || []) {
+      if (att.dataUrl && att.dataUrl.startsWith('data:image/')) {
+        if (att.name) mediaMap.set(att.name, att.dataUrl)
+        if (att.url) mediaMap.set(att.url, att.dataUrl)
+      }
+    }
+  }
+
+  const mediaDir = path.join(PUBLIC_DIR, 'media')
+  async function resolveDataUrl(att) {
+    if (att.name && mediaMap.has(att.name)) return mediaMap.get(att.name)
+    if (att.url && mediaMap.has(att.url)) return mediaMap.get(att.url)
+
+    // Coba baca dari disk server
+    const candidateName = att.name || (att.url ? path.basename(att.url) : null)
+    if (candidateName) {
+      const diskPath = path.join(mediaDir, candidateName)
+      if (fs.existsSync(diskPath)) {
+        try {
+          const buf = fs.readFileSync(diskPath)
+          const comp = await sharp(buf)
+            .resize(800, 800, { fit: 'inside', withoutEnlargement: true })
+            .webp({ quality: 65 })
+            .toBuffer()
+          const dUrl = `data:image/webp;base64,${comp.toString('base64')}`
+          mediaMap.set(candidateName, dUrl)
+          return dUrl
+        } catch {}
+      }
+    }
+    return null
+  }
+
+  let repairedCount = 0
+
+  // 1. Periksa progressNotes
+  if (Array.isArray(tables.progressNotes)) {
+    for (const note of tables.progressNotes) {
+      if (Array.isArray(note.attachments)) {
+        for (const att of note.attachments) {
+          if (!att.dataUrl || att.dataUrl.length === 0) {
+            const found = await resolveDataUrl(att)
+            if (found) {
+              att.dataUrl = found
+              repairedCount++
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // 2. Periksa penunjang
+  if (Array.isArray(tables.penunjang)) {
+    for (const pen of tables.penunjang) {
+      if (Array.isArray(pen.attachments)) {
+        for (const att of pen.attachments) {
+          if (!att.dataUrl || att.dataUrl.length === 0) {
+            const found = await resolveDataUrl(att)
+            if (found) {
+              att.dataUrl = found
+              repairedCount++
+            }
+          }
+        }
+      }
+    }
+  }
+
+  if (repairedCount > 0) {
+    console.log(`[CloudRepair] Memperbaiki ${repairedCount} lampiran di Cloud Firestore users/${USER_UID}...`)
+    function toFirestoreValue(val) {
+      if (val === null || val === undefined) return { nullValue: null }
+      if (typeof val === 'string') return { stringValue: val }
+      if (typeof val === 'boolean') return { booleanValue: val }
+      if (typeof val === 'number') {
+        if (Number.isInteger(val)) return { integerValue: String(val) }
+        return { doubleValue: val }
+      }
+      if (Array.isArray(val)) {
+        return { arrayValue: { values: val.map(toFirestoreValue) } }
+      }
+      if (typeof val === 'object') {
+        const fields = {}
+        for (const [k, v] of Object.entries(val)) {
+          if (v !== undefined) fields[k] = toFirestoreValue(v)
+        }
+        return { mapValue: { fields } }
+      }
+      return { stringValue: String(val) }
+    }
+
+    const payload = {
+      fields: {
+        tables: toFirestoreValue(tables),
+        updatedAt: { integerValue: String(Date.now()) },
+      },
+    }
+
+    const patchUrl = `https://firestore.googleapis.com/v1/projects/docto-id/databases/(default)/documents/users/${USER_UID}?updateMask.fieldPaths=tables&updateMask.fieldPaths=updatedAt`
+    const patchRes = await fetch(patchUrl, {
+      method: 'PATCH',
+      headers: {
+        Authorization: 'Bearer ' + accessToken,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    })
+
+    if (!patchRes.ok) {
+      const errJson = await patchRes.json().catch(() => ({}))
+      console.error('[CloudRepair] Gagal patch:', errJson)
+      return { error: 'Patch failed: ' + (errJson.error?.message || patchRes.statusText), repairedCount }
+    }
+
+    console.log(`[CloudRepair] ✓ Berhasil memperbarui dokumen Firestore! Realtime sync akan memuat gambar di semua perangkat.`)
+    return { success: true, repairedCount }
+  }
+
+  return { success: true, repairedCount: 0, message: 'Tidak ada lampiran rusak yang perlu diperbaiki' }
+}
+
 // ============================================================================
 // Firebase Cloud Messaging (FCM) Real-time Push Notification Handler
 // ============================================================================
@@ -1118,7 +1287,11 @@ const server = http.createServer(async (req, res) => {
 
     if (!fs.existsSync(filePath)) {
       // Rekonstruksi otomatis jika berkas belum ada di disk tapi tersimpan di inbox dataUrl
-      const matchedAtt = inboxList.flatMap((it) => it.attachments || []).find((a) => {
+      let curInbox = []
+      if (fs.existsSync(INBOX_JSON_PATH)) {
+        try { curInbox = JSON.parse(fs.readFileSync(INBOX_JSON_PATH, 'utf-8')) } catch {}
+      }
+      const matchedAtt = curInbox.flatMap((it) => it.attachments || []).find((a) => {
         return (a.url && a.url.endsWith(fileName)) || a.name === fileName || (a.id && fileName.includes(a.id))
       })
       if (matchedAtt && matchedAtt.dataUrl && matchedAtt.dataUrl.includes('base64,')) {
@@ -1190,6 +1363,19 @@ const server = http.createServer(async (req, res) => {
     }
     res.writeHead(404, { 'Access-Control-Allow-Origin': '*', 'Content-Type': 'text/plain' })
     res.end('Media Not Found')
+    return
+  }
+
+  // GET /api/repair-cloud-notes
+  if (req.method === 'GET' && url.pathname === '/api/repair-cloud-notes') {
+    try {
+      const result = await repairCloudNotes()
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify(result))
+    } catch (err) {
+      res.writeHead(500, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ error: err.message }))
+    }
     return
   }
 
