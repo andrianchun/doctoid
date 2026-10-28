@@ -267,6 +267,81 @@ export async function exportTables(): Promise<Record<string, unknown[]>> {
 }
 
 /**
+ * Pemulihan otomatis jika ada lampiran di progressNotes atau penunjang yang dataUrl-nya kosong/hilang
+ * dengan mencocokkan nama file ke antrean inbox yang memiliki dataUrl WebP valid.
+ */
+export async function autoRepairMissingAttachmentMedia(): Promise<number> {
+  try {
+    const notes = await db.progressNotes.toArray()
+    const penunjangList = await db.penunjang.toArray()
+    const inboxItems = await db.inboxQueue.toArray()
+
+    const mediaMap = new Map<string, string>()
+    for (const item of inboxItems) {
+      if (Array.isArray(item.attachments)) {
+        for (const att of item.attachments) {
+          if (att.dataUrl && att.dataUrl.startsWith('data:image/')) {
+            if (att.name) mediaMap.set(att.name, att.dataUrl)
+            if (att.url) mediaMap.set(att.url, att.dataUrl)
+          }
+        }
+      }
+    }
+
+    if (mediaMap.size === 0) return 0
+    let repairedCount = 0
+
+    // 1. Periksa progressNotes
+    for (const n of notes) {
+      if (Array.isArray(n.attachments)) {
+        let noteChanged = false
+        const newAtts = n.attachments.map((att: any) => {
+          if (!att.dataUrl && (mediaMap.has(att.name) || (att.url && mediaMap.has(att.url)))) {
+            const restored = mediaMap.get(att.name) || mediaMap.get(att.url)!
+            noteChanged = true
+            return { ...att, dataUrl: restored }
+          }
+          return att
+        })
+        if (noteChanged && n.id != null) {
+          await db.progressNotes.update(n.id, { attachments: newAtts })
+          repairedCount++
+        }
+      }
+    }
+
+    // 2. Periksa penunjang
+    for (const p of penunjangList) {
+      if (Array.isArray(p.attachments)) {
+        let penChanged = false
+        const newAtts = p.attachments.map((att: any) => {
+          if (!att.dataUrl && (mediaMap.has(att.name) || (att.url && mediaMap.has(att.url)))) {
+            const restored = mediaMap.get(att.name) || mediaMap.get(att.url)!
+            penChanged = true
+            return { ...att, dataUrl: restored }
+          }
+          return att
+        })
+        if (penChanged && p.id != null) {
+          await db.penunjang.update(p.id, { attachments: newAtts })
+          repairedCount++
+        }
+      }
+    }
+
+    if (repairedCount > 0) {
+      console.log(`[AutoRepair] ✓ Berhasil memulihkan ${repairedCount} lampiran media klinis!`)
+      cacheNotes(await db.progressNotes.toArray())
+      window.dispatchEvent(new CustomEvent('doctoid_data_synced'))
+    }
+    return repairedCount
+  } catch (err) {
+    console.warn('AutoRepair attachments error:', err)
+    return 0
+  }
+}
+
+/**
  * Pemulihan otomatis jika ada data lokal (status KRS, progress note)
  * yang sempat tertimpa oleh snapshot lama sebelum perbaikan Two-Way Merge.
  */

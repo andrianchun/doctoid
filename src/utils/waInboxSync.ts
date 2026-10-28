@@ -3,7 +3,7 @@ import { Capacitor } from '@capacitor/core'
 import { LocalNotifications } from '@capacitor/local-notifications'
 import { PushNotifications } from '@capacitor/push-notifications'
 import { db } from '../db'
-import { triggerCloudSync } from '../sync'
+import { triggerCloudSync, autoRepairMissingAttachmentMedia } from '../sync'
 import { extractDemografi } from '../parser'
 
 let notifPermissionRequested = false
@@ -649,6 +649,8 @@ export async function syncWaInboxToDexie() {
         }
       }
     }
+    // Periksa dan pulihkan secara otomatis jika ada catatan/penunjang yang lampirannya kehilangan dataUrl
+    await autoRepairMissingAttachmentMedia().catch(() => {})
   } catch (err) {
     // Silent catch agar tidak mengganggu UI dokter
   }
