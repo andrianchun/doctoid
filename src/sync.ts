@@ -209,33 +209,54 @@ export async function exportTables(): Promise<Record<string, unknown[]>> {
       cleanedList = list.slice(-70)
     }
 
-    // 3. progressNotes & penunjang: jika ada dataUrl base64 berukuran besar (>50KB per file),
-    // simpan secara utuh di Dexie lokal perangkat, namun untuk cloud payload cukup bawa metadata
-    // agar setDoc() tidak ditolak Firestore karena melebihi batas 1 MB.
+    // 3. progressNotes, penunjang, & poliLogs:
+    // HILANGKAN SELURUH base64 dataUrl besar dari cloud payload (tetap tersimpan utuh di Dexie lokal perangkat).
+    // Firestore Cloud hanya bertugas menyinkronkan data klinis medis, bukan file biner multi-megabyte.
     if (t === 'progressNotes') {
       cleanedList = cleanedList.map((item: any) => {
-        if (Array.isArray(item.attachments)) {
-          const safeAtts = item.attachments.map((att: any) => {
-            if (att.dataUrl && att.dataUrl.length > 50000) {
+        const safeItem = { ...item }
+        if (Array.isArray(safeItem.attachments)) {
+          safeItem.attachments = safeItem.attachments.map((att: any) => {
+            if (att.dataUrl && (att.dataUrl.length > 500 || att.dataUrl.startsWith('data:'))) {
               return { ...att, dataUrl: '' }
             }
             return att
           })
-          return { ...item, attachments: safeAtts }
         }
-        return item
+        return safeItem
       })
     }
 
     if (t === 'penunjang') {
       cleanedList = list.map((item: any) => {
-        if (item.dataUrl && item.dataUrl.length > 50000) {
-          return { ...item, dataUrl: '' }
+        const safeItem = { ...item }
+        if (Array.isArray(safeItem.attachments)) {
+          safeItem.attachments = safeItem.attachments.map((att: any) => {
+            if (att.dataUrl && (att.dataUrl.length > 500 || att.dataUrl.startsWith('data:'))) {
+              return { ...att, dataUrl: '' }
+            }
+            return att
+          })
         }
-        if (item.foto_url && item.foto_url.length > 50000) {
-          return { ...item, foto_url: '' }
+        if (safeItem.dataUrl && (safeItem.dataUrl.length > 500 || safeItem.dataUrl.startsWith('data:'))) {
+          safeItem.dataUrl = ''
         }
-        return item
+        if (safeItem.foto_url && (safeItem.foto_url.length > 500 || safeItem.foto_url.startsWith('data:'))) {
+          safeItem.foto_url = ''
+        }
+        return safeItem
+      })
+    }
+
+    if (t === 'poliLogs') {
+      cleanedList = list.map((item: any) => {
+        const safeItem = { ...item }
+        if (Array.isArray(safeItem.foto_urls)) {
+          safeItem.foto_urls = safeItem.foto_urls.filter(
+            (url: string) => !url.startsWith('data:') && url.length < 500
+          )
+        }
+        return safeItem
       })
     }
 
@@ -367,8 +388,23 @@ export async function safeImportTables(tables: Record<string, unknown[]>): Promi
             }
 
             if (t === 'penunjang') {
+              if (Array.isArray(remoteItem.attachments) && Array.isArray(existingLocal.attachments)) {
+                remoteItem.attachments = remoteItem.attachments.map((rAtt: any, idx: number) => {
+                  const lAtt = existingLocal.attachments[idx] || existingLocal.attachments.find((a: any) => a.name === rAtt.name || a.id === rAtt.id)
+                  if (!rAtt.dataUrl && lAtt?.dataUrl) {
+                    return { ...rAtt, dataUrl: lAtt.dataUrl }
+                  }
+                  return rAtt
+                })
+              }
               if (!remoteItem.dataUrl && existingLocal.dataUrl) remoteItem.dataUrl = existingLocal.dataUrl
               if (!remoteItem.foto_url && existingLocal.foto_url) remoteItem.foto_url = existingLocal.foto_url
+            }
+
+            if (t === 'poliLogs') {
+              if (Array.isArray(existingLocal.foto_urls) && (!Array.isArray(remoteItem.foto_urls) || remoteItem.foto_urls.length === 0)) {
+                remoteItem.foto_urls = existingLocal.foto_urls
+              }
             }
 
             await db.table(t).put(remoteItem)

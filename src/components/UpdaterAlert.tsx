@@ -55,6 +55,21 @@ function DownloadProgress({ progress, isApk }: { progress: number; isApk?: boole
   )
 }
 
+function DoctoidBrandIcon({ className = 'size-20' }: { className?: string }) {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" className={`${className} shrink-0 drop-shadow-md`}>
+      <defs>
+        <linearGradient id="docto-brand-grad" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stopColor="#5B7FFF" />
+          <stop offset="100%" stopColor="#3D5AF1" />
+        </linearGradient>
+      </defs>
+      <rect width="512" height="512" rx="112" fill="url(#docto-brand-grad)" />
+      <path d="M96 256h80l40-104 80 208 40-104h80" fill="none" stroke="#fff" strokeWidth="36" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
 export default function UpdaterAlert() {
   const [updateAvailable, setUpdateAvailable] = useState(false)
   const [manifest, setManifest] = useState<OtaManifest | null>(null)
@@ -277,12 +292,7 @@ export default function UpdaterAlert() {
       <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/75 p-4 backdrop-blur-md animate-in fade-in duration-300 overscroll-contain touch-none select-none">
         <div className="w-full max-w-sm rounded-3xl border border-white/20 bg-card p-6 shadow-2xl space-y-4 animate-in zoom-in-95 duration-300 text-center overscroll-contain touch-auto select-auto">
           <div className="flex flex-col items-center gap-2 pt-2">
-            {/* Ikon D Khas Doctoid — Bukan Icon Generik */}
-            <img
-              src="/icon.png"
-              alt="Doctoid"
-              className="size-20 rounded-3xl shadow-xl shadow-primary/25 border border-white/20 p-2 bg-gradient-to-br from-white/10 to-white/5 backdrop-blur-md object-contain"
-            />
+            <DoctoidBrandIcon className="size-20" />
             <h2 className="text-xl font-black text-ink tracking-tight mt-1">Pembaruan Wajib!</h2>
             <p className="caption text-xs text-ink-muted px-2">
               Versi terbaru Doctoid telah tersedia. Dokter perlu memperbarui aplikasi untuk melanjutkan akses rekam medis.
@@ -351,12 +361,7 @@ export default function UpdaterAlert() {
       >
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-3 min-w-0 flex-1">
-            {/* Ikon D Khas Doctoid */}
-            <img
-              src="/icon.png"
-              alt="Doctoid"
-              className="size-12 rounded-2xl shadow-md shadow-primary/25 border border-white/20 p-1 bg-gradient-to-br from-white/10 to-white/5 object-contain shrink-0"
-            />
+            <DoctoidBrandIcon className="size-12" />
             <div className="min-w-0 flex-1">
               <h3 className="text-sm font-bold text-ink leading-tight truncate">Update Tersedia</h3>
               <p className="caption text-xs text-ink-muted mt-0.5 tabular-nums truncate">
