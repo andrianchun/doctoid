@@ -120,10 +120,14 @@ export interface ClinicalMetrics {
 
 export type AttachmentTag = 'EKG' | 'Radiologi' | 'Lab' | 'Pemfis' | 'Lainnya'
 
+export type TipeProgressNote = 'kajian_awal' | 'visite' | 'konsul' | 'catatan'
+
 export interface ProgressNote {
   id?: number
   patient_id: number
   tanggal: string // ISO date
+  waktu?: string // Jam pencatatan (mis. "06:15" atau "12:00")
+  tipe_note?: TipeProgressNote
   S: string
   O_pemfis: string
   O_penunjang: string

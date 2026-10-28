@@ -399,6 +399,8 @@ export function extractDemografi(
 
   // 1. Analisis Baris Berisi Garis Miring (Format Konsul Pasien Indonesia):
   // Menangani semua variasi:
+  // - "*A/n Tn. Sukani / 75 tahun / BPJS Kelas 3 Aktif*"
+  // - "A/n Tn. Suroso / 67 tahun / BPJS PBI"
   // - "Tn. Budi / 47 th / L / BPJS"
   // - "Tn. Budi / L / 47 th / BPJS"
   // - "Ny. Siti / 50 th / BPJS"
@@ -407,20 +409,27 @@ export function extractDemografi(
   // - "By. Ny. Siti / 3 hari / P / Umum"
   const lines = raw.split(/\r?\n/)
   for (const line of lines) {
-    const cleanLine = line.replace(/[*_~#]/g, '').trim()
-    if (!cleanLine.includes('/')) continue
+    const rawClean = line.replace(/[*_~#]/g, '').trim()
+    if (!rawClean.includes('/')) continue
     // Abaikan baris url atau header chat WhatsApp ber-timestamp
     if (/(?:^|\s)\[\d{1,2}[/-]\d{1,2}/.test(line) || /https?:\/\//i.test(line)) continue
     // Abaikan baris tanda vital / TTV misal "TD 120/80", "Suhu(C) : 36.5", "TTV: ...", "Nadi: 80"
     if (
-      /^\s*(?:td|tensi|vital\s*sign|ttv|suhu|temp|nadi|hr|rr|spo2)\b/i.test(cleanLine) ||
-      /\b(?:suhu|temp|nadi|hr|heart\s*rate|rr|respirasi|spo2|gcs)\s*[:=]/i.test(cleanLine) ||
-      /^\s*(?:td|tensi|vital\s*sign)?\s*[:=]?\s*\d{2,3}\/\d{2,3}\b/i.test(cleanLine)
+      /^\s*(?:td|tensi|vital\s*sign|ttv|suhu|temp|nadi|hr|rr|spo2)\b/i.test(rawClean) ||
+      /\b(?:suhu|temp|nadi|hr|heart\s*rate|rr|respirasi|spo2|gcs)\s*[:=]/i.test(rawClean) ||
+      /^\s*(?:td|tensi|vital\s*sign)?\s*[:=]?\s*\d{2,3}\/\d{2,3}\b/i.test(rawClean)
     ) {
       continue
     }
 
-    const segments = cleanLine.split('/').map((s) => s.trim()).filter(Boolean)
+    // Bersihkan prefiks pengantar seperti "A/n", "a.n.", "atas nama", "pasien igd a/n", dll.
+    const cleanLine = rawClean.replace(/^(?:(?:pasien\s+(?:igd|bangsal|ruangan|[A-Za-z0-9\s]+?)\s+)?(?:atas\s*nama|a\s*[\/.]\s*n|an\.)\s*[:=–-]?\s*)/i, '').trim()
+
+    // Normalisasi segmen: bersihkan sisa "n " jika ada "a/" yang terpisah slash, atau prefiks "a/n" di dalam segmen
+    const segments = cleanLine
+      .split('/')
+      .map((s) => s.trim().replace(/^(?:(?:atas\s*nama|a\s*[\/.]\s*n|an\.|n)\s+)/i, '').trim())
+      .filter(Boolean)
     if (segments.length < 2) continue
 
     for (const seg of segments) {
@@ -457,10 +466,10 @@ export function extractDemografi(
       }
 
       // C. Cek apakah segmen ini Jaminan / Asuransi
-      const jmMatch = seg.match(/\b(BPJS(?:[\s\w]*)|JKN|KIS|Umum|Asuransi|Inhealth)\b/i)
+      const jmMatch = seg.match(/\b(BPJS(?:[\s\w]*)|JKN|KIS|PBI|Non-PBI|Umum|Asuransi|Inhealth)\b/i)
       if (jmMatch && !jaminan) {
         const jm = jmMatch[1].toUpperCase()
-        if (jm.includes('BPJS') || jm.includes('JKN') || jm.includes('KIS')) jaminan = 'BPJS'
+        if (jm.includes('BPJS') || jm.includes('JKN') || jm.includes('KIS') || jm.includes('PBI')) jaminan = 'BPJS'
         else if (jm.includes('UMUM')) jaminan = 'Umum'
         else if (jm.includes('ASURANSI') || jm.includes('INHEALTH')) jaminan = 'Asuransi'
         continue // PASTI BUKAN NAMA
@@ -488,6 +497,9 @@ export function extractDemografi(
           candidateNama = candidateNama.replace(/^(?:nama(?:\s*pasien)?|pasien|px|identitas)\s*[:-]?\s*/i, '').trim()
         }
 
+        // Jika segmen masih mengandung info umur / jaminan di belakang (misal "Sukani 75 th"), rapikan
+        candidateNama = candidateNama.replace(/\b(?:\d{1,3}\s*(?:th|thn|tahun|yo)|bpjs|jkn|kis|umum|asuransi)\b.*$/i, '').trim()
+
         // Validasi kelayakan nama: bukan gender token, bukan keyword medis/header/vital sign
         if (
           isValidPatientName(candidateNama) &&
@@ -504,9 +516,9 @@ export function extractDemografi(
     }
   }
 
-  // 2. Coba cari label nama eksplisit: "Nama: ...", "Pasien: ...", "Identitas: ...", "Px: ..."
+  // 2. Coba cari label nama eksplisit: "Nama: ...", "Pasien: ...", "Identitas: ...", "Px: ...", "A/n ...", "Atas Nama ..."
   if (!nama_depan) {
-    const labelMatch = raw.match(/(?:nama(?:\s*pasien)?|identitas|pasien|px)\s*[:-]\s*([A-Za-z][A-Za-z'.\s]{1,40}?)(?=\s*(?:,|\n|usia|umur|rm|\/|$))/i)
+    const labelMatch = raw.match(/(?:(?:pasien\s+(?:igd|bangsal|ruangan|[A-Za-z0-9\s]+?)\s+)?(?:atas\s*nama|a\s*[\/.]\s*n|an\.|nama(?:\s*pasien)?|identitas|pasien|px))\s*[:=–-]?\s*([A-Za-z][A-Za-z'.\s]{1,40}?)(?=\s*(?:,|\n|usia|umur|rm|\/|$))/i)
     if (labelMatch) {
       const candidate = labelMatch[1].trim()
       if (isValidPatientName(candidate) && !isGenderToken(candidate)) {
@@ -710,29 +722,29 @@ interface RawSections {
 }
 
 const SECTION_HEADER_PATTERNS: { regex: RegExp; section: keyof RawSections }[] = [
-  // S (Subjektif) - mendukung Subjektif, Subjektive, Subyektif, Subyektive, Subjective, Subjectif, RPS, Anamnesis
+  // S (Subjektif) - mendukung Subjektif, Subjektive, Subyektif, Subyektive, Subjective, Subjectif, RPS, Anamnesis, S/, S:, *S/*, *S:*
   {
-    regex: /^\s*(?:[*_~#]*\s*)?(?:S|Subjektif|Subjektive|Subyektif|Subyektive|Subjective|Subjectif|Anamnesis|Keluhan|Keluhan\s*Utama|RPS)\b\s*[:\-–—]?\s*(.*)$/i,
+    regex: /^\s*(?:[*_~#]*\s*)?(?:S|Subjektif|Subjektive|Subyektif|Subyektive|Subjective|Subjectif|Anamnesis|Keluhan|Keluhan\s*Utama|RPS)\b[*_~#:\s\-–—/]*\s*(.*)$/i,
     section: 'S',
   },
   // O - Penunjang Khusus
   {
-    regex: /^\s*(?:[*_~#]*\s*)?(?:Penunjang|Pemeriksaan\s*Penunjang|Hasil\s*Penunjang|Hasil\s*Lab|Laboratorium|Radiologi|CT[\s-]?Scan|Foto\s*Rontgen|EKG)\b\s*[:\-–—]?\s*(.*)$/i,
+    regex: /^\s*(?:[*_~#]*\s*)?(?:Penunjang|Pemeriksaan\s*Penunjang|Hasil\s*Penunjang|Hasil\s*Lab|Laboratorium|Radiologi|CT[\s-]?Scan|Foto\s*Rontgen|EKG)\b[*_~#:\s\-–—/]*\s*(.*)$/i,
     section: 'O_penunjang',
   },
-  // O - Pemfis / Objektif Umum
+  // O - Pemfis / Objektif Umum - mendukung O/, O:, *O/*, *O:*
   {
-    regex: /^\s*(?:[*_~#]*\s*)?(?:O|Objektif|Objektive|Obyektif|Obyektive|Objective|Pemeriksaan\s*Fisik|Pemfis|Status\s*Generalis|Status\s*Neurologi|Status\s*Neurologis|Pemeriksaan)\b\s*[:\-–—]?\s*(.*)$/i,
+    regex: /^\s*(?:[*_~#]*\s*)?(?:O|Objektif|Objektive|Obyektif|Obyektive|Objective|Pemeriksaan\s*Fisik|Pemfis|Status\s*Generalis|Status\s*Neurologi|Status\s*Neurologis|Pemeriksaan)\b[*_~#:\s\-–—/]*\s*(.*)$/i,
     section: 'O_pemfis',
   },
-  // A (Assessment)
+  // A (Assessment) - mendukung A/, A:, *A/*, *A:*, Dx, WD/, DD/ dan cegah kecocokan terhadap "A/n" (Atas Nama) atau "a.n"
   {
-    regex: /^\s*(?:[*_~#]*\s*)?(?:A|Assessment|Assesment|Asesmen|Diagnosis|Diagnosa|Dx|WD\/?|DD\/?|Impresi\s*Klinis)\b\s*[:\-–—]?\s*(.*)$/i,
+    regex: /^\s*(?:[*_~#]*\s*)?(?:Assessment|Assesment|Asesmen|Diagnosis|Diagnosa|Dx|WD\/?|DD\/?|Impresi\s*Klinis|A(?!\s*[\/.]\s*n\b))\b[*_~#:\s\-–—/]*\s*(.*)$/i,
     section: 'A',
   },
-  // P (Planning / Advis) - mendukung PDx, PTx, PMx, PEx, Advis, Rekomendasi
+  // P (Planning / Advis) - mendukung P/, P:, *P/*, *P:*, PDx, PTx, PMx, PEx, Advis, Rekomendasi
   {
-    regex: /^\s*(?:[*_~#]*\s*)?(?:P|Plan|Planning|PDx|PTx|PMx|PEx|Tatalaksana|Penatalaksanaan|Terapi|Tx|Rencana|Advis|Rekomendasi)\b\s*[:\-–—]?\s*(.*)$/i,
+    regex: /^\s*(?:[*_~#]*\s*)?(?:P|Plan|Planning|PDx|PTx|PMx|PEx|Tatalaksana|Penatalaksanaan|Terapi|Tx|Rencana|Advis|Rekomendasi)\b[*_~#:\s\-–—/]*\s*(.*)$/i,
     section: 'P',
   },
 ]
@@ -749,6 +761,9 @@ function sectionize(raw: string): RawSections {
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].trim()
     if (!line) continue
+
+    // Abaikan baris tanda baca liar atau garis pemisah (*, ---, ***, ///)
+    if (/^[*_~#:\s\-–—/]+$/.test(line)) continue
 
     // Abaikan kalimat basa-basi konsultasi di awal/akhir
     if (NOISE_PHRASES.test(line) && !current) continue
@@ -776,8 +791,8 @@ function sectionize(raw: string): RawSections {
             }
           }
           matchedSection = section
-          inlineContent = match[1] ? match[1].trim() : ''
-          headerLabel = line.replace(/[:\-–—].*$/, '').trim()
+          inlineContent = match[1] ? match[1].replace(/^[*_~#:\s\-–—/]+|[*_~#:\s\-–—/]+$/g, '').trim() : ''
+          headerLabel = line.replace(/[:\-–—/].*$/, '').trim()
           break
         }
       }
@@ -806,7 +821,7 @@ function sectionize(raw: string): RawSections {
         }
       }
 
-      if (inlineContent) {
+      if (inlineContent && !/^[*_~#:\s\-–—/]+$/.test(inlineContent)) {
         sections[current].push(inlineContent)
       }
     } else if (current) {
@@ -831,11 +846,23 @@ function sectionize(raw: string): RawSections {
 function parseDiagnosisLines(lines: string[]): DiagnosisItem[] {
   const results: DiagnosisItem[] = []
   for (const line of lines) {
-    const clean = line.replace(/^[-•*•–—\d.)\]]+\s*/, '').trim()
+    const clean = line
+      .replace(/^[-•*•–—\d.)\]]+\s*/, '')
+      .replace(/^[*_~#]+|[*_~#]+$/g, '')
+      .trim()
     if (!clean) continue
     if (NOISE_PHRASES.test(clean)) continue
     if (/^---\s*$/i.test(clean)) continue
     if (/^\*?(?:Jawaban|Advis|Balasan)\s*(?:\/?\s*Advis)?\s*(?:Dokter)?\*?[:\s]*$/i.test(clean)) continue
+
+    // Abaikan jika baris ternyata baris identitas pasien / demografi (misal: "A/n Tn. Sukani / 75 tahun / BPJS")
+    if (
+      /\b(?:a\s*[\/.]\s*n|an\.|atas\s*nama|\/n)\b/i.test(clean) ||
+      /\b(?:bpjs|jkn|kis|pbi|non-pbi)\b/i.test(clean) ||
+      (/\b\d{1,3}\s*(?:th|thn|tahun|yo)\b/i.test(clean) && /\b(?:tn|ny|sdr|sdri|an|by)\b/i.test(clean))
+    ) {
+      continue
+    }
 
     // Pisahkan jika ada koma di baris yang sama (mis. "CVA Infark, HT, DM")
     // Jangan pecah angka desimal berkoma seperti "Hipokalemia 3,25" (koma diikuti digit)
@@ -859,7 +886,7 @@ export function parsePlanningLines(lines: string[], today: string): TerapiItem[]
   let activeRoute = '' // e.g. 'PO', 'IV'
 
   for (const line of lines) {
-    const rawLine = line.trim()
+    const rawLine = line.replace(/^[*_~#]+|[*_~#]+$/g, '').trim()
     if (!rawLine) continue
     if (NOISE_PHRASES.test(rawLine)) continue
     if (isNonTherapyText(rawLine)) continue

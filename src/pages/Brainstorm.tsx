@@ -42,6 +42,7 @@ import DateInput from '../components/DateInput'
 import { useBodyScrollLock } from '../utils/useBodyScrollLock'
 import { extractClinicalMetrics } from '../utils/clinicalExtractor'
 import { analyzeAndClassifyAttachments } from '../utils/clinicalVision'
+import { triggerCloudSync } from '../sync'
 import {
   clearAllDeliveredNotifications,
   dismissInboxItem,
@@ -57,12 +58,20 @@ const today = () => getLocalDateString()
 function splitConsultAndAdvis(rawText: string): { consult: string; advis: string } {
   if (!rawText) return { consult: '', advis: '' }
 
+  const cleanAdvis = (text: string) => {
+    let cleaned = text.trim()
+    cleaned = cleaned.replace(/^[*_~#\s-]*(?:Jawaban\s*\/?\s*)?Advis\s*(?:Dokter)?[*_~#:\s-]*(?:\r?\n|$)/i, '').trim()
+    cleaned = cleaned.replace(/^(?:[\s*_~#:-]*\r?\n)+/, '').trim()
+    cleaned = cleaned.replace(/^[*\s]+|[*\s]+$/g, '').trim()
+    return cleaned
+  }
+
   // 1. Tag pemisah eksplisit dari gateway / server: "---" atau "*Jawaban / Advis Dokter:*"
-  const explicitMarker = rawText.match(/\n\s*---\s*\n\s*(?:\*?Jawaban\s*\/?\s*Advis\s*Dokter\*?[:\s]*)?/i)
+  const explicitMarker = rawText.match(/\n\s*---\s*\n\s*(?:[*_~#]*\s*(?:Jawaban\s*\/?\s*)?Advis\s*(?:Dokter)?[*_~#:\s-]*)/i)
   if (explicitMarker && explicitMarker.index !== undefined) {
     return {
       consult: rawText.slice(0, explicitMarker.index).trim(),
-      advis: rawText.slice(explicitMarker.index + explicitMarker[0].length).trim(),
+      advis: cleanAdvis(rawText.slice(explicitMarker.index + explicitMarker[0].length)),
     }
   }
 
@@ -74,7 +83,7 @@ function splitConsultAndAdvis(rawText: string): { consult: string; advis: string
       const consultEnd = mohonAdvisMatch.index + mohonAdvisMatch[1].length + 1
       return {
         consult: rawText.slice(0, consultEnd).trim(),
-        advis: afterMohon,
+        advis: cleanAdvis(afterMohon),
       }
     }
   }
@@ -86,7 +95,7 @@ function splitConsultAndAdvis(rawText: string): { consult: string; advis: string
     if (splitIdx > 0) {
       return {
         consult: rawText.slice(0, splitIdx).trim(),
-        advis: rawText.slice(splitIdx).trim(),
+        advis: cleanAdvis(rawText.slice(splitIdx)),
       }
     }
   }
@@ -1038,9 +1047,14 @@ export default function Brainstorm() {
           O_penunjang: form.O_penunjang.trim(),
         })
 
+        const isNewPatientAdmission = !selectedPatient
+        const nowTime = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }).replace('.', ':')
+
         await db.progressNotes.add({
           patient_id: p.id,
           tanggal: todayStr,
+          waktu: nowTime,
+          tipe_note: isNewPatientAdmission ? 'kajian_awal' : 'visite',
           S: form.S.trim(),
           O_pemfis: form.O_pemfis.trim(),
           O_penunjang: form.O_penunjang.trim(),
@@ -1705,9 +1719,14 @@ export default function Brainstorm() {
 
     const noteDate = form.tgl_mrs || today()
 
+    const isNewAdmission = !selectedPatient
+    const nowTime = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }).replace('.', ':')
+
     await db.progressNotes.add({
       patient_id: targetPatientId,
       tanggal: noteDate,
+      waktu: nowTime,
+      tipe_note: isNewAdmission ? 'kajian_awal' : 'visite',
       S: form.S, O_pemfis: form.O_pemfis, O_penunjang: form.O_penunjang, A: form.A, P: form.P,
       attachments: attachments.map(a => ({ name: a.name, type: a.type, dataUrl: a.dataUrl, url: a.url, kategori: a.kategori, tag: a.tag })),
       metrics,
@@ -1838,6 +1857,7 @@ export default function Brainstorm() {
     // Faskes & ruangan sengaja dikosongkan lagi tiap pasien baru — cegah salah kamar kalau lupa ganti
     setHospitalId(0)
     setWardId(0)
+    triggerCloudSync(50)
     const learnTag = learnedNewRule ? ' (Pola IGD dipelajari)' : ''
     notify(selectedPatient ? `Readmisi pasien tersimpan & riwayat tersambung${learnTag}` : `Pasien baru tersimpan${learnTag}`)
   }
@@ -3066,29 +3086,18 @@ export default function Brainstorm() {
                 >
                   <RotateCw size={16} className={isSyncingInbox ? 'animate-spin text-primary' : ''} />
                 </button>
-                {pendingInboxItems.length > 1 && (
+                {pendingInboxItems.length > 0 && (
                   <button
                     type="button"
                     disabled={Boolean(importingInboxId)}
                     onClick={handleDismissAllInbox}
-                    className={`text-xs font-semibold transition-colors cursor-pointer ml-1 ${
-                      importingInboxId ? 'opacity-40 pointer-events-none text-slate-300' : 'text-slate-400 hover:text-red-600'
+                    className={`text-xs font-semibold transition-colors cursor-pointer px-2 py-1 rounded-md ${
+                      importingInboxId ? 'opacity-40 pointer-events-none text-slate-300' : 'text-slate-400 hover:text-red-600 hover:bg-red-50'
                     }`}
                   >
                     Hapus Semua
                   </button>
                 )}
-                <button
-                  type="button"
-                  disabled={Boolean(importingInboxId)}
-                  onClick={() => setShowInboxModal(false)}
-                  aria-label="Tutup"
-                  className={`rounded-full p-1.5 text-slate-400 transition-colors ml-1 ${
-                    importingInboxId ? 'opacity-40 pointer-events-none' : 'cursor-pointer hover:text-slate-700 hover:bg-slate-100'
-                  }`}
-                >
-                  <X size={20} />
-                </button>
               </div>
             </div>
 
@@ -3243,13 +3252,8 @@ export default function Brainstorm() {
                       {/* Jawaban / Advis Dokter (ditempatkan tepat di bawah lampiran!) */}
                       {advis && (
                         <div className="space-y-1 pt-1">
-                          <div className="flex items-center justify-between text-[11px]">
-                            <span className="font-bold text-teal-800">
-                              Jawaban / Advis Anda (Dokter)
-                            </span>
-                            <span className="text-[10px] text-teal-600 font-medium">
-                              Otomatis ke A & P
-                            </span>
+                          <div className="text-[11px] font-bold text-teal-800">
+                            Advis Dokter
                           </div>
                           <div className="p-3 bg-teal-50/70 rounded-2xl border border-teal-200/80 text-xs text-teal-950 leading-relaxed whitespace-pre-wrap select-text max-h-52 overflow-y-auto font-sans">
                             {advis}

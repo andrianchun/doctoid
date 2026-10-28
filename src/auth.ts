@@ -73,6 +73,38 @@ export function getFirebaseAuth(): Auth {
   return getAuth(app)
 }
 
+/**
+ * Memastikan sesi Firebase Auth Web aktif.
+ * Jika berjalan di platform native Capacitor (Android APK) dan sesi Web kosong,
+ * secara otomatis memulihkan sesi autentikasi menggunakan token Google native.
+ */
+export async function ensureFirebaseAuthSession(): Promise<User | null> {
+  const auth = getFirebaseAuth()
+  if (auth && typeof auth.authStateReady === 'function') {
+    await auth.authStateReady()
+  }
+  if (auth.currentUser) return auth.currentUser
+
+  if (Capacitor.isNativePlatform()) {
+    try {
+      const { user } = await FirebaseAuthentication.getCurrentUser()
+      if (user) {
+        const { token } = await FirebaseAuthentication.getIdToken({ forceRefresh: false })
+        if (token) {
+          const credential = GoogleAuthProvider.credential(token)
+          const userCred = await signInWithCredential(auth, credential)
+          console.log('[Auth] ✓ Berhasil auto-restore sesi Firebase dari native token Android:', userCred.user.uid)
+          return userCred.user
+        }
+      }
+    } catch (err) {
+      console.warn('[Auth] Gagal bridge sesi Firebase dari native token:', err)
+    }
+  }
+
+  return auth.currentUser
+}
+
 export async function fetchCloudUserProfile(uid: string): Promise<Partial<UserProfile> | null> {
   if (!uid || uid === 'local') return null
   try {
@@ -263,15 +295,19 @@ export function initAuthListener(onUserChanged: (user: UserProfile | null) => vo
   }
 
   const unsubscribe = onAuthStateChanged(auth, async (firebaseUser: User | null) => {
-    if (firebaseUser) {
+    let activeUser = firebaseUser
+    if (!activeUser && Capacitor.isNativePlatform()) {
+      activeUser = await ensureFirebaseAuthSession()
+    }
+    if (activeUser) {
       const saved = getSavedUserProfile()
-      const cloud = await fetchCloudUserProfile(firebaseUser.uid)
+      const cloud = await fetchCloudUserProfile(activeUser.uid)
 
       const profile: UserProfile = {
-        uid: firebaseUser.uid,
-        email: firebaseUser.email || saved?.email || null,
-        displayName: cloud?.displayName || saved?.displayName || firebaseUser.displayName || 'Dokter',
-        photoURL: cloud?.photoURL || saved?.photoURL || firebaseUser.photoURL || null,
+        uid: activeUser.uid,
+        email: activeUser.email || saved?.email || null,
+        displayName: cloud?.displayName || saved?.displayName || activeUser.displayName || 'Dokter',
+        photoURL: cloud?.photoURL || saved?.photoURL || activeUser.photoURL || null,
         specialty: cloud?.specialty || saved?.specialty || getDoctorSpecialty(),
       }
       saveUserProfile(profile)

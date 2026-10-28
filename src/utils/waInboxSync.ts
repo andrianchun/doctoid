@@ -571,17 +571,40 @@ export async function syncWaInboxToDexie() {
       if (it.created_at) activeServerKeys.add(String(it.created_at))
     })
 
+    const allPatients = await db.patients.toArray()
+    const cleanCore = (str?: string) =>
+      (str || '')
+        .toLowerCase()
+        .replace(/^(?:dr|dok|dokter|tn|ny|sdri|sdr|an|by)\.?\s+/i, '')
+        .replace(/[^a-z0-9]/g, '')
+        .trim()
+
+    const isPatientAlreadyAdmitted = (it: any): boolean => {
+      const pName = cleanCore(it.parsed_data?.nama_depan)
+      const pRm = (it.parsed_data?.no_rm || '').trim()
+      const raw = (it.raw_text || '').toLowerCase()
+      return allPatients.some((p) => {
+        if (pRm && p.no_rm && p.no_rm.trim() === pRm) return true
+        const curName = cleanCore(p.nama_depan)
+        if (curName && pName && (curName === pName || (curName.length >= 4 && pName.includes(curName)))) return true
+        if (curName && curName.length >= 4 && raw.includes(curName)) return true
+        return false
+      })
+    }
+
     const localPending = await db.inboxQueue.where('status').equals('pending').toArray()
     for (const loc of localPending) {
+      // 1. Jika pasien sudah tercatat di db.patients, otomatis tandai 'imported'
+      if (isPatientAlreadyAdmitted(loc)) {
+        await db.inboxQueue.update(loc.id!, { status: 'imported' })
+        continue
+      }
+
+      // 2. Jika item sudah tidak ada di antrean server aktif (berarti sudah di-dismiss di HP lain/server)
       const locKey1 = String(loc.id || '')
       const locKey2 = String(loc.created_at || '')
       if (!activeServerKeys.has(locKey1) && !activeServerKeys.has(locKey2)) {
-        // HANYA hapus otomatis jika item sudah berumur > 48 jam di server,
-        // jangan hapus item baru yang mungkin belum selesai sinkron atau sedang ditinjau dokter!
-        const ageHours = (Date.now() - new Date(loc.created_at).getTime()) / (1000 * 60 * 60)
-        if (ageHours > 48) {
-          await db.inboxQueue.update(loc.id!, { status: 'dismissed' })
-        }
+        await db.inboxQueue.update(loc.id!, { status: 'dismissed' })
       }
     }
 
@@ -599,6 +622,8 @@ export async function syncWaInboxToDexie() {
         })
         .first()
 
+      const isAdmitted = isPatientAlreadyAdmitted(item)
+
       if (!existing) {
         const numericId = typeof item.id === 'number' ? item.id : Number(item.id) || undefined
         await db.inboxQueue.put({
@@ -609,13 +634,19 @@ export async function syncWaInboxToDexie() {
           raw_text: item.raw_text || '',
           parsed_data: item.parsed_data || undefined,
           attachments: item.attachments || [],
-          status: 'pending',
+          status: isAdmitted ? 'imported' : 'pending',
           created_at: item.created_at || new Date().toISOString(),
         })
 
-        // Picu notifikasi di Notification Bar HP
-        sendLocalNotification(item)
+        // Picu notifikasi di Notification Bar HP hanya jika pasien belum masuk rawat inap
+        if (!isAdmitted) {
+          sendLocalNotification(item)
+        }
       } else if (existing.status === 'pending') {
+        if (isAdmitted || isPatientAlreadyAdmitted(existing)) {
+          await db.inboxQueue.update(existing.id!, { status: 'imported' })
+          continue
+        }
         // Jika item masih pending dan ada pembaruan teks atau data lampiran yang lebih lengkap / valid
         const newAttachCount = item.attachments?.length || 0
         const oldAttachCount = existing.attachments?.length || 0

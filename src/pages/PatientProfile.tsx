@@ -562,6 +562,7 @@ export default function PatientProfile() {
     if (window.confirm(`Yakin ingin menghapus seluruh data rekam medis ${displayName}? Tindakan ini tidak dapat dibatalkan.`)) {
       await db.progressNotes.where('patient_id').equals(pid).delete()
       await db.patients.delete(pid)
+      triggerCloudSync(50)
       notify('Data pasien berhasil dihapus')
       navigate('/rekammedis', { replace: true })
     }
@@ -2037,11 +2038,30 @@ export default function PatientProfile() {
             <span>+ Visite Hari Ini</span>
           </button>
         </div>
-        {[...notes].reverse().map((n) => (
-          <div key={n.id} className="glass-card rounded-3xl p-5 shadow-sm space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="h3 text-xs font-bold text-primary">{formatDate(n.tanggal)}</span>
-              <div className="flex items-center gap-1.5">
+        {[...notes].reverse().map((n) => {
+          const isKajianAwal = n.tipe_note === 'kajian_awal' || (n.tanggal === patient?.tgl_mrs && notes[0]?.id === n.id)
+          const isVisite = n.tipe_note === 'visite'
+          return (
+            <div key={n.id} className="glass-card rounded-3xl p-5 shadow-sm space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="h3 text-xs font-bold text-primary">{formatDate(n.tanggal)}</span>
+                  {n.waktu && (
+                    <span className="text-[11px] font-semibold text-ink-muted">
+                      {n.waktu}
+                    </span>
+                  )}
+                  {isKajianAwal ? (
+                    <span className="rounded-md bg-amber-50 border border-amber-200/80 px-2 py-0.5 text-[10px] font-bold text-amber-800">
+                      Kajian Awal (OB)
+                    </span>
+                  ) : isVisite ? (
+                    <span className="rounded-md bg-blue-50 border border-blue-200/80 px-2 py-0.5 text-[10px] font-bold text-blue-800">
+                      CPPT Visite DPJP
+                    </span>
+                  ) : null}
+                </div>
+                <div className="flex items-center gap-1.5">
                 <button
                   type="button"
                   onClick={() => openEditNote(n)}
@@ -2114,7 +2134,7 @@ export default function PatientProfile() {
               </div>
             )}
           </div>
-        ))}
+        )})}
         {!notes.length && (
           <div className="glass-card rounded-3xl p-6 text-center text-xs font-medium text-ink-muted">
             Belum ada catatan CPPT.

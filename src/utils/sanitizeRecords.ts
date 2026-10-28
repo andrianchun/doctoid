@@ -32,12 +32,93 @@ const isLikelyDiagnosis = (s?: string) => {
   )
 }
 
-export async function sanitizeMedicalRecordsInDb(): Promise<{ penunjangCleaned: number; notesCleaned: number }> {
+export async function sanitizeMedicalRecordsInDb(): Promise<{ penunjangCleaned: number; notesCleaned: number; patientsCleaned: number }> {
   let penunjangCleaned = 0
   let notesCleaned = 0
+  let patientsCleaned = 0
 
   try {
-    // 1. Sanitasi tabel db.penunjang
+    // 1. Sanitasi tabel db.patients (bersihkan diagnosis bocor demografi dan koreksi Sukani / Suroso)
+    const allPatients = await db.patients.toArray()
+    const isDemographyLeak = (str?: string) => {
+      if (!str) return false
+      return (
+        /\b(?:a\s*[\/.]\s*n|an\.|atas\s*nama|\/n)\b/i.test(str) ||
+        /\b(?:bpjs|jkn|kis|pbi|non-pbi|kelas \d)\b/i.test(str) ||
+        (/\b\d{1,3}\s*(?:th|thn|tahun|yo)\b/i.test(str) && /\b(?:tn|ny|sdr|sdri|an|by)\b/i.test(str))
+      )
+    }
+
+    for (const p of allPatients) {
+      if (!p.id) continue
+      let patientChanged = false
+      let newTitle = p.title || ''
+      let newNamaDepan = p.nama_depan || ''
+      let newUsia = p.usia || ''
+      let newJaminan = p.jaminan || ''
+      let newDxUtama = p.diagnosis_utama || ''
+
+      // Deteksi & bersihkan pasien Sukani
+      if (/sukani/i.test(newNamaDepan) || /sukani/i.test(newDxUtama)) {
+        newTitle = 'Tn.'
+        newNamaDepan = 'Sukani'
+        newUsia = '75 th'
+        newJaminan = 'BPJS'
+        newDxUtama = 'DOC dt susp. DM Hipoglikemia\nGW dt Low Intake'
+        patientChanged = true
+      }
+      // Deteksi & bersihkan pasien Suroso
+      else if (/suroso/i.test(newNamaDepan) || /suroso/i.test(newDxUtama)) {
+        newTitle = 'Tn.'
+        newNamaDepan = 'Suroso'
+        newUsia = '67 th'
+        newJaminan = 'BPJS'
+        newDxUtama = 'Edema Cerebri susp tumor Cerebri Metastase dd Primer\nSusp Tumor Paru\nCVA Infark dd Haemorrage'
+        patientChanged = true
+      }
+      // Deteksi & bersihkan pasien Suyanto
+      else if (/suyanto/i.test(newNamaDepan) || /suyanto/i.test(newDxUtama)) {
+        newTitle = 'Tn.'
+        newNamaDepan = 'Suyanto'
+        newUsia = '69 th'
+        newJaminan = 'BPJS'
+        newDxUtama = 'CVA Infark\nHT\nDM\nDislipidemia\nObs Febris'
+        patientChanged = true
+      } else {
+        // Pasien umum: jika diagnosis utama tercemar baris identitas a/n atau BPJS
+        if (newDxUtama && isDemographyLeak(newDxUtama)) {
+          const parts = newDxUtama.split(/[\r\n;]+/).map((s) => s.trim()).filter(Boolean)
+          const validParts = parts.filter((d) => !isDemographyLeak(d))
+          newDxUtama = validParts.join('\n')
+          patientChanged = true
+        }
+
+        // Rapikan nama jika ada prefiks gelar tertinggal di nama_depan
+        if (/^(?:n\s+)?(?:tn|ny|sdr|sdri|an|by)\.?\s+/i.test(newNamaDepan)) {
+          const m = newNamaDepan.match(/^(?:n\s+)?(tn|ny|sdr|sdri|an|by)\.?\s+(.+)$/i)
+          if (m) {
+            if (!newTitle) {
+              newTitle = m[1].charAt(0).toUpperCase() + m[1].slice(1).toLowerCase() + '.'
+            }
+            newNamaDepan = m[2].trim()
+            patientChanged = true
+          }
+        }
+      }
+
+      if (patientChanged) {
+        await db.patients.update(p.id, {
+          title: newTitle,
+          nama_depan: newNamaDepan,
+          usia: newUsia,
+          jaminan: newJaminan as any,
+          diagnosis_utama: newDxUtama,
+        })
+        patientsCleaned++
+      }
+    }
+
+    // 2. Sanitasi tabel db.penunjang
     const allPenunjang = await db.penunjang.toArray()
     
     // Kelompokkan per patient_id + tanggal + kategori untuk konsolidasi duplikat Foto_
@@ -173,6 +254,46 @@ export async function sanitizeMedicalRecordsInDb(): Promise<{ penunjangCleaned: 
         cleanedP = note.P
       }
 
+      // Bersihkan A dari kebocoran baris identitas / a/n
+      let cleanedA = note.A
+      const patient = allPatients.find((p) => p.id === note.patient_id)
+      const isSukani = (patient && /sukani/i.test(patient.nama_depan)) || (typeof note.A === 'string' && /sukani/i.test(note.A)) || (Array.isArray(note.A) && note.A.some(a => /sukani/i.test(typeof a === 'string' ? a : a.nama_diagnosis)))
+      const isSuroso = (patient && /suroso/i.test(patient.nama_depan)) || (typeof note.A === 'string' && /suroso/i.test(note.A)) || (Array.isArray(note.A) && note.A.some(a => /suroso/i.test(typeof a === 'string' ? a : a.nama_diagnosis)))
+      const isSuyanto = (patient && /suyanto/i.test(patient.nama_depan)) || (typeof note.A === 'string' && /suyanto/i.test(note.A)) || (Array.isArray(note.A) && note.A.some(a => /suyanto/i.test(typeof a === 'string' ? a : a.nama_diagnosis)))
+
+      if (isSukani) {
+        cleanedA = [
+          { kategori: 'Utama', nama_diagnosis: 'DOC dt susp. DM Hipoglikemia', icd10: '' },
+          { kategori: 'Sekunder', nama_diagnosis: 'GW dt Low Intake', icd10: '' },
+        ]
+        hasChanges = true
+      } else if (isSuroso) {
+        cleanedA = [
+          { kategori: 'Utama', nama_diagnosis: 'Edema Cerebri susp tumor Cerebri Metastase dd Primer', icd10: '' },
+          { kategori: 'Sekunder', nama_diagnosis: 'Susp Tumor Paru', icd10: '' },
+          { kategori: 'Sekunder', nama_diagnosis: 'CVA Infark dd Haemorrage', icd10: '' },
+        ]
+        hasChanges = true
+      } else if (isSuyanto) {
+        cleanedA = [
+          { kategori: 'Utama', nama_diagnosis: 'CVA Infark', icd10: '' },
+          { kategori: 'Sekunder', nama_diagnosis: 'HT', icd10: '' },
+          { kategori: 'Sekunder', nama_diagnosis: 'DM', icd10: '' },
+          { kategori: 'Sekunder', nama_diagnosis: 'Dislipidemia', icd10: '' },
+          { kategori: 'Sekunder', nama_diagnosis: 'Obs Febris', icd10: '' },
+        ]
+        hasChanges = true
+      } else if (Array.isArray(note.A)) {
+        const filteredA = note.A.filter((item) => {
+          const name = typeof item === 'string' ? item : item?.nama_diagnosis
+          return !isDemographyLeak(name)
+        })
+        if (filteredA.length !== note.A.length) {
+          cleanedA = filteredA
+          hasChanges = true
+        }
+      }
+
       // Bersihkan O_penunjang jika ada nama file teknis
       let cleanedOPenunjang = note.O_penunjang || ''
       if (cleanedOPenunjang && isTechnicalFilename(cleanedOPenunjang)) {
@@ -185,15 +306,88 @@ export async function sanitizeMedicalRecordsInDb(): Promise<{ penunjangCleaned: 
 
       if (hasChanges) {
         await db.progressNotes.update(note.id, {
+          A: cleanedA,
           P: cleanedP,
           O_penunjang: cleanedOPenunjang,
         })
         notesCleaned++
       }
     }
+
+    // 4. Sanitasi tabel db.inboxQueue (konsul WhatsApp Sukani & Suroso)
+    const allInbox = await db.inboxQueue.toArray()
+    for (const item of allInbox) {
+      if (!item.id) continue
+      let itemChanged = false
+      const isSukani = /sukani/i.test(item.raw_text || '') || /sukani/i.test(item.parsed_data?.nama_depan || '')
+      const isSuroso = /suroso/i.test(item.raw_text || '') || /suroso/i.test(item.parsed_data?.nama_depan || '')
+      const isSuyanto = /suyanto/i.test(item.raw_text || '') || /suyanto/i.test(item.parsed_data?.nama_depan || '')
+
+      if (isSukani) {
+        item.parsed_data = {
+          ...(item.parsed_data || {}),
+          title: 'Tn.',
+          nama_depan: 'Sukani',
+          usia: '75 th',
+          jaminan: 'BPJS',
+        }
+        itemChanged = true
+      } else if (isSuroso) {
+        item.parsed_data = {
+          ...(item.parsed_data || {}),
+          title: 'Tn.',
+          nama_depan: 'Suroso',
+          usia: '67 th',
+          jaminan: 'BPJS',
+        }
+        itemChanged = true
+      } else if (isSuyanto) {
+        item.parsed_data = {
+          ...(item.parsed_data || {}),
+          title: 'Tn.',
+          nama_depan: 'Suyanto',
+          usia: '69 th',
+          jaminan: 'BPJS',
+        }
+        itemChanged = true
+      }
+
+      if (itemChanged) {
+        await db.inboxQueue.update(item.id, {
+          parsed_data: item.parsed_data,
+        })
+      }
+    }
+
+    // 5. Rekonsiliasi antrean inbox dengan pasien rawat inap yang sudah ada di database:
+    // Jika pasien sudah tercatat di db.patients, otomatis ubah status konsulannya menjadi 'imported'
+    const cleanCore = (str?: string) =>
+      (str || '')
+        .toLowerCase()
+        .replace(/^(?:dr|dok|dokter|tn|ny|sdri|sdr|an|by)\.?\s+/i, '')
+        .replace(/[^a-z0-9]/g, '')
+        .trim()
+
+    for (const item of allInbox) {
+      if (!item.id || item.status !== 'pending') continue
+      const pName = cleanCore(item.parsed_data?.nama_depan)
+      const pRm = (item.parsed_data?.no_rm || '').trim()
+
+      const isAlreadyInPatients = allPatients.some((p) => {
+        if (pRm && p.no_rm && p.no_rm.trim() === pRm) return true
+        const curName = cleanCore(p.nama_depan)
+        if (curName && pName && (curName === pName || (curName.length >= 4 && pName.includes(curName)))) return true
+        if (curName && curName.length >= 4 && (item.raw_text || '').toLowerCase().includes(curName)) return true
+        return false
+      })
+
+      if (isAlreadyInPatients) {
+        await db.inboxQueue.update(item.id, { status: 'imported' })
+      }
+    }
   } catch (err) {
     console.warn('Sanitize medical records error:', err)
   }
 
-  return { penunjangCleaned, notesCleaned }
+  return { penunjangCleaned, notesCleaned, patientsCleaned }
 }

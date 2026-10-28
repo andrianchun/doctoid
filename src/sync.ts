@@ -3,7 +3,7 @@ import { encryptJson, decryptJson, syncIdFromEntropy } from './crypto'
 import { getFirestore, initializeFirestore, doc, getDoc, setDoc, onSnapshot, type Firestore } from 'firebase/firestore'
 import {
   getFirebaseApp, getFirebaseAuth, getSavedUserProfile, saveUserProfile,
-  saveDoctorSpecialty, getDoctorSpecialty, type UserProfile
+  saveDoctorSpecialty, getDoctorSpecialty, ensureFirebaseAuthSession, type UserProfile
 } from './auth'
 import { cachePatients, cacheAllPatients, cacheNotes } from './utils/dataCache'
 import { isNonTherapyText } from './parser'
@@ -24,6 +24,29 @@ export const TABLES = [
   'penunjang',
   'poliLogs',
 ] as const
+
+const DELETED_RECORDS_KEY = 'doctoid_deleted_records'
+
+export function getDeletedRecordIds(): Record<string, number[]> {
+  try {
+    const raw = localStorage.getItem(DELETED_RECORDS_KEY)
+    if (raw) return JSON.parse(raw)
+  } catch {}
+  return {}
+}
+
+export function recordDeletedId(table: string, id: number) {
+  try {
+    const current = getDeletedRecordIds()
+    const list = current[table] || []
+    if (!list.includes(id)) {
+      list.push(id)
+      // Simpan maksimal 100 id terhapus terakhir per tabel
+      current[table] = list.slice(-100)
+      localStorage.setItem(DELETED_RECORDS_KEY, JSON.stringify(current))
+    }
+  } catch {}
+}
 
 export const getDeviceId = () => {
   let id = localStorage.getItem('doctoid_device_id')
@@ -95,6 +118,7 @@ export function initRealtimeCloudSync(uid: string): () => void {
 
       const remote = snap.data() as {
         tables?: Record<string, unknown[]>
+        deletedIds?: Record<string, number[]>
         updatedAt?: number | string
         lastModifiedBy?: string
         displayName?: string
@@ -124,7 +148,7 @@ export function initRealtimeCloudSync(uid: string): () => void {
         // 3. Timestamp remote lebih baru, ATAU
         // 4. Perangkat lokal baru belum pernah sinkron
         if (isNewRemoteSnapshot || isFromOtherDevice || isRemoteNewer || isDeviceFresh) {
-          const imported = await safeImportTables(remote.tables)
+          const imported = await safeImportTables(remote.tables, remote.deletedIds)
           if (imported) {
             localStorage.setItem('doctoid_last_imported_remote', String(remoteUpdatedAt))
             localStorage.setItem('doctoid_last_push', String(remoteUpdatedAt || Date.now()))
@@ -160,10 +184,10 @@ export function initRealtimeCloudSync(uid: string): () => void {
 }
 
 /**
- * Pemicu Sinkronisasi Cloud Otomatis (Debounced 400ms)
+ * Pemicu Sinkronisasi Cloud Otomatis (Debounced 200ms)
  * Otomatis dipanggil saat ada perubahan tabel database lokal (Faskes, Pasien, CPPT, Template, dll)
  */
-export function triggerCloudSync(delayMs = 400) {
+export function triggerCloudSync(delayMs = 200) {
   if (isImporting) return
   if (syncDebounceTimer) clearTimeout(syncDebounceTimer)
 
@@ -183,13 +207,16 @@ export function triggerCloudSync(delayMs = 400) {
 TABLES.forEach((tableName) => {
   const table = db.table(tableName)
   table.hook('creating', () => {
-    if (!isImporting) triggerCloudSync()
+    if (!isImporting) triggerCloudSync(100)
   })
   table.hook('updating', () => {
-    if (!isImporting) triggerCloudSync()
+    if (!isImporting) triggerCloudSync(100)
   })
-  table.hook('deleting', () => {
-    if (!isImporting) triggerCloudSync()
+  table.hook('deleting', function (primKey) {
+    if (typeof primKey === 'number') {
+      recordDeletedId(tableName, primKey)
+    }
+    if (!isImporting) triggerCloudSync(50)
   })
 })
 
@@ -450,8 +477,11 @@ export async function autoRecoverPreSyncBackup(): Promise<number> {
   }
 }
 
-/* Two-Way Smart Merge: Menggabungkan data cloud ke database lokal tanpa pernah menghapus data lokal yang belum tersinkron */
-export async function safeImportTables(tables: Record<string, unknown[]>): Promise<boolean> {
+/* Two-Way Smart Merge: Menggabungkan data cloud ke database lokal dengan propagasi penghapusan aman */
+export async function safeImportTables(
+  tables: Record<string, unknown[]>,
+  remoteDeletedIds?: Record<string, number[]>
+): Promise<boolean> {
   if (!tables || typeof tables !== 'object') {
     throw new Error('Data tabel tidak valid untuk diimpor.')
   }
@@ -469,15 +499,37 @@ export async function safeImportTables(tables: Record<string, unknown[]>): Promi
 
   try {
     await db.transaction('rw', TABLES.map((t) => db.table(t)), async () => {
+      // 1. Eksekusi penghapusan record jika ada instruksi deletion dari remote
+      if (remoteDeletedIds && typeof remoteDeletedIds === 'object') {
+        for (const [table, ids] of Object.entries(remoteDeletedIds)) {
+          if (!Array.isArray(ids)) continue
+          for (const id of ids) {
+            if (typeof id === 'number') {
+              recordDeletedId(table, id)
+              try {
+                await db.table(table).delete(id)
+                if (table === 'patients') {
+                  await db.progressNotes.where('patient_id').equals(id).delete()
+                  await db.penunjang.where('patient_id').equals(id).delete()
+                }
+              } catch {}
+            }
+          }
+        }
+      }
+
       for (const t of TABLES) {
         if (!Array.isArray(tables[t])) continue
         const remoteList = tables[t] as any[]
         const localItems = await db.table(t).toArray()
         const localMap = new Map(localItems.map((item: any) => [item.id, item]))
+        const locallyDeleted = new Set(getDeletedRecordIds()[t] || [])
 
         // Lakukan penggabungan cerdas untuk setiap item dari remote
         for (const remoteItem of remoteList) {
           if (!remoteItem || remoteItem.id == null) continue
+          // Abaikan jika item ini sudah dihapus di perangkat ini
+          if (locallyDeleted.has(remoteItem.id)) continue
           const existingLocal = localMap.get(remoteItem.id)
 
           if (existingLocal) {
@@ -610,6 +662,10 @@ export interface SyncMeta {
    - Jika lokal lebih baru atau forcePush: PUSH tables & profil dokter terbaru ke cloud. */
 export async function syncUserCloud(uid: string, forcePush = false): Promise<string> {
   if (!uid || uid === 'local') return 'idle'
+  
+  // Pastikan sesi Firebase Auth Web aktif (termasuk auto-bridge native Android token)
+  await ensureFirebaseAuthSession()
+
   const auth = getFirebaseAuth()
   if (auth && typeof auth.authStateReady === 'function') {
     await auth.authStateReady()
@@ -631,6 +687,7 @@ export async function syncUserCloud(uid: string, forcePush = false): Promise<str
   if (snap.exists()) {
     const remote = snap.data() as {
       tables?: Record<string, unknown[]>
+      deletedIds?: Record<string, number[]>
       devices?: Record<string, DeviceInfo>
       updatedAt?: number | string
       lastModifiedBy?: string
@@ -649,7 +706,7 @@ export async function syncUserCloud(uid: string, forcePush = false): Promise<str
 
     // PULL & MERGE DATA jika ada snapshot remote baru, berasal dari perangkat lain, atau remote lebih baru
     if (!forcePush && (isNewRemoteSnapshot || isFromOtherDevice || (remoteUpdatedAt && remoteUpdatedAt > lastPush)) && remote.tables) {
-      const imported = await safeImportTables(remote.tables)
+      const imported = await safeImportTables(remote.tables, remote.deletedIds)
       if (imported) {
         localStorage.setItem('doctoid_last_imported_remote', String(remoteUpdatedAt))
         localStorage.setItem('doctoid_last_push', String(remoteUpdatedAt || Date.now()))
@@ -691,6 +748,7 @@ export async function syncUserCloud(uid: string, forcePush = false): Promise<str
   }
   const updatedAt = Date.now()
   const tables = await exportTables()
+  const deletedIds = getDeletedRecordIds()
   const currentProfile = getSavedUserProfile()
 
   try {
@@ -698,6 +756,7 @@ export async function syncUserCloud(uid: string, forcePush = false): Promise<str
       ref,
       {
         tables,
+        deletedIds,
         devices,
         updatedAt,
         lastModifiedBy: deviceId,

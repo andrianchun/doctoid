@@ -12,7 +12,7 @@ import {
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import {
-  BedDouble, Plus,
+  BedDouble, Plus, Search,
   ChevronRight, Pencil, Eye, EyeOff, Settings, Building2, ChevronDown, X, Check, AlertTriangle
 } from 'lucide-react'
 import { db, type Patient, type Ward, type Hospital, type ProgressNote, type TerapiItem } from '../db'
@@ -24,7 +24,8 @@ import { extractClinicalHighlights, extractObjectivePositives } from '../utils/c
 import VisiteModal from '../components/VisiteModal'
 import { useBodyScrollLock } from '../utils/useBodyScrollLock'
 import { appCache, cacheHospitals, cacheWards, cachePatients, cacheNotes } from '../utils/dataCache'
-import { cleanNamaDepan, formatPatientDisplayName } from '../utils/patientName'
+import { cleanNamaDepan } from '../utils/patientName'
+import { triggerCloudSync } from '../sync'
 
 function cleanSubjective(raw?: string): string {
   if (!raw) return ''
@@ -109,12 +110,20 @@ function getPatientDiagnoses(patient: Patient, latestNote?: ProgressNote): strin
   const result: string[] = []
   const seen = new Set<string>()
 
+  const isDemographyOrGarbage = (text: string) => {
+    return (
+      /\b(?:a\s*[\/.]\s*n|an\.|atas\s*nama|\/n)\b/i.test(text) ||
+      /\b(?:bpjs|jkn|kis|pbi|non-pbi|kelas \d)\b/i.test(text) ||
+      (/\b\d{1,3}\s*(?:th|thn|tahun|yo)\b/i.test(text) && /\b(?:tn|ny|sdr|sdri|an|by)\b/i.test(text))
+    )
+  }
+
   // 1. Diagnosis utama pasien
   if (patient.diagnosis_utama) {
     const parts = patient.diagnosis_utama.split(/[\n;]+/)
     for (const p of parts) {
       const name = p.trim().replace(/^(?:[-•*]|\d+[.)])\s*/, '')
-      if (name && !seen.has(name.toLowerCase())) {
+      if (name && !isDemographyOrGarbage(name) && !seen.has(name.toLowerCase())) {
         seen.add(name.toLowerCase())
         result.push(name)
       }
@@ -128,7 +137,7 @@ function getPatientDiagnoses(patient: Patient, latestNote?: ProgressNote): strin
         const name = (typeof item === 'string' ? item : item?.nama_diagnosis)?.trim()
         if (name) {
           const cleanName = name.replace(/^(?:[-•*]|\d+[.)])\s*/, '')
-          if (cleanName && !seen.has(cleanName.toLowerCase())) {
+          if (cleanName && !isDemographyOrGarbage(cleanName) && !seen.has(cleanName.toLowerCase())) {
             seen.add(cleanName.toLowerCase())
             result.push(cleanName)
           }
@@ -138,7 +147,7 @@ function getPatientDiagnoses(patient: Patient, latestNote?: ProgressNote): strin
       const parts = (latestNote.A as string).split(/[\n;]+/)
       for (const p of parts) {
         const name = p.trim().replace(/^(?:[-•*]|\d+[.)])\s*/, '')
-        if (name && !seen.has(name.toLowerCase())) {
+        if (name && !isDemographyOrGarbage(name) && !seen.has(name.toLowerCase())) {
           seen.add(name.toLowerCase())
           result.push(name)
         }
@@ -155,6 +164,7 @@ function PatientCardContent({
   latestNoteWithS,
   unmasked,
   isVisitedToday,
+  isOnlyKajianAwal,
   onOpenVisite,
   handleToggleMask,
 }: {
@@ -163,6 +173,7 @@ function PatientCardContent({
   latestNoteWithS?: ProgressNote
   unmasked: boolean
   isVisitedToday?: boolean
+  isOnlyKajianAwal?: boolean
   onOpenVisite?: (e: React.MouseEvent) => void
   handleToggleMask?: (e: React.MouseEvent) => void
 }) {
@@ -704,6 +715,14 @@ function PatientCardContent({
             <span className="rounded-full bg-amber-50 border border-amber-200/60 px-2.5 py-0.5 text-xs font-bold text-amber-700">
               P-{hariKe(patient.tgl_mrs)}
             </span>
+            {isOnlyKajianAwal && (
+              <span
+                className="rounded-full bg-blue-50 border border-blue-200/80 px-2 py-0.5 text-[10.5px] font-bold text-blue-800"
+                title="Kajian Awal / OB masuk tercatat, belum visite siang"
+              >
+                OB{latestNote?.waktu ? ` ${latestNote.waktu}` : ''}
+              </span>
+            )}
           </div>
 
         {onOpenVisite ? (
@@ -781,7 +800,9 @@ function PatientCard({
   const navigate = useNavigate()
   const { unmasked, setUnmasked } = useUi()
   const todayStr = getLocalDateString()
-  const isVisitedToday = latestNote?.tanggal === todayStr
+  const isNewToday = patient.tgl_mrs === todayStr
+  const isVisitedToday = latestNote?.tanggal === todayStr && (isNewToday ? latestNote?.tipe_note === 'visite' : true)
+  const isOnlyKajianAwal = isNewToday && latestNote?.tanggal === todayStr && latestNote?.tipe_note !== 'visite'
 
   const handleToggleMask = async (e: React.MouseEvent) => {
     e.stopPropagation()
@@ -844,6 +865,7 @@ function PatientCard({
         latestNoteWithS={latestNoteWithS}
         unmasked={unmasked}
         isVisitedToday={isVisitedToday}
+        isOnlyKajianAwal={isOnlyKajianAwal}
         onOpenVisite={handleOpenVisiteClick}
         handleToggleMask={handleToggleMask}
       />
@@ -893,7 +915,10 @@ function WardColumn({
   const unvisitedCount = useMemo(() => {
     return patients.filter((p) => {
       const note = latestNoteMap?.get(p.id!)
-      return note?.tanggal !== todayStr
+      const isNewToday = p.tgl_mrs === todayStr
+      if (note?.tanggal !== todayStr) return true
+      if (isNewToday && note?.tipe_note !== 'visite') return true
+      return false
     }).length
   }, [patients, latestNoteMap, todayStr])
   const hasUnvisited = unvisitedCount > 0
@@ -1025,6 +1050,59 @@ export default function RawatInap() {
   const [activePatient, setActivePatient] = useState<Patient | null>(null)
   const [optimisticOrder, setOptimisticOrder] = useState<Record<number, number> | null>(null)
   const [optimisticWard, setOptimisticWard] = useState<Record<number, number> | null>(null)
+  const [pendingReorder, setPendingReorder] = useState<{
+    orders: Record<number, number>
+    wards?: Record<number, { wardId: number; hospitalId?: number }>
+  } | null>(null)
+
+  const handleCancelReorder = () => {
+    setOptimisticOrder(null)
+    setOptimisticWard(null)
+    setPendingReorder(null)
+    triggerHaptic('cancel')
+    notify('Perubahan urutan dibatalkan')
+  }
+
+  const handleSaveReorder = async () => {
+    if (!pendingReorder) return
+    try {
+      await db.transaction('rw', db.patients, async () => {
+        if (pendingReorder.wards) {
+          for (const [pIdStr, wardInfo] of Object.entries(pendingReorder.wards)) {
+            const pId = Number(pIdStr)
+            await db.patients.update(pId, {
+              lokasi_sekarang: wardInfo.wardId,
+              ...(wardInfo.hospitalId ? { hospital_id: wardInfo.hospitalId } : {}),
+            })
+          }
+        }
+        for (const [pIdStr, ord] of Object.entries(pendingReorder.orders)) {
+          const pId = Number(pIdStr)
+          await db.patients.update(pId, { order: ord })
+        }
+      })
+      triggerCloudSync(50)
+      notify('Urutan pasien berhasil disimpan')
+    } catch (err) {
+      console.error('Failed to save reorder:', err)
+      notify('Gagal menyimpan urutan')
+    } finally {
+      setOptimisticOrder(null)
+      setOptimisticWard(null)
+      setPendingReorder(null)
+    }
+  }
+
+  // Listener untuk sinkronisasi cloud real-time: jika ada update masuk dari perangkat lain (mis. APK / PWA),
+  // bersihkan state optimistik lokal agar UI langsung menyajikan data terbaru dari database
+  useEffect(() => {
+    const handleRemoteSync = () => {
+      setOptimisticOrder(null)
+      setOptimisticWard(null)
+    }
+    window.addEventListener('doctoid_data_synced', handleRemoteSync)
+    return () => window.removeEventListener('doctoid_data_synced', handleRemoteSync)
+  }, [])
   const [lastMovedWardId, setLastMovedWardId] = useState<number | null>(null)
   const [addWardHospital, setAddWardHospital] = useState<Hospital | null>(null)
   useBodyScrollLock(Boolean(addWardHospital))
@@ -1152,10 +1230,22 @@ export default function RawatInap() {
 
   const visitedTodayCount = useMemo(() => {
     if (!allNotes || !aktif) return 0
-    const visitedSet = new Set(
-      allNotes.filter((n) => n.tanggal?.startsWith(todayStr)).map((n) => n.patient_id)
-    )
-    return aktif.filter((p) => p.id && visitedSet.has(p.id)).length
+    const todayNotes = allNotes.filter((n) => n.tanggal?.startsWith(todayStr))
+    const visitedSet = new Set<number>()
+    for (const n of todayNotes) {
+      const p = aktif.find((a) => a.id === n.patient_id)
+      if (!p) continue
+      const isNewToday = p.tgl_mrs === todayStr
+      // Pasien baru hanya dihitung jika sudah ada catatan visite (bukan sekadar OB/kajian awal)
+      if (isNewToday) {
+        if (n.tipe_note === 'visite') {
+          visitedSet.add(p.id!)
+        }
+      } else {
+        visitedSet.add(p.id!)
+      }
+    }
+    return visitedSet.size
   }, [allNotes, aktif, todayStr])
 
   const displayAktif = useMemo(() => {
@@ -1349,14 +1439,10 @@ export default function RawatInap() {
             newOrderMap[p.id!] = idx + 1
           })
           setOptimisticOrder((prev) => ({ ...(prev || {}), ...newOrderMap }))
-
-          await db.transaction('rw', db.patients, async () => {
-            for (let i = 0; i < reordered.length; i++) {
-              await db.patients.update(reordered[i].id!, { order: i + 1 })
-            }
-          })
-
-          notify('Urutan pasien berhasil diubah')
+          setPendingReorder((prev) => ({
+            orders: { ...(prev?.orders || {}), ...newOrderMap },
+            wards: prev?.wards,
+          }))
         }
       } else {
         // --- 1B: Pindahkan ke ruangan lain dan sisipkan di posisi pasien target ---
@@ -1387,20 +1473,13 @@ export default function RawatInap() {
         })
         setOptimisticOrder((prev) => ({ ...(prev || {}), ...newOrderMap }))
         setOptimisticWard((prev) => ({ ...(prev || {}), [activePatientId]: targetWardId }))
-
-        await db.transaction('rw', db.patients, async () => {
-          await db.patients.update(activePatientId, {
-            lokasi_sekarang: targetWardId,
-            ...(targetHospital ? { hospital_id: targetHospital.id } : {}),
-          })
-          for (let i = 0; i < updatedTargetList.length; i++) {
-            await db.patients.update(updatedTargetList[i].id!, { order: i + 1 })
-          }
-        })
-
-        notify(
-          `Pasien ${formatPatientDisplayName(currentPatient.title, currentPatient.nama_depan || 'terpilih')} dipindahkan ke ${targetWard?.nama || 'ruangan baru'}`
-        )
+        setPendingReorder((prev) => ({
+          orders: { ...(prev?.orders || {}), ...newOrderMap },
+          wards: {
+            ...(prev?.wards || {}),
+            [activePatientId]: { wardId: targetWardId, hospitalId: targetHospital?.id },
+          },
+        }))
       }
       return
     }
@@ -1426,16 +1505,13 @@ export default function RawatInap() {
 
       setOptimisticWard((prev) => ({ ...(prev || {}), [activePatientId]: overWardId }))
       setOptimisticOrder((prev) => ({ ...(prev || {}), [activePatientId]: newOrder }))
-
-      await db.patients.update(activePatientId, {
-        lokasi_sekarang: overWardId,
-        ...(targetHospital ? { hospital_id: targetHospital.id } : {}),
-        order: newOrder,
-      })
-
-      notify(
-        `Pasien ${formatPatientDisplayName(currentPatient.title, currentPatient.nama_depan || 'terpilih')} dipindahkan ke ${targetWard?.nama || 'ruangan baru'}`
-      )
+      setPendingReorder((prev) => ({
+        orders: { ...(prev?.orders || {}), [activePatientId]: newOrder },
+        wards: {
+          ...(prev?.wards || {}),
+          [activePatientId]: { wardId: overWardId, hospitalId: targetHospital?.id },
+        },
+      }))
     }
   }
 
@@ -1492,13 +1568,14 @@ export default function RawatInap() {
         </div>
 
         {/* Input Pencarian Cepat Pasien Bangsal */}
-        <div className="relative">
+        <div className="relative flex items-center">
+          <Search size={14} className="absolute left-3 text-white/70 pointer-events-none" />
           <input
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Cari nama, no RM, diagnosis..."
-            className="w-full h-9.5 rounded-2xl bg-white/15 backdrop-blur-md border border-white/25 px-3.5 pr-8 text-xs font-semibold text-white placeholder:text-white/60 outline-none focus:bg-white/25 focus:border-white transition-all"
+            placeholder="Cari"
+            className="w-full h-9.5 rounded-2xl bg-white/15 backdrop-blur-md border border-white/25 pl-8.5 pr-8 text-xs font-semibold text-white placeholder:text-white/70 outline-none focus:bg-white/25 focus:border-white transition-all"
           />
           {searchQuery && (
             <button
@@ -1724,6 +1801,7 @@ export default function RawatInap() {
                   kode_warna: addWardHospital.kode_warna || '#3B82F6',
                   order: existingWards.length + 1,
                 })
+                triggerCloudSync(50)
                 notify(`Ruangan "${newWardInput.trim()}" berhasil dibuat`)
                 setAddWardHospital(null)
                 setNewWardInput('')
@@ -1763,6 +1841,39 @@ export default function RawatInap() {
             </form>
           </div>
         </div>
+      )}
+
+      {/* Floating Confirmation Bar ala Xiaomi (Konfirmasi Batal [X] / Simpan [V]) */}
+      {pendingReorder && (
+        <aside
+          aria-label="Konfirmasi Perubahan Urutan"
+          className="fixed bottom-20 sm:bottom-24 left-1/2 -translate-x-1/2 z-40 flex items-center gap-3 px-4 py-2 bg-slate-900/95 text-white rounded-2xl shadow-2xl border border-slate-700/80 backdrop-blur-md animate-in slide-in-from-bottom-4 duration-200 select-none max-w-[92vw]"
+        >
+          <span className="text-xs font-semibold text-slate-200 whitespace-nowrap pl-0.5">
+            Simpan urutan baru?
+          </span>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <button
+              type="button"
+              onClick={handleCancelReorder}
+              className="size-8 rounded-xl bg-slate-800 hover:bg-rose-950/80 hover:text-rose-400 text-slate-300 flex items-center justify-center transition-all cursor-pointer border border-slate-700 active:scale-95"
+              title="Batal (X) - Kembalikan urutan semula"
+              aria-label="Batalkan perubahan urutan"
+            >
+              <X size={16} />
+            </button>
+            <button
+              type="button"
+              onClick={handleSaveReorder}
+              className="h-8 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer shadow-sm active:scale-95"
+              title="Simpan (V)"
+              aria-label="Simpan perubahan urutan"
+            >
+              <Check size={16} className="stroke-[2.5]" />
+              <span>Simpan</span>
+            </button>
+          </div>
+        </aside>
       )}
 
       {/* Modal Visite Harian (SOAP Cepat) */}

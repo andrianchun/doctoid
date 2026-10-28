@@ -215,13 +215,17 @@ function extractWaPatientInfo(text) {
 
   // 1. Cek baris bergaris miring (format standar konsul medis: "*Tn Suyanto / 69 th / BPJS*")
   for (const line of lines) {
-    const cleanLine = line.replace(/[*_~#]/g, '').trim()
-    if (!cleanLine.includes('/')) continue
+    const rawClean = line.replace(/[*_~#]/g, '').trim()
+    if (!rawClean.includes('/')) continue
     if (/(?:^|\s)\[\d{1,2}[/-]\d{1,2}/.test(line) || /https?:\/\//i.test(line)) continue
     // Abaikan baris TTV misal "TD 120/80"
-    if (/^\s*(?:td|tensi|ttv|vital|suhu|temp|nadi|hr|rr|spo2)\b/i.test(cleanLine) || /^\s*\d{2,3}\/\d{2,3}\b/i.test(cleanLine)) continue
+    if (/^\s*(?:td|tensi|ttv|vital|suhu|temp|nadi|hr|rr|spo2)\b/i.test(rawClean) || /^\s*\d{2,3}\/\d{2,3}\b/i.test(rawClean)) continue
 
-    const segs = cleanLine.split('/').map((s) => s.trim()).filter(Boolean)
+    const cleanLine = rawClean.replace(/^(?:(?:pasien\s+(?:igd|bangsal|ruangan|[A-Za-z0-9\s]+?)\s+)?(?:atas\s*nama|a\s*[\/.]\s*n|an\.)\s*[:=–-]?\s*)/i, '').trim()
+    const segs = cleanLine
+      .split('/')
+      .map((s) => s.trim().replace(/^(?:(?:atas\s*nama|a\s*[\/.]\s*n|an\.|n)\s+)/i, '').trim())
+      .filter(Boolean)
     if (segs.length < 2) continue
 
     for (const seg of segs) {
@@ -236,10 +240,10 @@ function extractWaPatientInfo(text) {
       }
 
       // Jaminan
-      const jmM = seg.match(/\b(BPJS(?:[\s\w]*)|JKN|KIS|Umum|Asuransi|Inhealth)\b/i)
+      const jmM = seg.match(/\b(BPJS(?:[\s\w]*)|JKN|KIS|PBI|Non-PBI|Umum|Asuransi|Inhealth)\b/i)
       if (jmM && !jaminan) {
         const jm = jmM[1].toUpperCase()
-        if (jm.includes('BPJS') || jm.includes('JKN') || jm.includes('KIS')) jaminan = 'BPJS'
+        if (jm.includes('BPJS') || jm.includes('JKN') || jm.includes('KIS') || jm.includes('PBI')) jaminan = 'BPJS'
         else if (jm.includes('UMUM')) jaminan = 'Umum'
         else if (jm.includes('ASURANSI') || jm.includes('INHEALTH')) jaminan = 'Asuransi'
         continue
@@ -281,7 +285,7 @@ function extractWaPatientInfo(text) {
 
   // 2. Cek label "atas nama", "a.n.", "a/n", "nama:", "pasien:"
   if (!nama_depan) {
-    const anMatch = text.match(/(?:(?:pasien\s+(?:igd|bangsal|ruangan|[A-Za-z0-9\s]+?)\s+)?(?:atas\s*nama|a\.?n\.?|nama(?:\s*pasien)?|identitas)\s*[:=–-]?\s*[*_~#]*\s*)(?:(dr|dok|dokter|Tn|Ny|Sdri|Sdr|An|By)\.?\s*)?([A-Za-z][A-Za-z'.-]+(?:[ \t]+[A-Za-z'.-]+){0,3})/i)
+    const anMatch = text.match(/(?:(?:pasien\s+(?:igd|bangsal|ruangan|[A-Za-z0-9\s]+?)\s+)?(?:atas\s*nama|a\s*[\/.]\s*n|an\.|nama(?:\s*pasien)?|identitas)\s*[:=–-]?\s*[*_~#]*\s*)(?:(dr|dok|dokter|Tn|Ny|Sdri|Sdr|An|By)\.?\s*)?([A-Za-z][A-Za-z'.-]+(?:[ \t]+[A-Za-z'.-]+){0,3})/i)
     if (anMatch) {
       const cGelar = anMatch[1]
       let cNama = anMatch[2].trim()

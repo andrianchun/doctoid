@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react'
-import { X, Plus, Trash2, CheckSquare, Square, Camera, FileImage, Loader2, Sparkles } from 'lucide-react'
+import { X, Trash2, CheckSquare, Square, Loader2 } from 'lucide-react'
 import { db, type Patient, type ProgressNote, type TerapiItem, type DiagnosisItem } from '../db'
 import { lineToTerapi } from '../parser'
 import { rapikan } from '../ai'
@@ -12,6 +12,7 @@ import Masked from './Masked'
 import DateInput from './DateInput'
 import PredictiveInput from './PredictiveInput'
 import { PemfisVisualizer } from './PemfisVisualizer'
+import { triggerCloudSync } from '../sync'
 
 interface VisiteModalProps {
   patient: Patient
@@ -120,7 +121,7 @@ export default function VisiteModal({
         })
       }
 
-      setOcrMessage('CPPT berhasil diimpor dari foto/screenshot! ✓')
+      setOcrMessage('CPPT berhasil diimpor dari foto/screenshot!')
       setTimeout(() => setOcrMessage(''), 4000)
     } catch (err: any) {
       alert(err?.message || 'Gagal memproses gambar.')
@@ -209,9 +210,12 @@ export default function VisiteModal({
       })
 
       // Simpan catatan CPPT baru untuk visite hari ini
+      const nowTime = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }).replace('.', ':')
       await db.progressNotes.add({
         patient_id: patient.id!,
         tanggal,
+        waktu: nowTime,
+        tipe_note: 'visite',
         S: finalS,
         O_pemfis: O_pemfis.trim(),
         O_penunjang: O_penunjang.trim(),
@@ -228,6 +232,8 @@ export default function VisiteModal({
         })
       }
 
+      triggerCloudSync(50)
+
       onSaved(`Visite ${formatPatientDisplayName(patient.title, patient.nama_depan)} berhasil dicatat`)
       onClose()
     } catch (err) {
@@ -243,30 +249,37 @@ export default function VisiteModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 backdrop-blur-xs p-3.5 sm:p-5 animate-in fade-in duration-150 overscroll-contain touch-none select-none"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-3 sm:p-4 animate-in fade-in duration-150 overscroll-contain touch-none select-none"
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose()
       }}
     >
       <div
-        className="w-full max-w-lg rounded-3xl bg-white p-4 sm:p-5 shadow-2xl my-auto max-h-[92dvh] flex flex-col overscroll-contain touch-auto select-auto"
+        className="w-full max-w-lg rounded-2xl bg-white border border-slate-200 p-4 sm:p-5 shadow-xl my-auto max-h-[92dvh] flex flex-col overscroll-contain touch-auto select-auto"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Header Modal - Langsung & Tanpa Tulisan Visite/Tanggal/Icon */}
-        <div className="flex items-center justify-between gap-2 border-b border-slate-100 pb-3 shrink-0">
+        {/* Header Modal */}
+        <div className="flex items-center justify-between gap-3 border-b border-slate-100 pb-3 shrink-0">
           <div className="min-w-0 flex-1 flex items-center justify-between gap-2">
-            <h2 className="text-sm font-bold text-ink truncate leading-tight">
-              {patient.title ? `${patient.title} ` : ''}
-              <Masked value={cleanNamaDepan(patient.nama_depan, patient.title)} type="name" />{' '}
-              {patient.usia && (
-                <span className="text-xs font-normal text-ink-muted">({patient.usia})</span>
+            <div>
+              <h2 className="text-base font-bold text-slate-900 truncate leading-snug">
+                {patient.title ? `${patient.title} ` : ''}
+                <Masked value={cleanNamaDepan(patient.nama_depan, patient.title)} type="name" />
+                {patient.usia && (
+                  <span className="text-xs font-normal text-slate-500 ml-1">({patient.usia})</span>
+                )}
+              </h2>
+              {patient.no_rm && (
+                <p className="text-xs text-slate-500 truncate">
+                  RM {patient.no_rm}
+                </p>
               )}
-            </h2>
+            </div>
             <div className="w-32 shrink-0">
               <DateInput
                 value={tanggal}
                 onChange={(val) => setTanggal(val)}
-                className="h-7 rounded-lg border border-slate-200 bg-slate-50/80 px-2 text-[11px] font-medium text-ink focus:bg-white focus:border-primary outline-none cursor-pointer"
+                className="h-8 rounded-xl border border-slate-300 bg-slate-50 px-2.5 text-xs font-semibold text-slate-900 focus:bg-white focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none cursor-pointer"
               />
             </div>
           </div>
@@ -274,49 +287,53 @@ export default function VisiteModal({
             type="button"
             onClick={onClose}
             aria-label="Tutup"
-            className="size-8 rounded-full flex items-center justify-center text-ink-muted hover:text-ink hover:bg-slate-100 transition-colors cursor-pointer shrink-0 -mr-1"
+            className="size-8 rounded-full flex items-center justify-center text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer shrink-0 -mr-1"
           >
             <X size={18} />
           </button>
         </div>
 
-        {/* Quick OCR / AI Import Ribbon (Foto Layar SIMRS / Screenshot WA) */}
-        <div className="flex flex-col gap-1.5 pt-2.5 shrink-0">
-          <div className="flex items-center justify-between gap-2 bg-gradient-to-r from-blue-50/90 to-indigo-50/80 border border-blue-200/70 rounded-2xl px-3 py-2 shadow-2xs">
-            <div className="flex items-center gap-1.5 min-w-0">
-              <Sparkles size={13} className="text-primary shrink-0 animate-pulse" />
-              <span className="text-[11px] font-bold text-slate-700 truncate">
-                Impor dari Layar SIMRS / WA
-              </span>
-            </div>
+        {/* Quick OCR / AI Import Toolbar (SIMRS / WA) */}
+        <div className="py-2.5 border-b border-slate-100 shrink-0">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-xs font-bold text-slate-700">
+              Impor SIMRS / WA
+            </span>
             <div className="flex items-center gap-1.5 shrink-0">
               <button
                 type="button"
                 disabled={isOcrBusy}
                 onClick={() => simrsCameraRef.current?.click()}
-                className="text-[10.5px] font-bold bg-white hover:bg-slate-50 text-primary border border-primary/30 rounded-xl px-2.5 py-1 flex items-center gap-1 shadow-2xs active:scale-95 transition-all cursor-pointer disabled:opacity-50"
-                title="Foto layar komputer SIMRS"
+                className="h-7 px-3 text-xs font-bold text-primary bg-primary/10 hover:bg-primary/20 rounded-xl transition-colors cursor-pointer disabled:opacity-50 flex items-center gap-1.5"
+                title="Foto layar monitor komputer SIMRS"
               >
-                {isOcrBusy ? <Loader2 size={11} className="animate-spin text-primary" /> : <Camera size={11} />}
-                Foto Layar
+                {isOcrBusy && <Loader2 size={12} className="animate-spin text-primary" />}
+                <span>Foto Layar SIMRS</span>
               </button>
               <button
                 type="button"
                 disabled={isOcrBusy}
                 onClick={() => simrsGalleryRef.current?.click()}
-                className="text-[10.5px] font-bold bg-white hover:bg-slate-50 text-indigo-600 border border-indigo-200 rounded-xl px-2.5 py-1 flex items-center gap-1 shadow-2xs active:scale-95 transition-all cursor-pointer disabled:opacity-50"
+                className="h-7 px-3 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors cursor-pointer disabled:opacity-50"
                 title="Upload screenshot chat WA laporan ruangan"
               >
-                <FileImage size={11} />
-                Screenshot WA
+                Upload WA
               </button>
             </div>
           </div>
 
           {/* Feedback OCR status text */}
           {ocrMessage && (
-            <div className="text-[10.5px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-1 rounded-xl animate-in fade-in duration-150 flex items-center gap-1.5">
+            <div className="mt-2 text-xs font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-1.5 rounded-xl flex items-center justify-between">
               <span>{ocrMessage}</span>
+              <button
+                type="button"
+                onClick={() => setOcrMessage('')}
+                className="text-emerald-700 hover:text-emerald-900 cursor-pointer p-0.5"
+                aria-label="Tutup pesan"
+              >
+                <X size={14} />
+              </button>
             </div>
           )}
         </div>
@@ -341,18 +358,18 @@ export default function VisiteModal({
         {/* Form Body dengan Sticky Footer */}
         <form onSubmit={handleSubmit} className="flex flex-col flex-1 min-h-0 pt-3">
           {/* Bagian Input Scrollable */}
-          <div className="flex-1 overflow-y-auto overscroll-contain space-y-3 pr-1 text-xs">
+          <div className="flex-1 overflow-y-auto overscroll-contain space-y-4 pr-1 text-xs">
             {/* S */}
             <div>
               <div className="flex items-center justify-between mb-1">
-                <label className="font-bold text-xs text-primary">S</label>
-                <div className="flex items-center gap-2.5">
+                <label className="text-xs font-bold text-slate-900">S (Subjektif)</label>
+                <div className="flex items-center gap-2">
                   {latestNote?.S && (
                     <button
                       type="button"
                       onClick={() => setS(getVisiteSubjectivePrefill(latestNote.S))}
                       title="Muat ulang daftar keluhan awal saat MRS"
-                      className="text-[10px] text-primary hover:underline transition-colors cursor-pointer font-semibold"
+                      className="text-xs text-primary hover:underline font-bold cursor-pointer"
                     >
                       Keluhan MRS
                     </button>
@@ -361,7 +378,7 @@ export default function VisiteModal({
                     <button
                       type="button"
                       onClick={() => setS('')}
-                      className="text-[10px] text-ink-muted hover:text-rose-600 transition-colors cursor-pointer font-medium"
+                      className="text-xs text-slate-500 hover:text-rose-600 font-semibold cursor-pointer"
                     >
                       Kosongkan
                     </button>
@@ -372,59 +389,59 @@ export default function VisiteModal({
                 rows={3}
                 value={S}
                 onChange={(e) => setS(e.target.value)}
-                placeholder="mual + berkurang&#10;muntah -&#10;pusing -&#10;lemah separuh badan kiri membaik"
-                className="w-full rounded-xl border border-slate-200 p-2.5 text-xs text-ink placeholder:text-ink-muted/40 focus:border-primary focus:ring-1 focus:ring-primary/20 outline-none resize-y leading-relaxed font-mono"
+                placeholder="Keluhan subjektif saat visite..."
+                className="w-full rounded-2xl border border-slate-300 bg-slate-50/50 p-2.5 text-xs text-slate-900 placeholder:text-slate-400 focus:bg-white focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none resize-y leading-relaxed"
               />
             </div>
 
             {/* O */}
-            <div className="space-y-1.5">
-              <div className="space-y-2">
-                <div>
-                  <PemfisVisualizer
-                    value={O_pemfis}
-                    onChange={(val) => setOPemfis(val)}
-                    label="O - Fisik & TTV"
-                    placeholder="KU, TTV, defisit fisik..."
-                    rows={2}
-                  />
-                </div>
-                <div>
-                  <span className="text-[10px] font-semibold text-ink-muted block mb-0.5">O - Penunjang / Lab</span>
-                  <textarea
-                    rows={2}
-                    value={O_penunjang}
-                    onChange={(e) => setOPenunjang(e.target.value)}
-                    placeholder="Lab, Ro, CT scan..."
-                    className="w-full rounded-xl border border-slate-200 p-2 text-xs text-ink placeholder:text-ink-muted/40 focus:border-primary focus:ring-1 focus:ring-primary/20 outline-none resize-y"
-                  />
-                </div>
+            <div className="space-y-3">
+              <div>
+                <PemfisVisualizer
+                  value={O_pemfis}
+                  onChange={(val) => setOPemfis(val)}
+                  label="O (Pemeriksaan Fisik & TTV)"
+                  placeholder="KU, TTV, defisit fisik..."
+                  rows={2}
+                />
+              </div>
+              <div>
+                <label className="text-xs font-bold text-slate-700 block mb-1">
+                  Pemeriksaan Penunjang / Laboratorium
+                </label>
+                <textarea
+                  rows={2}
+                  value={O_penunjang}
+                  onChange={(e) => setOPenunjang(e.target.value)}
+                  placeholder="Hasil Lab, Radiologi, CT Scan..."
+                  className="w-full rounded-2xl border border-slate-300 bg-slate-50/50 p-2.5 text-xs text-slate-900 placeholder:text-slate-400 focus:bg-white focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none resize-y leading-relaxed"
+                />
               </div>
             </div>
 
             {/* A */}
             <div>
-              <label className="font-bold text-xs text-primary block mb-1">A</label>
+              <label className="text-xs font-bold text-slate-900 block mb-1">A (Asesmen / Diagnosis)</label>
               <textarea
                 rows={2}
                 value={A}
                 onChange={(e) => setA(e.target.value)}
-                placeholder="Diagnosis (1 per baris)..."
-                className="w-full rounded-xl border border-slate-200 p-2 text-xs text-ink placeholder:text-ink-muted/40 focus:border-primary focus:ring-1 focus:ring-primary/20 outline-none resize-y"
+                placeholder="Daftar diagnosis (1 diagnosis per baris)..."
+                className="w-full rounded-2xl border border-slate-300 bg-slate-50/50 p-2.5 text-xs text-slate-900 placeholder:text-slate-400 focus:bg-white focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none resize-y leading-relaxed"
               />
             </div>
 
             {/* PDx */}
             <div>
               <div className="flex items-center justify-between mb-1">
-                <label className="font-bold text-xs text-primary">PDx</label>
+                <label className="text-xs font-bold text-slate-900">PDx (Rencana Penunjang)</label>
                 {pdxList.length > 0 && (
-                  <span className="text-[10px] font-semibold text-ink-muted">
-                    {pdxList.filter((p) => p.status === 'stop').length}/{pdxList.length} sudah
+                  <span className="text-xs font-semibold text-slate-500">
+                    {pdxList.filter((p) => p.status === 'stop').length}/{pdxList.length} selesai
                   </span>
                 )}
               </div>
-              <div className="flex items-center gap-1.5 mb-1.5">
+              <div className="flex items-center gap-1.5 mb-2">
                 <PredictiveInput
                   type="procedure"
                   value={quickPdxInput}
@@ -432,26 +449,26 @@ export default function VisiteModal({
                   onSelect={(item) => setQuickPdxInput(item.name)}
                   placeholder="Rencana penunjang / ICD-9..."
                   className="flex-1"
-                  inputClassName="w-full h-8 rounded-xl border border-slate-200 px-3 text-xs text-ink placeholder:text-ink-muted/40 focus:border-primary focus:ring-1 focus:ring-primary/20 outline-none"
+                  inputClassName="w-full h-8 rounded-xl border border-slate-300 bg-slate-50/50 px-3 text-xs text-slate-900 placeholder:text-slate-400 focus:bg-white focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none"
                 />
                 <button
                   type="button"
                   onClick={() => handleAddPdx()}
                   disabled={!quickPdxInput.trim()}
-                  className="h-8 px-3 rounded-xl bg-primary/10 hover:bg-primary/20 text-primary font-bold text-xs disabled:opacity-40 transition-colors flex items-center gap-1 cursor-pointer shrink-0"
+                  className="h-8 px-3 rounded-xl bg-primary hover:bg-primary-deep text-white font-bold text-xs disabled:opacity-40 transition-colors cursor-pointer shrink-0 shadow-xs"
                 >
-                  <Plus size={14} /> Tambah
+                  Tambah
                 </button>
               </div>
               {pdxList.length > 0 && (
-                <div className="space-y-0.5 max-h-28 overflow-y-auto pr-0.5 divide-y divide-slate-100">
+                <div className="divide-y divide-slate-100 max-h-32 overflow-y-auto pr-0.5 border border-slate-200 rounded-xl px-2.5 py-0.5 bg-slate-50/30">
                   {pdxList.map((item) => {
                     const originalIdx = P.indexOf(item)
                     const isDone = item.status === 'stop'
                     return (
                       <div
                         key={originalIdx}
-                        className="flex items-center justify-between gap-1.5 py-1 text-xs"
+                        className="flex items-center justify-between gap-2 py-1.5 text-xs"
                       >
                         <button
                           type="button"
@@ -463,20 +480,20 @@ export default function VisiteModal({
                           ) : (
                             <Square size={16} className="text-slate-400 group-hover:text-primary shrink-0 transition-colors" />
                           )}
-                          <span className={`font-semibold truncate ${isDone ? 'line-through text-ink-muted' : 'text-ink'}`}>
+                          <span className={`font-semibold truncate ${isDone ? 'line-through text-slate-400' : 'text-slate-900'}`}>
                             {item.nama_item}
                           </span>
                           {item.dosis_keterangan && (
-                            <span className="text-ink-muted text-[11px] truncate">({item.dosis_keterangan})</span>
+                            <span className="text-slate-500 text-xs truncate">({item.dosis_keterangan})</span>
                           )}
                         </button>
                         <button
                           type="button"
                           onClick={() => handleRemoveDrug(originalIdx)}
-                          className="p-1 text-ink-muted hover:text-rose-600 rounded-lg cursor-pointer shrink-0"
+                          className="p-1 text-slate-400 hover:text-rose-600 rounded-lg cursor-pointer shrink-0 transition-colors"
                           title="Hapus"
                         >
-                          <Trash2 size={13} />
+                          <Trash2 size={14} />
                         </button>
                       </div>
                     )
@@ -488,14 +505,14 @@ export default function VisiteModal({
             {/* PTx */}
             <div>
               <div className="flex items-center justify-between mb-1">
-                <label className="font-bold text-xs text-primary">PTx</label>
+                <label className="text-xs font-bold text-slate-900">PTx (Rencana Terapi)</label>
                 {ptxList.length > 0 && (
-                  <span className="text-[10px] font-semibold text-ink-muted">
+                  <span className="text-xs font-semibold text-slate-500">
                     {ptxList.filter((p) => p.status === 'aktif').length} aktif
                   </span>
                 )}
               </div>
-              <div className="flex items-center gap-1.5 mb-1.5">
+              <div className="flex items-center gap-1.5 mb-2">
                 <PredictiveInput
                   type="drug"
                   value={quickPtxInput}
@@ -506,18 +523,18 @@ export default function VisiteModal({
                   }}
                   placeholder="Ketik obat & dosis (Fornas)..."
                   className="flex-1"
-                  inputClassName="w-full h-8 rounded-xl border border-slate-200 px-3 text-xs text-ink placeholder:text-ink-muted/40 focus:border-primary focus:ring-1 focus:ring-primary/20 outline-none"
+                  inputClassName="w-full h-8 rounded-xl border border-slate-300 bg-slate-50/50 px-3 text-xs text-slate-900 placeholder:text-slate-400 focus:bg-white focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none"
                 />
                 <button
                   type="button"
                   onClick={() => handleAddPtx()}
                   disabled={!quickPtxInput.trim()}
-                  className="h-8 px-3 rounded-xl bg-primary/10 hover:bg-primary/20 text-primary font-bold text-xs disabled:opacity-40 transition-colors flex items-center gap-1 cursor-pointer shrink-0"
+                  className="h-8 px-3 rounded-xl bg-primary hover:bg-primary-deep text-white font-bold text-xs disabled:opacity-40 transition-colors cursor-pointer shrink-0 shadow-xs"
                 >
-                  <Plus size={14} /> Tambah
+                  Tambah
                 </button>
               </div>
-              <div className="space-y-1 max-h-48 overflow-y-auto pr-0.5 divide-y divide-slate-100">
+              <div className="divide-y divide-slate-100 max-h-48 overflow-y-auto pr-0.5 border border-slate-200 rounded-xl px-2.5 py-0.5 bg-slate-50/30">
                 {ptxList.map((item) => {
                   const originalIdx = P.indexOf(item)
                   const isStop = item.status === 'stop'
@@ -537,38 +554,38 @@ export default function VisiteModal({
                       <div className="flex items-center justify-between gap-2">
                         <div className="min-w-0 flex-1 truncate flex items-center gap-1.5">
                           <span className={`size-1.5 rounded-full shrink-0 ${isStop ? 'bg-slate-300' : 'bg-primary'}`} />
-                          <span className={`truncate ${isStop ? 'line-through text-ink-muted/70' : 'text-ink'}`}>
+                          <span className={`truncate ${isStop ? 'line-through text-slate-400' : 'text-slate-900'}`}>
                             <b>{item.nama_item}</b>{' '}
                             {item.dosis_keterangan && (
-                              <span className="text-ink-muted text-[11px]">({item.dosis_keterangan})</span>
+                              <span className="text-slate-500 text-xs">({item.dosis_keterangan})</span>
                             )}
                           </span>
 
                           {!isStop && (
                             <>
                               {item.tracking?.tipe === 'durasi' ? (
-                                <span className="rounded-full bg-blue-50 text-blue-700 px-1.5 py-0.2 text-[10px] font-bold shrink-0">
-                                  ⏱ H-{day}/{item.tracking.target_hari || 7}
+                                <span className="rounded-md bg-blue-50 text-blue-700 border border-blue-200 px-1.5 py-0.5 text-xs font-bold shrink-0">
+                                  H-{day}/{item.tracking.target_hari || 7}
                                 </span>
                               ) : isManitol ? (
-                                <span className="rounded-full bg-amber-100 text-amber-900 px-1.5 py-0.2 text-[10px] font-bold shrink-0">
-                                  ⚡ Manitol H-{day}
+                                <span className="rounded-md bg-amber-50 text-amber-900 border border-amber-200 px-1.5 py-0.5 text-xs font-bold shrink-0">
+                                  Manitol H-{day}
                                 </span>
                               ) : isDexa ? (
-                                <span className="rounded-full bg-amber-100 text-amber-900 px-1.5 py-0.2 text-[10px] font-bold shrink-0">
-                                  ⚡ Dexa H-{day}
+                                <span className="rounded-md bg-amber-50 text-amber-900 border border-amber-200 px-1.5 py-0.5 text-xs font-bold shrink-0">
+                                  Dexa H-{day}
                                 </span>
                               ) : isCeftri ? (
-                                <span className="rounded-full bg-blue-50 text-blue-700 px-1.5 py-0.2 text-[10px] font-bold shrink-0">
-                                  ⏱ H-{day}/7
+                                <span className="rounded-md bg-blue-50 text-blue-700 border border-blue-200 px-1.5 py-0.5 text-xs font-bold shrink-0">
+                                  H-{day}/7
                                 </span>
                               ) : isNimo ? (
-                                <span className="rounded-full bg-blue-50 text-blue-700 px-1.5 py-0.2 text-[10px] font-bold shrink-0">
-                                  ⏱ H-{day}/21
+                                <span className="rounded-md bg-blue-50 text-blue-700 border border-blue-200 px-1.5 py-0.5 text-xs font-bold shrink-0">
+                                  H-{day}/21
                                 </span>
                               ) : isDapt ? (
-                                <span className="rounded-full bg-blue-50 text-blue-700 px-1.5 py-0.2 text-[10px] font-bold shrink-0">
-                                  ⏱ H-{day}/21
+                                <span className="rounded-md bg-blue-50 text-blue-700 border border-blue-200 px-1.5 py-0.5 text-xs font-bold shrink-0">
+                                  H-{day}/21
                                 </span>
                               ) : null}
                             </>
@@ -579,10 +596,10 @@ export default function VisiteModal({
                           <button
                             type="button"
                             onClick={() => handleToggleDrugStatus(originalIdx)}
-                            className={`px-2 py-0.5 rounded-lg text-[10px] font-bold cursor-pointer transition-colors ${
+                            className={`px-2 py-0.5 rounded-lg text-xs font-bold cursor-pointer transition-colors ${
                               isStop
                                 ? 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-                                : 'text-ink-muted hover:bg-rose-50 hover:text-rose-600'
+                                : 'text-slate-500 hover:bg-rose-50 hover:text-rose-600'
                             }`}
                           >
                             {isStop ? 'Lanjut' : 'Stop'}
@@ -590,17 +607,17 @@ export default function VisiteModal({
                           <button
                             type="button"
                             onClick={() => handleRemoveDrug(originalIdx)}
-                            className="p-1 text-ink-muted hover:text-rose-600 rounded-lg cursor-pointer"
+                            className="p-1 text-slate-400 hover:text-rose-600 rounded-lg cursor-pointer transition-colors"
                             title="Hapus"
                           >
-                            <Trash2 size={13} />
+                            <Trash2 size={14} />
                           </button>
                         </div>
                       </div>
 
                       {/* Quick Taper Down Actions */}
                       {!isStop && isManitol && (
-                        <div className="flex items-center gap-1 pl-3 text-[10px] text-amber-900">
+                        <div className="flex items-center gap-1 pl-3 text-xs text-amber-900">
                           <span className="font-semibold">Tap down:</span>
                           <button
                             type="button"
@@ -636,7 +653,7 @@ export default function VisiteModal({
                   )
                 })}
                 {!ptxList.length && (
-                  <p className="text-center py-1.5 text-ink-muted text-xs">
+                  <p className="text-center py-2 text-slate-400 text-xs">
                     Belum ada terapi obat.
                   </p>
                 )}
@@ -645,13 +662,13 @@ export default function VisiteModal({
 
             {/* Catatan Bebas */}
             <div>
-              <label className="font-bold text-xs text-ink-muted block mb-1">Catatan</label>
+              <label className="text-xs font-bold text-slate-900 block mb-1">Catatan Tambahan</label>
               <textarea
                 rows={2}
                 value={catatan}
                 onChange={(e) => setCatatan(e.target.value)}
-                placeholder="Rencana KRS, konsul, extra, dll..."
-                className="w-full rounded-xl border border-slate-200 p-2.5 text-xs text-ink placeholder:text-ink-muted/40 focus:border-primary focus:ring-1 focus:ring-primary/20 outline-none resize-y"
+                placeholder="Rencana KRS, jadwal konsul, instruksi khusus..."
+                className="w-full rounded-2xl border border-slate-300 bg-slate-50/50 p-2.5 text-xs text-slate-900 placeholder:text-slate-400 focus:bg-white focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none resize-y leading-relaxed"
               />
             </div>
           </div>
@@ -661,14 +678,14 @@ export default function VisiteModal({
             <button
               type="button"
               onClick={onClose}
-              className="h-9 px-4 rounded-xl text-xs font-bold text-ink-muted hover:bg-slate-100 transition-colors cursor-pointer"
+              className="h-9 px-4 rounded-xl text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 transition-colors cursor-pointer"
             >
               Batal
             </button>
             <button
               type="submit"
               disabled={isSubmitting}
-              className="h-9 px-5 rounded-xl bg-gradient-to-br from-primary to-primary-deep text-xs font-bold text-white shadow-md shadow-primary/25 disabled:opacity-50 active:scale-95 transition-all cursor-pointer"
+              className="h-9 px-6 rounded-xl bg-gradient-to-br from-primary to-primary-deep text-xs font-bold text-white shadow-sm hover:opacity-95 active:scale-95 transition-all cursor-pointer disabled:opacity-50"
             >
               {isSubmitting ? 'Menyimpan…' : 'Simpan'}
             </button>

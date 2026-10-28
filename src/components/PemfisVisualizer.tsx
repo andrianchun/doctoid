@@ -1,12 +1,6 @@
 import React, { useState, useRef } from 'react'
 import {
-  Activity,
-  Heart,
-  Brain,
-  MapPin,
-  FileText,
   Trash2,
-  Sparkles,
   ChevronDown,
   ChevronUp,
 } from 'lucide-react'
@@ -115,37 +109,34 @@ export const PemfisVisualizer: React.FC<PemfisVisualizerProps> = ({
     <div className="w-full flex flex-col gap-2">
       {/* Header bar dengan Mode Switcher */}
       <div className="flex items-center justify-between flex-wrap gap-2">
-        <label className="font-bold text-xs text-primary flex items-center gap-1.5">
-          <Activity size={14} className="text-primary" />
-          <span>{label}</span>
+        <label className="font-bold text-xs text-slate-900">
+          {label}
         </label>
 
         <div className="flex items-center gap-2">
           {/* Segmented Toggle: Teks vs Visual */}
-          <div className="flex items-center p-0.5 bg-slate-200/80 rounded-xl text-[11px] font-bold">
+          <div className="flex items-center p-0.5 bg-slate-100 rounded-xl text-xs font-bold border border-slate-200">
             <button
               type="button"
               onClick={() => setMode('text')}
-              className={`flex items-center gap-1 px-2.5 py-1 rounded-lg transition-all cursor-pointer ${
+              className={`px-2.5 py-1 rounded-lg transition-all cursor-pointer ${
                 mode === 'text'
                   ? 'bg-white text-primary shadow-xs'
-                  : 'text-slate-600 hover:text-ink'
+                  : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              <FileText size={12} />
-              <span>Narasi Teks</span>
+              Narasi Teks
             </button>
             <button
               type="button"
               onClick={handleSwitchToVisual}
-              className={`flex items-center gap-1 px-2.5 py-1 rounded-lg transition-all cursor-pointer ${
+              className={`px-2.5 py-1 rounded-lg transition-all cursor-pointer ${
                 mode === 'visual'
                   ? 'bg-primary text-white shadow-xs'
-                  : 'text-slate-600 hover:text-ink'
+                  : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              <Sparkles size={12} className={mode === 'visual' ? 'text-amber-300' : ''} />
-              <span>Model Visual</span>
+              Model Visual
             </button>
           </div>
 
@@ -172,27 +163,25 @@ export const PemfisVisualizer: React.FC<PemfisVisualizerProps> = ({
             <button
               type="button"
               onClick={() => setActiveTab('ttv')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl transition-all whitespace-nowrap cursor-pointer ${
+              className={`px-3 py-1.5 rounded-xl transition-all whitespace-nowrap cursor-pointer ${
                 activeTab === 'ttv'
                   ? 'bg-white text-primary shadow-xs border border-slate-200/60'
-                  : 'text-slate-600 hover:text-ink hover:bg-slate-100'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
               }`}
             >
-              <Activity size={13} className="text-rose-500" />
-              <span>1. TTV & GCS</span>
+              1. TTV & GCS
             </button>
 
             <button
               type="button"
               onClick={() => setActiveTab('interna')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl transition-all whitespace-nowrap cursor-pointer ${
+              className={`px-3 py-1.5 rounded-xl transition-all whitespace-nowrap cursor-pointer ${
                 activeTab === 'interna'
                   ? 'bg-white text-primary shadow-xs border border-slate-200/60'
-                  : 'text-slate-600 hover:text-ink hover:bg-slate-100'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
               }`}
             >
-              <Heart size={13} className="text-red-500" />
-              <span>2. Status Interna</span>
+              2. Status Interna
             </button>
 
             <button
@@ -201,13 +190,12 @@ export const PemfisVisualizer: React.FC<PemfisVisualizerProps> = ({
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl transition-all whitespace-nowrap cursor-pointer ${
                 activeTab === 'lokalis'
                   ? 'bg-white text-primary shadow-xs border border-slate-200/60'
-                  : 'text-slate-600 hover:text-ink hover:bg-slate-100'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
               }`}
             >
-              <MapPin size={13} className="text-amber-500" />
               <span>3. Status Lokalis</span>
               {state.markers.length > 0 && (
-                <span className="size-4 rounded-full bg-amber-500 text-white text-[9px] flex items-center justify-center font-bold">
+                <span className="size-4 rounded-full bg-amber-500 text-white text-xs flex items-center justify-center font-bold">
                   {state.markers.length}
                 </span>
               )}
@@ -216,14 +204,13 @@ export const PemfisVisualizer: React.FC<PemfisVisualizerProps> = ({
             <button
               type="button"
               onClick={() => setActiveTab('neuro')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl transition-all whitespace-nowrap cursor-pointer ${
+              className={`px-3 py-1.5 rounded-xl transition-all whitespace-nowrap cursor-pointer ${
                 activeTab === 'neuro'
                   ? 'bg-white text-primary shadow-xs border border-slate-200/60'
-                  : 'text-slate-600 hover:text-ink hover:bg-slate-100'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
               }`}
             >
-              <Brain size={13} className="text-purple-600" />
-              <span>4. Status Neurologis</span>
+              4. Status Neurologis
             </button>
           </div>
 
@@ -1083,7 +1070,6 @@ export const PemfisVisualizer: React.FC<PemfisVisualizerProps> = ({
               className="w-full flex items-center justify-between text-xs font-bold text-slate-600 hover:text-ink cursor-pointer"
             >
               <span className="flex items-center gap-1.5">
-                <FileText size={13} className="text-primary" />
                 <span>Pratinjau Hasil Catatan Rekam Medis (Auto-Generated)</span>
               </span>
               {showLivePreview ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
