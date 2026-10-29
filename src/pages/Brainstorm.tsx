@@ -33,6 +33,7 @@ import CustomSelect from '../components/CustomSelect'
 import { PemfisVisualizer } from '../components/PemfisVisualizer'
 import { ClinicalMediaCard, normalizeMediaUrl } from '../components/ClinicalMediaCard'
 import { ImageViewerModal, type ViewerImage } from '../components/ImageViewerModal'
+import PredictiveInput from '../components/PredictiveInput'
 import { lineToTerapi, localParse, parsePlanningLines, classifyFragment, synthesizeRegexRule, isGenderToken, isNonTherapyText, extractDemografi, type LocalParseResult } from '../parser'
 import { rapikan, analisisKasus } from '../ai'
 import { buatKonteks, catatTerapi, saranTerapi, type Suggestion } from '../styleLearning'
@@ -208,6 +209,8 @@ export default function Brainstorm() {
   const [isTextFocused, setIsTextFocused] = useState(false)
   const [toast, setToast] = useState('')
   const [komentarAnalisis, setKomentarAnalisis] = useState('')
+  const [newPdxInput, setNewPdxInput] = useState('')
+  const [newPtxInput, setNewPtxInput] = useState('')
 
   type Kategori = 'pemfis' | 'penunjang'
   const [attachments, setAttachments] = useState<{ id: string, name: string, type: string, dataUrl: string, url?: string, kategori: Kategori, tag?: AttachmentTag }[]>([])
@@ -2398,29 +2401,47 @@ export default function Brainstorm() {
       </div>
 
       {/* KARTU 3: A (ASSESSMENT) */}
-      <div className={'glass-card rounded-3xl p-5 shadow-sm space-y-4 animate-in fade-in slide-in-from-bottom-2 border border-slate-300/80 relative z-0 ' + hl('A')}>
+      <div className={'glass-card rounded-3xl p-5 shadow-sm space-y-4 animate-in fade-in slide-in-from-bottom-2 border border-slate-300/80 relative focus-within:z-30 ' + hl('A')}>
         <div className="pb-2 border-b border-slate-200">
           <h2 className="text-xs font-extrabold text-slate-800 uppercase tracking-wider">A (Assessment)</h2>
         </div>
 
         {/* Subjudul 1: Diagnosis Utama (1 item) */}
         <div className="space-y-1.5">
-          <label className="block text-xs font-extrabold text-primary uppercase tracking-wider">
-            Diagnosis Utama
-          </label>
-          <input
+          <div className="flex items-center justify-between">
+            <label className="block text-xs font-extrabold text-primary uppercase tracking-wider">
+              Diagnosis Utama
+            </label>
+            {form.A[0]?.icd10 && (
+              <span className="text-[10px] font-mono font-bold text-blue-700 bg-blue-50 border border-blue-200/80 px-2 py-0.5 rounded-md">
+                ICD-10: {form.A[0].icd10}
+              </span>
+            )}
+          </div>
+          <PredictiveInput
+            type="diagnosis"
             value={form.A[0]?.nama_diagnosis || ''}
-            onChange={(e) => {
+            onChange={(val) => {
               const newA = [...form.A]
               if (newA.length === 0) {
-                newA.push({ kategori: 'Utama', nama_diagnosis: e.target.value, icd10: '' })
+                newA.push({ kategori: 'Utama', nama_diagnosis: val, icd10: '' })
               } else {
-                newA[0] = { ...newA[0], kategori: 'Utama', nama_diagnosis: e.target.value }
+                newA[0] = { ...newA[0], kategori: 'Utama', nama_diagnosis: val }
               }
               set({ A: newA })
             }}
-            placeholder="Diagnosis utama pasien..."
-            className="w-full rounded-xl bg-slate-100/90 border border-slate-300 px-3.5 py-2.5 outline-none font-bold text-slate-900 text-xs placeholder:text-slate-400 placeholder:font-normal focus:bg-white focus:border-primary focus:ring-2 focus:ring-primary/10 shadow-2xs transition-all"
+            onSelect={(item) => {
+              const newA = [...form.A]
+              if (newA.length === 0) {
+                newA.push({ kategori: 'Utama', nama_diagnosis: item.name, icd10: item.code || '' })
+              } else {
+                newA[0] = { ...newA[0], kategori: 'Utama', nama_diagnosis: item.name, icd10: item.code || '' }
+              }
+              set({ A: newA })
+            }}
+            placeholder="Diagnosis utama pasien (mis. Stroke Iskemik Akut, ICH)..."
+            className="w-full"
+            inputClassName="w-full rounded-xl bg-slate-100/90 border border-slate-300 px-3.5 py-2.5 outline-none font-bold text-slate-900 text-xs placeholder:text-slate-400 placeholder:font-normal focus:bg-white focus:border-primary focus:ring-2 focus:ring-primary/10 shadow-2xs transition-all"
           />
         </div>
 
@@ -2434,16 +2455,30 @@ export default function Brainstorm() {
             const actualIndex = idx + 1
             return (
               <div key={actualIndex} className="flex gap-2 items-center">
-                <input
-                  value={dx.nama_diagnosis}
-                  onChange={(e) => {
-                    const newA = [...form.A]
-                    newA[actualIndex] = { ...newA[actualIndex], nama_diagnosis: e.target.value }
-                    set({ A: newA })
-                  }}
-                  placeholder={`Diagnosis sekunder ${actualIndex}...`}
-                  className="flex-1 min-w-0 rounded-xl bg-slate-100/90 border border-slate-300 px-3.5 py-2.5 outline-none font-semibold text-slate-900 text-xs placeholder:text-slate-400 placeholder:font-normal focus:bg-white focus:border-primary focus:ring-2 focus:ring-primary/10 shadow-2xs transition-all"
-                />
+                <div className="flex-1 min-w-0">
+                  <PredictiveInput
+                    type="diagnosis"
+                    value={dx.nama_diagnosis}
+                    onChange={(val) => {
+                      const newA = [...form.A]
+                      newA[actualIndex] = { ...newA[actualIndex], nama_diagnosis: val }
+                      set({ A: newA })
+                    }}
+                    onSelect={(item) => {
+                      const newA = [...form.A]
+                      newA[actualIndex] = { ...newA[actualIndex], nama_diagnosis: item.name, icd10: item.code || '' }
+                      set({ A: newA })
+                    }}
+                    placeholder={`Diagnosis sekunder ${actualIndex} (mis. Hipertensi, DM)...`}
+                    className="w-full"
+                    inputClassName="w-full rounded-xl bg-slate-100/90 border border-slate-300 px-3.5 py-2.5 outline-none font-semibold text-slate-900 text-xs placeholder:text-slate-400 placeholder:font-normal focus:bg-white focus:border-primary focus:ring-2 focus:ring-primary/10 shadow-2xs transition-all"
+                  />
+                </div>
+                {dx.icd10 && (
+                  <span className="text-[10px] font-mono font-bold text-blue-700 bg-blue-50 border border-blue-200/80 px-2 py-1 rounded-md shrink-0">
+                    {dx.icd10}
+                  </span>
+                )}
                 <button
                   type="button"
                   aria-label="Hapus diagnosis sekunder"
@@ -2475,7 +2510,7 @@ export default function Brainstorm() {
       </div>
 
       {/* KARTU 4: PLANNING DIAGNOSTIK */}
-      <div className="glass-card rounded-3xl p-5 shadow-sm space-y-3 animate-in fade-in slide-in-from-bottom-2 border border-slate-300/80 relative z-0">
+      <div className="glass-card rounded-3xl p-5 shadow-sm space-y-3 animate-in fade-in slide-in-from-bottom-2 border border-slate-300/80 relative focus-within:z-30">
         <div className="pb-2 border-b border-slate-200">
           <h2 className="text-xs font-extrabold text-slate-800 uppercase tracking-wider">Planning Diagnostik</h2>
         </div>
@@ -2495,6 +2530,12 @@ export default function Brainstorm() {
                   placeholder="Nama Prosedur / Lab"
                   className="flex-1 min-w-0 rounded-xl bg-slate-100/90 border border-slate-300 px-3.5 py-2.5 outline-none font-bold text-slate-900 text-xs placeholder:text-slate-400 placeholder:font-normal focus:bg-white focus:border-primary focus:ring-2 focus:ring-primary/10 shadow-2xs transition-all"
                 />
+
+                {it.icd9 && (
+                  <span className="text-[10px] font-mono font-bold text-teal-700 bg-teal-50 border border-teal-200/80 px-2 py-1 rounded-md shrink-0">
+                    {it.icd9}
+                  </span>
+                )}
 
                 <input
                   value={it.dosis_keterangan}
@@ -2520,21 +2561,44 @@ export default function Brainstorm() {
           })}
         </div>
 
-        <input
-          placeholder="CT Scan, EKG, DL..."
-          className={inputCls}
-          onKeyDown={(e) => {
-            const v = (e.target as HTMLInputElement).value.trim()
-            if (e.key === 'Enter' && v) {
-              set({ P: [...form.P, { ...lineToTerapi(v, today()), kategori: 'Diagnostik' }] })
-              ;(e.target as HTMLInputElement).value = ''
-            }
+        <PredictiveInput
+          type="procedure"
+          value={newPdxInput}
+          onChange={(val) => setNewPdxInput(val)}
+          onSelect={(item) => {
+            set({
+              P: [
+                ...form.P,
+                {
+                  ...lineToTerapi(item.name, today()),
+                  kategori: 'Diagnostik',
+                  icd9: item.code || '',
+                },
+              ],
+            })
+            setNewPdxInput('')
           }}
+          onCustomSubmit={() => {
+            if (!newPdxInput.trim()) return
+            set({
+              P: [
+                ...form.P,
+                {
+                  ...lineToTerapi(newPdxInput.trim(), today()),
+                  kategori: 'Diagnostik',
+                },
+              ],
+            })
+            setNewPdxInput('')
+          }}
+          placeholder="Tambah rencana diagnostik / ICD-9 (mis. CT-Scan, EKG, DL, Thorax)..."
+          className="w-full"
+          inputClassName={inputCls}
         />
       </div>
 
       {/* KARTU 5: PLANNING TERAPI */}
-      <div className={'glass-card rounded-3xl p-5 shadow-sm space-y-3 animate-in fade-in slide-in-from-bottom-2 border border-slate-300/80 relative z-0 ' + hl('P')}>
+      <div className={'glass-card rounded-3xl p-5 shadow-sm space-y-3 animate-in fade-in slide-in-from-bottom-2 border border-slate-300/80 relative focus-within:z-30 ' + hl('P')}>
         <div className="pb-2 border-b border-slate-200">
           <h2 className="text-xs font-extrabold text-slate-800 uppercase tracking-wider">Planning Terapi</h2>
         </div>
@@ -2550,7 +2614,7 @@ export default function Brainstorm() {
                     value={it.nama_item}
                     onChange={(e) => {
                       const val = e.target.value
-                      const isNonFarmako = /head\s*up|posisi|tirah\s*baring|diet|o2|oksigen|fisioterapi|mobilisasi|edukasi/i.test(val)
+                      const isNonFarmako = /head\s*up|posisi|tirah\s*baring|diet|o2|oksigen|fisioterapi|mobilisasi|edukasi|ngt|kateter/i.test(val)
                       const newP = [...form.P]
                       newP[originalIndex] = {
                         ...newP[originalIndex],
@@ -2603,25 +2667,47 @@ export default function Brainstorm() {
           </div>
         )}
 
-        <input
-          placeholder="Citicoline 3 x 500 mg, Head up 30°..."
-          className={inputCls}
-          onKeyDown={(e) => {
-            const v = (e.target as HTMLInputElement).value.trim()
-            if (e.key === 'Enter' && v) {
-              const isNonFarmako = /head\s*up|posisi|tirah\s*baring|diet|o2|oksigen|fisioterapi|mobilisasi|edukasi/i.test(v)
-              set({
-                P: [
-                  ...form.P,
-                  {
-                    ...lineToTerapi(v, today()),
-                    kategori: isNonFarmako ? 'Non-Farmakologi' : 'Farmakologi',
-                  },
-                ],
-              })
-              ;(e.target as HTMLInputElement).value = ''
-            }
+        <PredictiveInput
+          type="drug"
+          value={newPtxInput}
+          onChange={(val) => setNewPtxInput(val)}
+          onSelect={(item) => {
+            const isNonFarmako =
+              item.category === 'Non-Farmakologi' ||
+              /head\s*up|posisi|tirah\s*baring|diet|o2|oksigen|fisioterapi|mobilisasi|edukasi|ngt|kateter/i.test(item.name)
+            set({
+              P: [
+                ...form.P,
+                {
+                  id: `tx-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+                  nama_item: item.name,
+                  dosis_keterangan: item.detail || '',
+                  tgl_mulai: today(),
+                  tgl_stop: null,
+                  status: 'aktif',
+                  kategori: isNonFarmako ? 'Non-Farmakologi' : 'Farmakologi',
+                },
+              ],
+            })
+            setNewPtxInput('')
           }}
+          onCustomSubmit={() => {
+            if (!newPtxInput.trim()) return
+            const isNonFarmako = /head\s*up|posisi|tirah\s*baring|diet|o2|oksigen|fisioterapi|mobilisasi|edukasi|ngt|kateter/i.test(newPtxInput)
+            set({
+              P: [
+                ...form.P,
+                {
+                  ...lineToTerapi(newPtxInput.trim(), today()),
+                  kategori: isNonFarmako ? 'Non-Farmakologi' : 'Farmakologi',
+                },
+              ],
+            })
+            setNewPtxInput('')
+          }}
+          placeholder="Ketik obat / terapi Fornas (mis. Inj. Citicoline, Head up 30°)..."
+          className="w-full"
+          inputClassName={inputCls}
         />
       </div>
 

@@ -419,25 +419,31 @@ export const STANDARD_PROCEDURES: StandardProcedure[] = [
     name: 'CT-Scan Kepala Non-Kontras',
     icd9: '87.03',
     category: 'Radiologi',
-    aliases: ['ct', 'ct scan', 'ct kepala', 'msct', 'head ct'],
+    aliases: ['ct', 'ct scan', 'ct kepala', 'msct', 'head ct', 'ct-scan'],
   },
   {
     name: 'CT-Scan Kepala dg Kontras',
-    icd9: '87.03',
+    icd9: '87.04',
     category: 'Radiologi',
-    aliases: ['ct kontras', 'ct scan kontras'],
+    aliases: ['ct kontras', 'ct scan kontras', 'head ct contrast'],
+  },
+  {
+    name: 'CT Angiography (CTA) Kepala / Leher',
+    icd9: '87.41',
+    category: 'Radiologi',
+    aliases: ['cta', 'ct angiografi', 'cta kepala', 'angiografi ct'],
   },
   {
     name: 'MRI Kepala & MRA',
     icd9: '88.91',
     category: 'Radiologi',
-    aliases: ['mri', 'mri kepala', 'mra', 'brain mri'],
+    aliases: ['mri', 'mri kepala', 'mra', 'brain mri', 'mri brain'],
   },
   {
     name: 'Foto Thorax AP/PA',
     icd9: '87.44',
     category: 'Radiologi',
-    aliases: ['cxr', 'thorax', 'foto rontgen dada', 'rontgen thorax'],
+    aliases: ['cxr', 'thorax', 'foto rontgen dada', 'rontgen thorax', 'ro thorax', 'foto thorax'],
   },
   {
     name: 'USG Doppler Carotis',
@@ -457,43 +463,43 @@ export const STANDARD_PROCEDURES: StandardProcedure[] = [
     name: 'Darah Lengkap (DL)',
     icd9: '90.59',
     category: 'Laboratorium',
-    aliases: ['dl', 'darah rutin', 'cbc', 'hemoglobin leukosit'],
+    aliases: ['dl', 'darah rutin', 'cbc', 'hemoglobin leukosit', 'leukosit'],
   },
   {
     name: 'GDA / GDS Rutin',
-    icd9: '90.59',
+    icd9: '90.53',
     category: 'Laboratorium',
-    aliases: ['gda', 'gds', 'gula darah', 'glukosa acak'],
+    aliases: ['gda', 'gds', 'gula darah', 'glukosa acak', 'gula'],
   },
   {
     name: 'Elektrolit Serum (Na/K/Cl)',
     icd9: '90.59',
     category: 'Laboratorium',
-    aliases: ['se', 'elektrolit', 'natrium kalium klorida'],
+    aliases: ['se', 'elektrolit', 'natrium kalium klorida', 'kalium', 'natrium'],
   },
   {
     name: 'Faal Ginjal (Ureum / Kreatinin)',
     icd9: '90.59',
     category: 'Laboratorium',
-    aliases: ['ur cr', 'ureum', 'kreatinin', 'rft', 'bun cr'],
+    aliases: ['ur cr', 'ureum', 'kreatinin', 'rft', 'bun cr', 'fungsi ginjal'],
   },
   {
     name: 'Faal Hati (SGOT / SGPT)',
     icd9: '90.59',
     category: 'Laboratorium',
-    aliases: ['lft', 'sgot', 'sgpt', 'ast alt'],
+    aliases: ['lft', 'sgot', 'sgpt', 'ast alt', 'fungsi hati'],
   },
   {
     name: 'Profil Lipid (Kol/TG/HDL/LDL)',
     icd9: '90.59',
     category: 'Laboratorium',
-    aliases: ['lipid', 'kolesterol', 'trigliserida', 'ldl'],
+    aliases: ['lipid', 'kolesterol', 'trigliserida', 'ldl', 'kol'],
   },
   {
     name: 'Koagulasi (PT / APTT / INR)',
     icd9: '90.59',
     category: 'Laboratorium',
-    aliases: ['pt', 'aptt', 'inr', 'faal hemostasis'],
+    aliases: ['pt', 'aptt', 'inr', 'faal hemostasis', 'hemostasis'],
   },
   {
     name: 'HbA1c',
@@ -519,8 +525,20 @@ export const STANDARD_PROCEDURES: StandardProcedure[] = [
     category: 'Laboratorium',
     aliases: ['ul', 'urine lengkap', 'urinalisis'],
   },
+  {
+    name: 'Kultur Darah & Uji Sensitivitas',
+    icd9: '90.59',
+    category: 'Laboratorium',
+    aliases: ['kultur darah', 'kultur'],
+  },
+  {
+    name: 'Kultur Sputum & BTA',
+    icd9: '90.49',
+    category: 'Laboratorium',
+    aliases: ['sputum', 'bta', 'kultur dahak'],
+  },
 
-  // Prosedur Diagnostik & Lainnya
+  // Prosedur Diagnostik & Konsul
   {
     name: 'EKG 12 Lead',
     icd9: '89.52',
@@ -555,19 +573,49 @@ export const STANDARD_PROCEDURES: StandardProcedure[] = [
     name: 'Pemasangan NGT',
     icd9: '96.07',
     category: 'Lainnya',
-    aliases: ['pasang ngt', 'selang makan'],
+    aliases: ['pasang ngt', 'selang makan', 'ngt'],
   },
   {
     name: 'Pemasangan Kateter Urin',
     icd9: '57.94',
     category: 'Lainnya',
-    aliases: ['pasang dc', 'dower catheter', 'foley catheter'],
+    aliases: ['pasang dc', 'dower catheter', 'foley catheter', 'kateter'],
   },
   {
     name: 'Fisioterapi Motorik & Rehabilitasi',
     icd9: '93.11',
     category: 'Non-Farmakologi',
-    aliases: ['rehab', 'ft', 'fisioterapi'],
+    aliases: ['rehab', 'ft', 'fisioterapi', 'rom'],
+  },
+  {
+    name: 'Raber Pulmonologi (dr. Sp.P)',
+    icd9: 'Konsul',
+    category: 'Diagnostik',
+    aliases: ['raber paru', 'konsul paru', 'sp p', 'pulmo', 'sp.p'],
+  },
+  {
+    name: 'Raber Penyakit Dalam (dr. Sp.PD)',
+    icd9: 'Konsul',
+    category: 'Diagnostik',
+    aliases: ['raber ipd', 'konsul ipd', 'sp pd', 'interna', 'sp.pd'],
+  },
+  {
+    name: 'Raber Kardiologi (dr. Sp.JP)',
+    icd9: 'Konsul',
+    category: 'Diagnostik',
+    aliases: ['raber jantung', 'konsul jantung', 'sp jp', 'kardio', 'sp.jp'],
+  },
+  {
+    name: 'Raber Bedah Saraf (dr. Sp.BS)',
+    icd9: 'Konsul',
+    category: 'Diagnostik',
+    aliases: ['raber bs', 'konsul bedah saraf', 'sp bs', 'sp.bs'],
+  },
+  {
+    name: 'Raber Gizi Klinis (dr. Sp.GK)',
+    icd9: 'Konsul',
+    category: 'Diagnostik',
+    aliases: ['raber gizi', 'konsul gizi', 'sp gk', 'sp.gk', 'nutrisi'],
   },
 ]
 
@@ -577,43 +625,67 @@ export const STANDARD_DIAGNOSES: StandardDiagnosis[] = [
     name: 'Stroke Iskemik Akut (Cerebral Infarction)',
     icd10: 'I63.9',
     category: 'Neurologi',
-    aliases: ['stroke iskemik', 'infark serebri', 'snh', 'stroke non hemoragik', 'ischemic stroke'],
+    aliases: ['cv', 'cva', 'cva infark', 'cva infark akut', 'stroke iskemik', 'infark serebri', 'snh', 'stroke non hemoragik', 'ischemic stroke', 'trombotik', 'cva trombotik'],
+  },
+  {
+    name: 'Stroke Iskemik Emboli (Cerebral Embolism)',
+    icd10: 'I63.4',
+    category: 'Neurologi',
+    aliases: ['cva emboli', 'stroke emboli', 'emboli serebri'],
   },
   {
     name: 'Perdarahan Intraserebral (ICH / Stroke Hemoragik)',
     icd10: 'I61.9',
     category: 'Neurologi',
-    aliases: ['ich', 'stroke hemoragik', 'sh', 'perdarahan intraserebral', 'intracerebral hemorrhage'],
+    aliases: ['ich', 'cva bleeding', 'cva ich', 'stroke hemoragik', 'sh', 'perdarahan intraserebral', 'intracerebral hemorrhage'],
   },
   {
     name: 'Perdarahan Subaraknoid (SAH)',
     icd10: 'I60.9',
     category: 'Neurologi',
-    aliases: ['sah', 'subarachnoid hemorrhage'],
+    aliases: ['sah', 'cva sah', 'subarachnoid hemorrhage', 'perdarahan subaraknoid'],
   },
   {
     name: 'Transient Ischemic Attack (TIA)',
     icd10: 'G45.9',
     category: 'Neurologi',
-    aliases: ['tia'],
+    aliases: ['tia', 'cva tia', 'transient ischemic attack'],
   },
   {
     name: 'Epilepsi & Bangkitan Kejang Simtomatik',
     icd10: 'G40.9',
     category: 'Neurologi',
-    aliases: ['kejang', 'epilepsi', 'seizure', 'status epileptikus'],
+    aliases: ['kejang', 'epilepsi', 'seizure', 'bangkitan', 'konvulsi'],
+  },
+  {
+    name: 'Status Epileptikus',
+    icd10: 'G41.9',
+    category: 'Neurologi',
+    aliases: ['status epileptikus', 'kejang berulang', 'status convulsive'],
   },
   {
     name: 'Cephalgia / Tension Type Headache',
     icd10: 'G44.2',
     category: 'Neurologi',
-    aliases: ['cephalgia', 'sakit kepala', 'nyeri kepala', 'tth'],
+    aliases: ['cephalgia', 'sakit kepala', 'nyeri kepala', 'tth', 'tension headache'],
+  },
+  {
+    name: 'Migraine tanpa Aura / dengan Aura',
+    icd10: 'G43.9',
+    category: 'Neurologi',
+    aliases: ['migraine', 'migren', 'sakit kepala sebelah'],
+  },
+  {
+    name: 'Trigeminal Neuralgia',
+    icd10: 'G50.0',
+    category: 'Neurologi',
+    aliases: ['trigeminal', 'tic douloureux', 'neuralgia trigeminal'],
   },
   {
     name: 'Vertigo Perifer (BPPV / Vestibulopati)',
     icd10: 'H81.1',
     category: 'Neurologi',
-    aliases: ['vertigo', 'bppv', 'pusing berputar'],
+    aliases: ['vertigo', 'bppv', 'pusing berputar', 'vestibulopati'],
   },
   {
     name: 'Vertigo Sentral',
@@ -625,25 +697,55 @@ export const STANDARD_DIAGNOSES: StandardDiagnosis[] = [
     name: 'Bells Palsy (Paresis N. VII Perifer)',
     icd10: 'G51.0',
     category: 'Neurologi',
-    aliases: ['bells palsy', 'n vii', 'fasialis perifer'],
+    aliases: ['bells palsy', 'bell palsy', 'n vii', 'fasialis perifer', 'merot', 'paresis fasialis'],
   },
   {
-    name: 'Ensefalopati Metabolik',
+    name: 'Ensefalopati Metabolik / Toksik',
     icd10: 'G93.4',
     category: 'Neurologi',
-    aliases: ['ensefalopati', 'metabolic encephalopathy', 'penurunan kesadaran ec metabolik'],
+    aliases: ['ensefalopati', 'metabolic encephalopathy', 'penurunan kesadaran ec metabolik', 'doc ec metabolik'],
+  },
+  {
+    name: 'Ensefalopati Hipoksik Iskemik (HIE)',
+    icd10: 'G93.1',
+    category: 'Neurologi',
+    aliases: ['hie', 'hypoxic encephalopathy', 'ensefalopati hipoksik', 'post rosc'],
   },
   {
     name: 'Meningitis / Meningoensefalitis',
     icd10: 'G00.9',
     category: 'Neurologi',
-    aliases: ['meningitis', 'meningoensefalitis', 'infeksi ssp'],
+    aliases: ['meningitis', 'meningoensefalitis', 'infeksi ssp', 'radang selaput otak'],
   },
   {
     name: 'Spondilosis Lumbal / HNP (Hernia Nukleus Pulposus)',
     icd10: 'M51.2',
     category: 'Neurologi',
-    aliases: ['hnp', 'spondilosis', 'lbp', 'ischialgia'],
+    aliases: ['hnp', 'spondilosis', 'lbp', 'ischialgia', 'nyeri pinggang'],
+  },
+  {
+    name: 'Spondilosis Servikal / Radikulopati Servikal',
+    icd10: 'M47.8',
+    category: 'Neurologi',
+    aliases: ['spondilosis servikal', 'radikulopati', 'cervical root syndrome', 'nyeri leher'],
+  },
+  {
+    name: 'Guillain-Barre Syndrome (GBS)',
+    icd10: 'G61.0',
+    category: 'Neurologi',
+    aliases: ['gbs', 'guillain barre', 'polineuropati akut'],
+  },
+  {
+    name: 'Myasthenia Gravis',
+    icd10: 'G70.0',
+    category: 'Neurologi',
+    aliases: ['myasthenia', 'mg', 'ptodid', 'kelemahan otot'],
+  },
+  {
+    name: 'SOL Intrakranial (Space Occupying Lesion)',
+    icd10: 'D49.6',
+    category: 'Neurologi',
+    aliases: ['sol', 'tumor otak', 'massa intrakranial', 'brain tumor'],
   },
   {
     name: 'Polineuropati Diabetik',
@@ -651,13 +753,49 @@ export const STANDARD_DIAGNOSES: StandardDiagnosis[] = [
     category: 'Neurologi',
     aliases: ['polineuropati', 'neuropati diabetik', 'kebas baal dm'],
   },
+  {
+    name: 'Carpal Tunnel Syndrome (CTS)',
+    icd10: 'G56.0',
+    category: 'Neurologi',
+    aliases: ['cts', 'carpal tunnel', 'kebas tangan'],
+  },
+  {
+    name: 'Parkinson Disease',
+    icd10: 'G20',
+    category: 'Neurologi',
+    aliases: ['parkinson', 'tremor parkinson', 'parkinsonism'],
+  },
+  {
+    name: 'Penurunan Kesadaran (Loss / Decrease of Consciousness)',
+    icd10: 'R40.2',
+    category: 'Neurologi',
+    aliases: ['doc', 'penurunan kesadaran', 'tidak sadar', 'soporous', 'koma', 'somnolen'],
+  },
 
   // Komorbiditas Umum & Penyakit Dalam
+  {
+    name: 'Pneumonia Aspirasi',
+    icd10: 'J69.0',
+    category: 'IPD',
+    aliases: ['pneumonia aspirasi', 'aspirasi pneumonia', 'aspirasi'],
+  },
+  {
+    name: 'Pneumonia / CAP (Community Acquired Pneumonia)',
+    icd10: 'J18.9',
+    category: 'IPD',
+    aliases: ['pneumonia', 'cap', 'hap', 'infeksi paru', 'ronkhi basah'],
+  },
   {
     name: 'Hipertensi Grade 1-2 / Urgency',
     icd10: 'I10',
     category: 'IPD',
     aliases: ['hipertensi', 'ht', 'ht urgency', 'hypertension', 'tekanan darah tinggi'],
+  },
+  {
+    name: 'Hipertensi Emergency / Krisis Hipertensi',
+    icd10: 'I16.9',
+    category: 'IPD',
+    aliases: ['ht emergency', 'krisis hipertensi', 'hipertensi emergensi'],
   },
   {
     name: 'Diabetes Melitus Tipe 2 (T2DM)',
@@ -675,50 +813,95 @@ export const STANDARD_DIAGNOSES: StandardDiagnosis[] = [
     name: 'Chronic Kidney Disease (CKD)',
     icd10: 'N18.9',
     category: 'IPD',
-    aliases: ['ckd', 'gagal ginjal kronik', 'ggk'],
+    aliases: ['ckd', 'gagal ginjal kronik', 'ggk', 'crf'],
   },
   {
     name: 'Hipokalemia',
     icd10: 'E87.6',
     category: 'IPD',
-    aliases: ['hipokalemia', 'kalium rendah'],
+    aliases: ['hipokalemia', 'kalium rendah', 'k rendah'],
   },
   {
     name: 'Hiponatremia',
     icd10: 'E87.1',
     category: 'IPD',
-    aliases: ['hiponatremia', 'natrium rendah'],
+    aliases: ['hiponatremia', 'natrium rendah', 'na rendah'],
   },
   {
     name: 'Dispepsia / Gastritis Akut',
     icd10: 'K30',
     category: 'IPD',
-    aliases: ['dispepsia', 'gastritis', 'maag', 'mual muntah'],
-  },
-  {
-    name: 'Pneumonia / CAP (Community Acquired Pneumonia)',
-    icd10: 'J18.9',
-    category: 'IPD',
-    aliases: ['pneumonia', 'cap', 'hap', 'infeksi paru'],
+    aliases: ['dispepsia', 'gastritis', 'maag', 'mual muntah', 'heartburn'],
   },
   {
     name: 'Gagal Jantung Kongestif (CHF)',
     icd10: 'I50.9',
     category: 'Kardiologi',
-    aliases: ['chf', 'gagal jantung', 'heart failure'],
+    aliases: ['chf', 'gagal jantung', 'heart failure', 'decomp'],
+  },
+  {
+    name: 'Atrial Fibrilasi (AF)',
+    icd10: 'I48.9',
+    category: 'Kardiologi',
+    aliases: ['af', 'atrial fibrilasi', 'aritmia af'],
+  },
+  {
+    name: 'Perdarahan Saluran Cerna Atas (SCBA)',
+    icd10: 'K92.2',
+    category: 'IPD',
+    aliases: ['scba', 'hematemesis', 'melena', 'perdarahan lambung'],
+  },
+  {
+    name: 'Sepsis',
+    icd10: 'A41.9',
+    category: 'IPD',
+    aliases: ['sepsis', 'syok sepsis', 'bakteremia'],
   },
 ]
 
 /**
- * Pencarian prediktif obat standar Fornas
+ * Ekstraksi awalan rute klinis (Inj., PO, Tab., Drip, Inf., IVFD)
+ */
+export function extractRoutePrefix(query: string): { routePrefix: string; drugQuery: string } {
+  const match = query.match(/^(inj\.?|po\.?|tab\.?|drip|inf\.?|ivfd)\s*(.*)$/i)
+  if (match) {
+    const rawPrefix = match[1].toLowerCase().replace(/\.$/, '')
+    let normalized = 'Inj.'
+    if (rawPrefix === 'po') normalized = 'PO'
+    else if (rawPrefix === 'tab') normalized = 'Tab.'
+    else if (rawPrefix === 'drip') normalized = 'Drip'
+    else if (rawPrefix === 'inf') normalized = 'Inf.'
+    else if (rawPrefix === 'ivfd') normalized = 'IVFD'
+    return { routePrefix: normalized, drugQuery: match[2].trim() }
+  }
+  return { routePrefix: '', drugQuery: query.trim() }
+}
+
+/**
+ * Pencarian prediktif obat standar Fornas & terapi suportif
  */
 export function searchStandardDrugs(query: string, limit = 6): StandardDrug[] {
-  const q = query.trim().toLowerCase()
+  const { routePrefix, drugQuery } = extractRoutePrefix(query)
+  const q = drugQuery.toLowerCase()
+
+  // Jika query murni hanya awalan rute (misal "Inj. " atau "PO " atau "Drip ")
+  if (!q && routePrefix) {
+    if (routePrefix === 'Inj.' || routePrefix === 'Drip') {
+      return STANDARD_DRUGS.filter((d) => d.route === 'iv' || d.commonDosages.some((dos) => /iv|drip|amp|vial/i.test(dos))).slice(0, limit)
+    }
+    if (routePrefix === 'PO' || routePrefix === 'Tab.') {
+      return STANDARD_DRUGS.filter((d) => d.route === 'oral' || d.commonDosages.some((dos) => /po|tab|kapsul/i.test(dos))).slice(0, limit)
+    }
+    if (routePrefix === 'Inf.' || routePrefix === 'IVFD') {
+      return STANDARD_DRUGS.filter((d) => d.name.includes('Infus') || d.name.includes('NaCl') || d.name.includes('Asering') || d.name.includes('RL') || d.name.includes('Manitol')).slice(0, limit)
+    }
+  }
+
   if (!q) return []
 
   return STANDARD_DRUGS.filter((d) => {
     if (d.name.toLowerCase().includes(q)) return true
-    if (d.aliases?.some((a) => a.includes(q))) return true
+    if (d.aliases?.some((a) => a.toLowerCase().includes(q) || q.includes(a.toLowerCase()))) return true
     return false
   }).slice(0, limit)
 }
@@ -739,8 +922,8 @@ export function searchStandardProcedures(
       return false
     }
     if (p.name.toLowerCase().includes(q)) return true
-    if (p.icd9.includes(q)) return true
-    if (p.aliases?.some((a) => a.includes(q))) return true
+    if (p.icd9.toLowerCase().includes(q)) return true
+    if (p.aliases?.some((a) => a.toLowerCase().includes(q) || q.includes(a.toLowerCase()))) return true
     return false
   }).slice(0, limit)
 }
@@ -755,7 +938,7 @@ export function searchStandardDiagnoses(query: string, limit = 6): StandardDiagn
   return STANDARD_DIAGNOSES.filter((d) => {
     if (d.name.toLowerCase().includes(q)) return true
     if (d.icd10.toLowerCase().includes(q)) return true
-    if (d.aliases?.some((a) => a.includes(q))) return true
+    if (d.aliases?.some((a) => a.toLowerCase().includes(q) || q.includes(a.toLowerCase()))) return true
     return false
   }).slice(0, limit)
 }

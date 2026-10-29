@@ -4,6 +4,7 @@ import {
   searchStandardProcedures,
   searchStandardDiagnoses,
   searchStandardComplaints,
+  extractRoutePrefix,
   type StandardDrug,
   type StandardProcedure,
   type StandardDiagnosis,
@@ -134,36 +135,43 @@ export default function PredictiveInput({
 
     if (type === 'drug') {
       const drug = item as StandardDrug
+      const { routePrefix } = extractRoutePrefix(value)
+      const prefix = routePrefix ? `${routePrefix} ` : ''
+
       if (drug.commonDosages && drug.commonDosages.length > 0 && !activeDrugForDosage) {
         // Expand dosage sub-options if present
         setActiveDrugForDosage(drug)
-        onChange(drug.name)
+        onChange(`${prefix}${drug.name}`)
         return
       }
-      onChange(drug.name)
+
+      const fullName = `${prefix}${drug.name}`
+      onChange(fullName)
       if (onSelect) {
         onSelect({
-          name: drug.name,
+          name: fullName,
           detail: drug.commonDosages?.[0] || '',
           category: drug.category,
         })
       }
     } else if (type === 'procedure') {
       const proc = item as StandardProcedure
-      onChange(proc.name)
+      const fullName = proc.icd9 ? `${proc.name} [${proc.icd9}]` : proc.name
+      onChange(fullName)
       if (onSelect) {
         onSelect({
-          name: proc.name,
+          name: fullName,
           code: proc.icd9,
           category: proc.category,
         })
       }
     } else if (type === 'diagnosis') {
       const diag = item as StandardDiagnosis
-      onChange(diag.name)
+      const fullName = diag.icd10 ? `${diag.name} [${diag.icd10}]` : diag.name
+      onChange(fullName)
       if (onSelect) {
         onSelect({
-          name: diag.name,
+          name: fullName,
           code: diag.icd10,
           category: diag.category,
         })
@@ -175,10 +183,14 @@ export default function PredictiveInput({
   }
 
   const handlePickDosage = (drug: StandardDrug, dosage: string) => {
-    onChange(drug.name)
+    const { routePrefix } = extractRoutePrefix(value)
+    const prefix = routePrefix ? `${routePrefix} ` : ''
+    const fullName = `${prefix}${drug.name}`
+
+    onChange(fullName)
     if (onSelect) {
       onSelect({
-        name: drug.name,
+        name: fullName,
         detail: dosage,
         category: drug.category,
       })
