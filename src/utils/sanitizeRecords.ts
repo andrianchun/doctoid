@@ -358,33 +358,6 @@ export async function sanitizeMedicalRecordsInDb(): Promise<{ penunjangCleaned: 
         })
       }
     }
-
-    // 5. Rekonsiliasi antrean inbox dengan pasien rawat inap yang sudah ada di database:
-    // Jika pasien sudah tercatat di db.patients, otomatis ubah status konsulannya menjadi 'imported'
-    const cleanCore = (str?: string) =>
-      (str || '')
-        .toLowerCase()
-        .replace(/^(?:dr|dok|dokter|tn|ny|sdri|sdr|an|by)\.?\s+/i, '')
-        .replace(/[^a-z0-9]/g, '')
-        .trim()
-
-    for (const item of allInbox) {
-      if (!item.id || item.status !== 'pending') continue
-      const pName = cleanCore(item.parsed_data?.nama_depan)
-      const pRm = (item.parsed_data?.no_rm || '').trim()
-
-      const isAlreadyInPatients = allPatients.some((p) => {
-        if (pRm && p.no_rm && p.no_rm.trim() === pRm) return true
-        const curName = cleanCore(p.nama_depan)
-        if (curName && pName && (curName === pName || (curName.length >= 4 && pName.includes(curName)))) return true
-        if (curName && curName.length >= 4 && (item.raw_text || '').toLowerCase().includes(curName)) return true
-        return false
-      })
-
-      if (isAlreadyInPatients) {
-        await db.inboxQueue.update(item.id, { status: 'imported' })
-      }
-    }
   } catch (err) {
     console.warn('Sanitize medical records error:', err)
   }

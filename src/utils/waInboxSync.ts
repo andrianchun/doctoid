@@ -617,41 +617,9 @@ export async function syncWaInboxToDexie() {
       if (it.created_at) activeServerKeys.add(String(it.created_at))
     })
 
-    const allPatients = await db.patients.toArray()
-    const cleanCore = (str?: string) =>
-      (str || '')
-        .toLowerCase()
-        .replace(/^(?:dr|dok|dokter|tn|ny|sdri|sdr|an|by)\.?\s+/i, '')
-        .replace(/[^a-z0-9]/g, '')
-        .trim()
-
-    const isPatientAlreadyAdmitted = (it: any): boolean => {
-      const pName = cleanCore(it.parsed_data?.nama_depan)
-      const pRm = (it.parsed_data?.no_rm || '').trim()
-      if (!pName && !pRm) return false
-
-      return allPatients.some((p) => {
-        if (pRm && p.no_rm && p.no_rm.trim() === pRm) return true
-        const curName = cleanCore(p.nama_depan)
-        if (curName && pName) {
-          if (curName === pName) return true
-          if (curName.length >= 4 && pName.length >= 4) {
-            if (curName.includes(pName) || pName.includes(curName)) return true
-          }
-        }
-        return false
-      })
-    }
-
     const localPending = await db.inboxQueue.where('status').equals('pending').toArray()
     for (const loc of localPending) {
-      // 1. Jika pasien sudah tercatat di db.patients, otomatis tandai 'imported'
-      if (isPatientAlreadyAdmitted(loc)) {
-        await db.inboxQueue.update(loc.id!, { status: 'imported' })
-        continue
-      }
-
-      // 2. Jika item sudah tidak ada di antrean server aktif (berarti sudah di-dismiss di HP lain/server)
+      // Jika item sudah tidak ada di antrean server aktif (berarti sudah di-dismiss di HP lain/server)
       const locKey1 = String(loc.id || '')
       const locKey2 = String(loc.created_at || '')
       if (!activeServerKeys.has(locKey1) && !activeServerKeys.has(locKey2)) {
@@ -664,41 +632,37 @@ export async function syncWaInboxToDexie() {
     for (const item of items) {
       if (!item.raw_text && (!item.attachments || item.attachments.length === 0)) continue
 
+      const numId = typeof item.id === 'number' ? item.id : Number(item.id) || undefined
       // Cek apakah item sudah pernah tercatat di inboxQueue lokal berdasarkan ID / timestamp unik
       const existing = await db.inboxQueue
         .filter((q) => {
-          const idMatch = Boolean(item.id && q.id && String(q.id) === String(item.id))
+          const idMatch = Boolean(
+            (item.id && q.id && String(q.id) === String(item.id)) ||
+            (numId && q.id && q.id === numId)
+          )
           const timeMatch = Boolean(item.created_at && q.created_at && q.created_at === item.created_at)
           return idMatch || timeMatch
         })
         .first()
 
-      const isAdmitted = isPatientAlreadyAdmitted(item)
-
       if (!existing) {
-        const numericId = typeof item.id === 'number' ? item.id : Number(item.id) || undefined
         await db.inboxQueue.put({
-          ...(numericId ? { id: numericId } : {}),
+          ...(numId ? { id: numId } : {}),
           source: 'whatsapp',
           sender_name: item.sender_name || 'Konsulan WhatsApp',
           sender_phone: item.sender_phone || '',
           raw_text: item.raw_text || '',
           parsed_data: item.parsed_data || undefined,
           attachments: item.attachments || [],
-          status: isAdmitted ? 'imported' : 'pending',
+          status: 'pending',
           created_at: item.created_at || new Date().toISOString(),
         })
 
-        // Picu notifikasi di Notification Bar HP hanya jika pasien belum masuk rawat inap
-        if (!isAdmitted) {
-          sendLocalNotification(item)
-        }
-      } else if (existing.status === 'pending') {
-        if (isAdmitted || isPatientAlreadyAdmitted(existing)) {
-          await db.inboxQueue.update(existing.id!, { status: 'imported' })
-          continue
-        }
-        // Jika item masih pending dan ada pembaruan teks atau data lampiran yang lebih lengkap / valid
+        // Picu notifikasi di Notification Bar HP
+        sendLocalNotification(item)
+      } else {
+        // Jika item aktif di antrean server, pastikan statusnya 'pending' agar muncul di inbox dokter
+        // (memulihkan jika sebelumnya sempat salah tertandai 'imported' otomatis oleh pengecekan nama pasien lama)
         const newAttachCount = item.attachments?.length || 0
         const oldAttachCount = existing.attachments?.length || 0
         const textChanged = Boolean(item.raw_text && item.raw_text !== existing.raw_text)
@@ -707,8 +671,9 @@ export async function syncWaInboxToDexie() {
         const incomingHasUrls = (item.attachments || []).some((a: any) => Boolean(a.url))
         const existingHasUrls = (existing.attachments || []).some((a: any) => Boolean(a.url))
         const attachUpdated = newAttachCount !== oldAttachCount || (incomingDataLen > existingDataLen) || (incomingHasUrls && !existingHasUrls)
+        const needsResurrect = existing.status !== 'pending'
 
-        if (attachUpdated || textChanged) {
+        if (attachUpdated || textChanged || needsResurrect) {
           let resolvedAttachments = item.attachments || existing.attachments
           // Jika server membawa URL Full-HD WebP/WebM, gabungkan dengan preview lokal agar instan & jernih
           if (incomingHasUrls && existing.attachments && existing.attachments.length > 0) {
@@ -723,11 +688,16 @@ export async function syncWaInboxToDexie() {
           }
 
           await db.inboxQueue.update(existing.id!, {
+            status: 'pending',
             raw_text: item.raw_text || existing.raw_text,
             attachments: resolvedAttachments,
             parsed_data: item.parsed_data || existing.parsed_data,
             created_at: item.created_at || existing.created_at,
           })
+
+          if (needsResurrect) {
+            sendLocalNotification(item)
+          }
         }
       }
     }
