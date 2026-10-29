@@ -1,10 +1,32 @@
 import { useEffect } from 'react'
-import { Capacitor } from '@capacitor/core'
+import { Capacitor, CapacitorHttp } from '@capacitor/core'
 import { LocalNotifications } from '@capacitor/local-notifications'
 import { PushNotifications } from '@capacitor/push-notifications'
 import { db } from '../db'
 import { triggerCloudSync, autoRepairMissingAttachmentMedia } from '../sync'
 import { extractDemografi } from '../parser'
+
+async function fetchHttpJson(url: string, timeoutMs = 10000): Promise<any> {
+  if (Capacitor.isNativePlatform()) {
+    try {
+      const res = await CapacitorHttp.get({
+        url,
+        connectTimeout: timeoutMs,
+        readTimeout: timeoutMs,
+      })
+      if (res.status >= 200 && res.status < 300) {
+        return typeof res.data === 'string' ? JSON.parse(res.data) : res.data
+      }
+      throw new Error(`CapacitorHttp returned ${res.status}`)
+    } catch (nativeErr) {
+      console.warn('[waInboxSync] Native CapacitorHttp get failed, falling back to fetch:', nativeErr)
+    }
+  }
+
+  const fRes = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) })
+  if (!fRes.ok) throw new Error(`Fetch error: ${fRes.status}`)
+  return await fRes.json()
+}
 
 let notifPermissionRequested = false
 let pushInitialized = false
@@ -279,11 +301,19 @@ export async function dismissInboxItem(idOrCreatedAt: number | string) {
   // 1. Hubungi Gateway VM (Port 3001)
   try {
     const gatewayUrl = localStorage.getItem('doctoid_wa_gateway_url') || 'http://35.255.95.161:3001'
-    fetch(`${gatewayUrl}/api/inbox/dismiss`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: idOrCreatedAt }),
-    }).catch(() => {})
+    if (Capacitor.isNativePlatform()) {
+      CapacitorHttp.post({
+        url: `${gatewayUrl}/api/inbox/dismiss`,
+        headers: { 'Content-Type': 'application/json' },
+        data: { id: idOrCreatedAt },
+      }).catch(() => {})
+    } else {
+      fetch(`${gatewayUrl}/api/inbox/dismiss`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: idOrCreatedAt }),
+      }).catch(() => {})
+    }
   } catch {}
 
   // 2. Hubungi Firestore doctoid/inbox_${USER_UID}
@@ -332,11 +362,19 @@ export async function markInboxItemImported(idOrCreatedAt: number | string) {
   // Hapus dari antrean server gateway agar tidak muncul di device lain
   try {
     const gatewayUrl = localStorage.getItem('doctoid_wa_gateway_url') || 'http://35.255.95.161:3001'
-    fetch(`${gatewayUrl}/api/inbox/dismiss`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: idOrCreatedAt }),
-    }).catch(() => {})
+    if (Capacitor.isNativePlatform()) {
+      CapacitorHttp.post({
+        url: `${gatewayUrl}/api/inbox/dismiss`,
+        headers: { 'Content-Type': 'application/json' },
+        data: { id: idOrCreatedAt },
+      }).catch(() => {})
+    } else {
+      fetch(`${gatewayUrl}/api/inbox/dismiss`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: idOrCreatedAt }),
+      }).catch(() => {})
+    }
   } catch {}
 
   try {
@@ -378,11 +416,19 @@ export async function dismissAllInboxItems() {
   // 1. Hubungi Gateway VM
   try {
     const gatewayUrl = localStorage.getItem('doctoid_wa_gateway_url') || 'http://35.255.95.161:3001'
-    fetch(`${gatewayUrl}/api/inbox/clear`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ all: true }),
-    }).catch(() => {})
+    if (Capacitor.isNativePlatform()) {
+      CapacitorHttp.post({
+        url: `${gatewayUrl}/api/inbox/clear`,
+        headers: { 'Content-Type': 'application/json' },
+        data: { all: true },
+      }).catch(() => {})
+    } else {
+      fetch(`${gatewayUrl}/api/inbox/clear`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ all: true }),
+      }).catch(() => {})
+    }
   } catch {}
 
   // 2. Kosongkan Firestore doctoid/inbox_${USER_UID}
@@ -535,17 +581,15 @@ export async function syncWaInboxToDexie() {
     const gatewayUrl = localStorage.getItem('doctoid_wa_gateway_url') || 'http://35.255.95.161:3001'
 
     const fetchFirestore = async (): Promise<any[]> => {
-      const fRes = await fetch(firestoreUrl, { signal: AbortSignal.timeout(2000) })
-      if (!fRes.ok) throw new Error('Firestore failed')
-      const fData = await fRes.json()
-      const vals = fData.fields?.items?.arrayValue?.values || []
+      const fData = await fetchHttpJson(firestoreUrl, 8000)
+      const vals = fData?.fields?.items?.arrayValue?.values || []
       return vals.map((v: any) => fromFirestoreMap(v.mapValue?.fields || {}))
     }
 
     const fetchGateway = async (): Promise<any[]> => {
-      const gRes = await fetch(`${gatewayUrl}/api/inbox?t=${Date.now()}`, { signal: AbortSignal.timeout(3500) })
-      if (!gRes.ok) throw new Error('Gateway failed')
-      return await gRes.json()
+      const gData = await fetchHttpJson(`${gatewayUrl}/api/inbox?t=${Date.now()}`, 8000)
+      if (!Array.isArray(gData)) throw new Error('Gateway response not array')
+      return gData
     }
 
     try {
@@ -553,12 +597,14 @@ export async function syncWaInboxToDexie() {
       serverResponded = true
     } catch {
       try {
-        const res = await fetch(`https://docto-id.web.app/wa-inbox.json?t=${Date.now()}`, { signal: AbortSignal.timeout(1500) })
-        if (res.ok) {
-          items = await res.json()
+        items = await fetchFirestore()
+        serverResponded = true
+      } catch {
+        try {
+          items = await fetchGateway()
           serverResponded = true
-        }
-      } catch {}
+        } catch {}
+      }
     }
 
     if (!serverResponded || !Array.isArray(items)) return
@@ -582,12 +628,17 @@ export async function syncWaInboxToDexie() {
     const isPatientAlreadyAdmitted = (it: any): boolean => {
       const pName = cleanCore(it.parsed_data?.nama_depan)
       const pRm = (it.parsed_data?.no_rm || '').trim()
-      const raw = (it.raw_text || '').toLowerCase()
+      if (!pName && !pRm) return false
+
       return allPatients.some((p) => {
         if (pRm && p.no_rm && p.no_rm.trim() === pRm) return true
         const curName = cleanCore(p.nama_depan)
-        if (curName && pName && (curName === pName || (curName.length >= 4 && pName.includes(curName)))) return true
-        if (curName && curName.length >= 4 && raw.includes(curName)) return true
+        if (curName && pName) {
+          if (curName === pName) return true
+          if (curName.length >= 4 && pName.length >= 4) {
+            if (curName.includes(pName) || pName.includes(curName)) return true
+          }
+        }
         return false
       })
     }

@@ -7,6 +7,7 @@ export interface AttachmentMenuProps {
   onSelectMic: () => void
   disabled?: boolean
   isListening?: boolean
+  align?: 'left' | 'right'
 }
 
 export default function AttachmentMenu({
@@ -15,6 +16,7 @@ export default function AttachmentMenu({
   onSelectMic,
   disabled = false,
   isListening = false,
+  align = 'left',
 }: AttachmentMenuProps) {
   const [isOpen, setIsOpen] = useState(false)
   const [activeItem, setActiveItem] = useState<'camera' | 'gallery' | 'mic' | null>(null)
@@ -55,7 +57,8 @@ export default function AttachmentMenu({
 
   const handlePointerMove = (e: React.PointerEvent<HTMLButtonElement>) => {
     if (!isOpen || disabled) return
-    const dx = e.clientX - startPos.current.x
+    const rawDx = e.clientX - startPos.current.x
+    const dx = align === 'right' ? -rawDx : rawDx
     const dy = startPos.current.y - e.clientY // y axis is inverted on screen
     const distance = Math.sqrt(dx * dx + dy * dy)
 
@@ -121,7 +124,7 @@ export default function AttachmentMenu({
   }
 
   return (
-    <div className="relative flex items-center justify-center size-10 shrink-0 mb-0.5" ref={containerRef}>
+    <div className="relative flex items-center justify-center size-10 shrink-0" ref={containerRef}>
       <button
         type="button"
         disabled={disabled}
@@ -146,15 +149,17 @@ export default function AttachmentMenu({
       </button>
 
       {/* Floating Radial Menu (MOBA Style Fan ala Lomeal) */}
-      <div className="absolute pointer-events-none inset-0 flex items-end justify-start z-30">
+      <div className={`absolute pointer-events-none inset-0 flex items-end ${align === 'right' ? 'justify-end' : 'justify-start'} z-30`}>
         <div
-          className={`absolute bottom-0 left-0 w-[150px] h-[150px] origin-bottom-left transition-all duration-300 ease-out ${
+          className={`absolute bottom-0 ${
+            align === 'right' ? 'right-0 origin-bottom-right' : 'left-0 origin-bottom-left'
+          } w-[150px] h-[150px] transition-all duration-300 ease-out ${
             isOpen ? 'opacity-100 scale-100 pointer-events-auto' : 'opacity-0 scale-50 pointer-events-none'
           }`}
         >
           {/* Active Tooltip / Label */}
           {activeItem && (
-            <div className="absolute -top-3 left-10 -translate-y-full px-2.5 py-1 rounded-full bg-slate-900/90 text-white text-[11px] font-semibold whitespace-nowrap shadow-lg pointer-events-none animate-in fade-in zoom-in-95 duration-100 z-40">
+            <div className={`absolute -top-3 ${align === 'right' ? 'right-10' : 'left-10'} -translate-y-full px-2.5 py-1 rounded-full bg-slate-900/90 text-white text-[11px] font-semibold whitespace-nowrap shadow-lg pointer-events-none animate-in fade-in zoom-in-95 duration-100 z-40`}>
               {activeItem === 'camera' && 'Ekstrak Kamera'}
               {activeItem === 'gallery' && 'Ekstrak Galeri'}
               {activeItem === 'mic' && 'Dikte Suara'}
@@ -163,48 +168,54 @@ export default function AttachmentMenu({
 
           {/* Fan Background SVG */}
           <svg width="150" height="150" viewBox="0 0 150 150" className="absolute inset-0 drop-shadow-2xl">
-            {/* Center Hub — Putih menyatu dengan fan shape */}
-            <path
-              d="M 0 150 L 32 150 A 32 32 0 0 0 0 118 Z"
-              className="fill-white"
-            />
-            {/* Slice 1: Camera (0-30 deg) */}
-            <path
-              d="M 32 150 L 150 150 A 150 150 0 0 0 129.9 75 L 27.71 134 A 32 32 0 0 1 32 150 Z"
-              className={`transition-colors duration-200 stroke-slate-200/90 stroke-[1.5px] ${
-                isOpen ? 'pointer-events-auto cursor-pointer' : 'pointer-events-none'
-              } ${activeItem === 'camera' ? 'fill-emerald-500' : 'fill-white/95 backdrop-blur-md'}`}
-              onPointerEnter={() => setActiveItem('camera')}
-              onPointerLeave={() => setActiveItem(null)}
-              onClick={(e) => triggerItem(e, 'camera')}
-            />
-            {/* Slice 2: Gallery (30-60 deg) */}
-            <path
-              d="M 27.71 134 L 129.9 75 A 150 150 0 0 0 75 20.1 L 16 122.29 A 32 32 0 0 1 27.71 134 Z"
-              className={`transition-colors duration-200 stroke-slate-200/90 stroke-[1.5px] ${
-                isOpen ? 'pointer-events-auto cursor-pointer' : 'pointer-events-none'
-              } ${activeItem === 'gallery' ? 'fill-sky-500' : 'fill-white/95 backdrop-blur-md'}`}
-              onPointerEnter={() => setActiveItem('gallery')}
-              onPointerLeave={() => setActiveItem(null)}
-              onClick={(e) => triggerItem(e, 'gallery')}
-            />
-            {/* Slice 3: Mic (60-90 deg) */}
-            <path
-              d="M 16 122.29 L 75 20.1 A 150 150 0 0 0 0 0 L 0 118 A 32 32 0 0 1 16 122.29 Z"
-              className={`transition-colors duration-200 stroke-slate-200/90 stroke-[1.5px] ${
-                isOpen ? 'pointer-events-auto cursor-pointer' : 'pointer-events-none'
-              } ${activeItem === 'mic' ? 'fill-rose-500' : 'fill-white/95 backdrop-blur-md'}`}
-              onPointerEnter={() => setActiveItem('mic')}
-              onPointerLeave={() => setActiveItem(null)}
-              onClick={(e) => triggerItem(e, 'mic')}
-            />
+            <g transform={align === 'right' ? 'translate(150, 0) scale(-1, 1)' : undefined}>
+              {/* Center Hub — Putih menyatu dengan fan shape */}
+              <path
+                d="M 0 150 L 32 150 A 32 32 0 0 0 0 118 Z"
+                className="fill-white"
+              />
+              {/* Slice 1: Camera (0-30 deg) */}
+              <path
+                d="M 32 150 L 150 150 A 150 150 0 0 0 129.9 75 L 27.71 134 A 32 32 0 0 1 32 150 Z"
+                className={`transition-colors duration-200 stroke-slate-200/90 stroke-[1.5px] ${
+                  isOpen ? 'pointer-events-auto cursor-pointer' : 'pointer-events-none'
+                } ${activeItem === 'camera' ? 'fill-emerald-500' : 'fill-white/95 backdrop-blur-md'}`}
+                onPointerEnter={() => setActiveItem('camera')}
+                onPointerLeave={() => setActiveItem(null)}
+                onClick={(e) => triggerItem(e, 'camera')}
+              />
+              {/* Slice 2: Gallery (30-60 deg) */}
+              <path
+                d="M 27.71 134 L 129.9 75 A 150 150 0 0 0 75 20.1 L 16 122.29 A 32 32 0 0 1 27.71 134 Z"
+                className={`transition-colors duration-200 stroke-slate-200/90 stroke-[1.5px] ${
+                  isOpen ? 'pointer-events-auto cursor-pointer' : 'pointer-events-none'
+                } ${activeItem === 'gallery' ? 'fill-sky-500' : 'fill-white/95 backdrop-blur-md'}`}
+                onPointerEnter={() => setActiveItem('gallery')}
+                onPointerLeave={() => setActiveItem(null)}
+                onClick={(e) => triggerItem(e, 'gallery')}
+              />
+              {/* Slice 3: Mic (60-90 deg) */}
+              <path
+                d="M 16 122.29 L 75 20.1 A 150 150 0 0 0 0 0 L 0 118 A 32 32 0 0 1 16 122.29 Z"
+                className={`transition-colors duration-200 stroke-slate-200/90 stroke-[1.5px] ${
+                  isOpen ? 'pointer-events-auto cursor-pointer' : 'pointer-events-none'
+                } ${activeItem === 'mic' ? 'fill-rose-500' : 'fill-white/95 backdrop-blur-md'}`}
+                onPointerEnter={() => setActiveItem('mic')}
+                onPointerLeave={() => setActiveItem(null)}
+                onClick={(e) => triggerItem(e, 'mic')}
+              />
+            </g>
           </svg>
 
           {/* Radial Icons */}
           {/* CAMERA - 15 deg */}
           <div
-            className="absolute bottom-0 left-0 w-10 h-10 -ml-5 -mb-5 flex items-center justify-center transition-transform pointer-events-none"
-            style={{ transform: `rotate(-15deg) translateX(110px) rotate(15deg) scale(${activeItem === 'camera' ? 1.2 : 1})` }}
+            className={`absolute bottom-0 ${align === 'right' ? 'right-0 -mr-5' : 'left-0 -ml-5'} w-10 h-10 -mb-5 flex items-center justify-center transition-transform pointer-events-none`}
+            style={{
+              transform: align === 'right'
+                ? `rotate(-165deg) translateX(110px) rotate(165deg) scale(${activeItem === 'camera' ? 1.2 : 1})`
+                : `rotate(-15deg) translateX(110px) rotate(15deg) scale(${activeItem === 'camera' ? 1.2 : 1})`
+            }}
           >
             <div className={`w-full h-full flex items-center justify-center rounded-full transition-colors ${activeItem === 'camera' ? 'text-white' : 'text-emerald-600'}`}>
               <Camera size={20} />
@@ -213,8 +224,12 @@ export default function AttachmentMenu({
 
           {/* GALLERY - 45 deg */}
           <div
-            className="absolute bottom-0 left-0 w-10 h-10 -ml-5 -mb-5 flex items-center justify-center transition-transform pointer-events-none"
-            style={{ transform: `rotate(-45deg) translateX(110px) rotate(45deg) scale(${activeItem === 'gallery' ? 1.2 : 1})` }}
+            className={`absolute bottom-0 ${align === 'right' ? 'right-0 -mr-5' : 'left-0 -ml-5'} w-10 h-10 -mb-5 flex items-center justify-center transition-transform pointer-events-none`}
+            style={{
+              transform: align === 'right'
+                ? `rotate(-135deg) translateX(110px) rotate(135deg) scale(${activeItem === 'gallery' ? 1.2 : 1})`
+                : `rotate(-45deg) translateX(110px) rotate(45deg) scale(${activeItem === 'gallery' ? 1.2 : 1})`
+            }}
           >
             <div className={`w-full h-full flex items-center justify-center rounded-full transition-colors ${activeItem === 'gallery' ? 'text-white' : 'text-sky-600'}`}>
               <ImageIcon size={20} />
@@ -223,8 +238,12 @@ export default function AttachmentMenu({
 
           {/* MIC - 75 deg */}
           <div
-            className="absolute bottom-0 left-0 w-10 h-10 -ml-5 -mb-5 flex items-center justify-center transition-transform pointer-events-none"
-            style={{ transform: `rotate(-75deg) translateX(110px) rotate(75deg) scale(${activeItem === 'mic' ? 1.2 : 1})` }}
+            className={`absolute bottom-0 ${align === 'right' ? 'right-0 -mr-5' : 'left-0 -ml-5'} w-10 h-10 -mb-5 flex items-center justify-center transition-transform pointer-events-none`}
+            style={{
+              transform: align === 'right'
+                ? `rotate(-105deg) translateX(110px) rotate(105deg) scale(${activeItem === 'mic' ? 1.2 : 1})`
+                : `rotate(-75deg) translateX(110px) rotate(75deg) scale(${activeItem === 'mic' ? 1.2 : 1})`
+            }}
           >
             <div className={`w-full h-full flex items-center justify-center rounded-full transition-colors ${activeItem === 'mic' ? 'text-white' : 'text-rose-500'}`}>
               <Mic size={20} />

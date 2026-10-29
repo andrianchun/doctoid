@@ -22,8 +22,7 @@ const ShareReceiver: ShareReceiverPlugin | null = Capacitor.isNativePlatform()
 import {
   Mic,
   Loader2, X, ChevronDown, Send,
-  Search, Paperclip, Bell, ScanEye, RotateCw, Play,
-  Camera, FileImage, Sparkles
+  Search, Paperclip, Bell, ScanEye, RotateCw, Play
 } from 'lucide-react'
 import { db, type Jaminan, type TerapiItem, type DiagnosisItem, type RegexField, type Patient, type RawatEpisode, type PeranRawat, type InboxItem, type AttachmentTag } from '../db'
 import { DEPT_ALIH_RAWAT } from './PatientProfile'
@@ -661,13 +660,12 @@ export default function Brainstorm() {
     }
   }, [dockSlot])
 
-  // Melebarkan textarea otomatis saat mengetik/fokus (maksimal 6 baris ~145px)
+  // Menyesuaikan tinggi textarea otomatis sesuai konten (minimum 86px sejajar 2 tombol di kanan, maksimal 145px)
   const adjustTextHeight = useCallback(() => {
     const el = textRef.current
     if (!el) return
     el.style.height = 'auto'
-    const isExpanded = isTextFocused || raw.length > 0
-    const minH = isExpanded ? 70 : 42 // 3 baris saat aktif mengetik / ada teks, 1 baris saat kosong
+    const minH = 86 // Sejajar dengan tinggi 2 tombol tumpuk di kanan (40px + 6px + 40px)
     const maxH = 145 // Maksimal 6 baris agar ergonomis di layar ponsel
     const nextH = Math.min(Math.max(el.scrollHeight, minH), maxH)
     el.style.height = `${nextH}px`
@@ -1899,42 +1897,6 @@ export default function Brainstorm() {
         </div>
       </div>
 
-      {/* Bilah Impor Cepat Layar SIMRS / SPRI Admisi MRS */}
-      <div className="flex items-center justify-between gap-2 bg-gradient-to-r from-blue-50/90 to-indigo-50/80 border border-blue-200/70 rounded-2xl px-3.5 py-2.5 shadow-2xs">
-        <div className="flex items-center gap-2 min-w-0">
-          <Sparkles size={14} className="text-primary shrink-0 animate-pulse" />
-          <div className="min-w-0">
-            <span className="text-xs font-bold text-slate-800 block truncate">
-              Impor Layar SIMRS / SPRI
-            </span>
-            <span className="text-[10px] text-slate-500 block truncate">
-              Auto-parse Identitas, S, O, A, dan P untuk pasien MRS
-            </span>
-          </div>
-        </div>
-        <div className="flex items-center gap-1.5 shrink-0">
-          <button
-            type="button"
-            disabled={busy === 'ai' || busy === 'ocr'}
-            onClick={() => ocrCameraRef.current?.click()}
-            className="text-xs font-bold bg-white hover:bg-slate-50 text-primary border border-primary/30 rounded-xl px-2.5 py-1.5 flex items-center gap-1 shadow-2xs active:scale-95 transition-all cursor-pointer disabled:opacity-50"
-            title="Foto monitor komputer SIMRS atau lembar SPRI admisi"
-          >
-            {busy === 'ai' ? <Loader2 size={12} className="animate-spin text-primary" /> : <Camera size={12} />}
-            <span>Foto Layar</span>
-          </button>
-          <button
-            type="button"
-            disabled={busy === 'ai' || busy === 'ocr'}
-            onClick={() => ocrGalleryRef.current?.click()}
-            className="text-xs font-bold bg-white hover:bg-slate-50 text-indigo-700 border border-indigo-200 rounded-xl px-2.5 py-1.5 flex items-center gap-1 shadow-2xs active:scale-95 transition-all cursor-pointer disabled:opacity-50"
-            title="Pilih foto monitor SIMRS dari galeri"
-          >
-            <FileImage size={12} />
-            <span>Galeri</span>
-          </button>
-        </div>
-      </div>
 
       {/* Banner Deteksi Pasien Lama / Aktif Realtime */}
       {detectedPatient && !selectedPatient && (
@@ -2854,16 +2816,7 @@ export default function Brainstorm() {
             {/* Kotak Input Putih Bersih — dengan Fade Shadow Lembut ke Atas agar Terpisah Tegas dari Objek Belakang */}
             <div className="flex flex-col rounded-t-3xl rounded-b-none bg-white border-t border-x border-slate-300/80 border-b-0 p-2.5 transition-shadow w-full relative z-20 shadow-[0_-12px_36px_-6px_rgba(15,23,42,0.18),0_-4px_14px_-2px_rgba(15,23,42,0.08)]">
               <div className="flex items-end gap-2 w-full">
-                {/* Radial Fan Attachment Menu (Kamera, Galeri, Dikte ala Lomeal) */}
-                <AttachmentMenu
-                  disabled={busy === 'ai'}
-                  isListening={listening}
-                  onSelectCamera={() => ocrCameraRef.current?.click()}
-                  onSelectGallery={() => ocrGalleryRef.current?.click()}
-                  onSelectMic={toggleMic}
-                />
-
-                {/* Textarea Auto-Expand tanpa resize handle */}
+                {/* Textarea Auto-Expand tanpa resize handle — Melebar dari tepi kiri */}
                 <textarea
                   ref={textRef}
                   value={raw}
@@ -2883,40 +2836,51 @@ export default function Brainstorm() {
                     }
                   }}
                   placeholder="Ketik/tempel laporan medis atau paste foto EKG/Lab/Radiologi..."
-                  rows={isTextFocused || raw ? 3 : 1}
+                  rows={2}
                   maxLength={10000}
                   style={{
-                    height: (isTextFocused || raw) ? '70px' : '42px',
-                    minHeight: (isTextFocused || raw) ? '70px' : '42px',
-                    maxHeight: '145px'
+                    height: '86px',
+                    minHeight: '86px',
+                    maxHeight: '145px',
                   }}
                   className="flex-1 resize-none bg-slate-50 border border-slate-200 rounded-2xl p-2.5 px-3 text-xs outline-none text-slate-900 font-medium placeholder:text-slate-400 placeholder:font-normal focus:bg-white focus:border-primary focus:ring-2 focus:ring-primary/20 transition-colors leading-relaxed overflow-y-auto hide-scrollbar"
                 />
 
-              {/* Murni Tombol Send di sebelah kanan */}
-              <div className="shrink-0 flex items-center mb-0.5">
-                <button
-                  type="button"
-                  onClick={parseAi}
-                  disabled={busy === 'ai' || (!raw.trim() && attachments.length === 0)}
-                  aria-label="Proses Catatan"
-                  className={`flex size-10 shrink-0 items-center justify-center rounded-full transition-all ${
-                    raw.trim() || attachments.length > 0
-                      ? 'bg-gradient-to-br from-primary to-primary-deep text-white shadow-md shadow-primary/30 active:scale-95 cursor-pointer'
-                      : 'bg-slate-100 border border-slate-200 text-slate-300 cursor-not-allowed'
-                  } ${busy === 'ai' ? 'opacity-70 cursor-wait' : ''}`}
-                >
-                  {busy === 'ai' ? (
-                    <Loader2 size={18} className="animate-spin text-white" />
-                  ) : (
-                    <Send size={18} className={raw.trim() || attachments.length > 0 ? 'translate-x-0.5' : ''} />
-                  )}
-                </button>
+                {/* Kolom Tombol Aksi di Sebelah Kanan: Tombol + (AttachmentMenu) di atas, Tombol Send di bawah */}
+                <div className="flex flex-col items-center justify-end gap-1.5 shrink-0 self-end">
+                  {/* Radial Fan Attachment Menu (Kamera, Galeri, Dikte ala Lomeal) */}
+                  <AttachmentMenu
+                    align="right"
+                    disabled={busy === 'ai'}
+                    isListening={listening}
+                    onSelectCamera={() => ocrCameraRef.current?.click()}
+                    onSelectGallery={() => ocrGalleryRef.current?.click()}
+                    onSelectMic={toggleMic}
+                  />
+
+                  {/* Tombol Send */}
+                  <button
+                    type="button"
+                    onClick={parseAi}
+                    disabled={busy === 'ai' || (!raw.trim() && attachments.length === 0)}
+                    aria-label="Proses Catatan"
+                    className={`flex size-10 shrink-0 items-center justify-center rounded-full transition-all ${
+                      raw.trim() || attachments.length > 0
+                        ? 'bg-gradient-to-br from-primary to-primary-deep text-white shadow-md shadow-primary/30 active:scale-95 cursor-pointer'
+                        : 'bg-slate-100 border border-slate-200 text-slate-300 cursor-not-allowed'
+                    } ${busy === 'ai' ? 'opacity-70 cursor-wait' : ''}`}
+                  >
+                    {busy === 'ai' ? (
+                      <Loader2 size={18} className="animate-spin text-white" />
+                    ) : (
+                      <Send size={18} className="text-current" />
+                    )}
+                  </button>
+                </div>
               </div>
             </div>
           </div>
-        </div>
-      )
+        )
 
         return dockSlot ? (
           createPortal(inputBarJsx, dockSlot)

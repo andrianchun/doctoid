@@ -1337,7 +1337,7 @@ export default function PatientProfile() {
             ) : patient.peran_rawat === 'Konsul' ? (
               <div className="flex items-center gap-1">
                 <span className="rounded-full bg-sky-500/80 text-white border border-sky-400/50 px-3 py-1 text-xs font-bold">
-                  Konsul · {patient.dpjp_utama || 'Dept Lain'}
+                  {patient.dpjp_utama && patient.dpjp_utama !== 'Neuro' ? `${patient.dpjp_utama} (Konsul)` : 'Konsul'}
                 </span>
                 <button
                   type="button"

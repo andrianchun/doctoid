@@ -193,7 +193,9 @@ function isValidWaName(candidate) {
     'igd', 'atas nama', 'atas', 'nama', 'pasien', 'konsul', 'mohon', 'izin', 'dokter', 'perawat',
     'bidan', 'jaga', 'ruangan', 'bangsal', 'suhu', 'temp', 'temperature', 'tensi', 'td', 'nadi',
     'hr', 'rr', 'respirasi', 'spo2', 'gcs', 'ku', 'gda', 'gds', 'subjektif', 'objektif',
-    'assessment', 'planning', 'terapi', 'ttv', 'bpjs', 'umum', 'asuransi', 'inhealth', 'rujukan'
+    'assessment', 'planning', 'terapi', 'ttv', 'bpjs', 'umum', 'asuransi', 'inhealth', 'rujukan',
+    'muntah', 'mual', 'thorax', 'foto thorax', 'cor', 'paru', 'pulmo', 'rontgen', 'ekg', 'lab',
+    'darah', 'infus', 'injeksi', 'pulang', 'rujuk', 'kanan', 'kiri', 'ap', 'pa', 'pemeriksaan', 'hasil'
   ]
   if (BAD_TERMS.some((term) => lower === term || lower.startsWith(term + ' ') || lower.endsWith(' ' + term) || lower.includes(' atas nama') || lower.includes('igd '))) {
     return false
@@ -218,8 +220,15 @@ function extractWaPatientInfo(text) {
     const rawClean = line.replace(/[*_~#]/g, '').trim()
     if (!rawClean.includes('/')) continue
     if (/(?:^|\s)\[\d{1,2}[/-]\d{1,2}/.test(line) || /https?:\/\//i.test(line)) continue
-    // Abaikan baris TTV misal "TD 120/80"
+    // Abaikan baris TTV misal "TD 120/80" atau temuan fisik
     if (/^\s*(?:td|tensi|ttv|vital|suhu|temp|nadi|hr|rr|spo2)\b/i.test(rawClean) || /^\s*\d{2,3}\/\d{2,3}\b/i.test(rawClean)) continue
+
+    // Baris bergaris miring HANYA valid sebagai identitas pasien jika memiliki usia, jaminan, gelar, atau No RM
+    const hasDemographicMarker = /\b\d{1,3}\s*(?:th|thn|tahun|yo|bln|bulan)\b/i.test(rawClean) ||
+      /\b(bpjs|umum|jkn|kis|asuransi|inhealth|pbi)\b/i.test(rawClean) ||
+      /\b(tn|ny|sdri|sdr|an|by)\b/i.test(rawClean) ||
+      /\b(?:no\.?\s*rm|rm)\b/i.test(rawClean)
+    if (!hasDemographicMarker) continue
 
     const cleanLine = rawClean.replace(/^(?:(?:pasien\s+(?:igd|bangsal|ruangan|[A-Za-z0-9\s]+?)\s+)?(?:atas\s*nama|a\s*[\/.]\s*n|an\.)\s*[:=–-]?\s*)/i, '').trim()
     const segs = cleanLine

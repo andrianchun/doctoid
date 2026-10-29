@@ -448,20 +448,26 @@ function PatientCardContent({
         </div>
       </div>
 
-      {/* Baris di bawah nama sebelum SOAP: No. RM & Badge Leader (DPJP Utama) */}
-      {(patient.no_rm?.trim() || (patient.dpjp_utama && patient.dpjp_utama !== 'Neuro')) && (
+      {/* Baris di bawah nama sebelum SOAP: No. RM & Badge Leader / Konsul */}
+      {(patient.no_rm?.trim() || (patient.dpjp_utama && patient.dpjp_utama !== 'Neuro') || patient.peran_rawat === 'Konsul') && (
         <div className="mt-1 flex flex-wrap items-center gap-1.5 min-w-0">
           {patient.no_rm?.trim() && (
             <p className="caption text-xs text-ink-muted">
               <Masked value={patient.no_rm} type="rm" />
             </p>
           )}
-          {patient.dpjp_utama && patient.dpjp_utama !== 'Neuro' && (
+          {((patient.dpjp_utama && patient.dpjp_utama !== 'Neuro') || patient.peran_rawat === 'Konsul') && (
             <span
-              title={`Leader: ${patient.dpjp_utama}`}
-              className="rounded-full bg-indigo-50 border border-indigo-200/80 px-2.5 py-0.5 text-xs font-bold text-indigo-700 inline-flex items-center"
+              title={patient.peran_rawat === 'Konsul' ? `Konsul dari ${patient.dpjp_utama || 'Dept Lain'}` : `Leader: ${patient.dpjp_utama} (Neuro Raber)`}
+              className={`rounded-full px-2.5 py-0.5 text-xs font-bold inline-flex items-center ${
+                patient.peran_rawat === 'Konsul'
+                  ? 'bg-sky-50 border border-sky-200/80 text-sky-700'
+                  : 'bg-indigo-50 border border-indigo-200/80 text-indigo-700'
+              }`}
             >
-              {patient.dpjp_utama}
+              {patient.peran_rawat === 'Konsul'
+                ? `${patient.dpjp_utama && patient.dpjp_utama !== 'Neuro' ? patient.dpjp_utama : 'Dept Lain'} (Konsul)`
+                : patient.dpjp_utama}
             </span>
           )}
         </div>

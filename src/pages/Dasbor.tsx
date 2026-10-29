@@ -383,8 +383,8 @@ export default function Dasbor() {
         }
       }
 
-      // 2. Pasien Peran Rawat Konsul (yang belum divisite hari ini - digabung ke Terapi)
-      if (p.peran_rawat === 'Konsul' && !visitedTodayPatientIds.has(p.id)) {
+      // 2. Pasien Peran Rawat Konsul (Hanya ingatkan jika konsulan baru dan belum pernah dijawab/divisite)
+      if (p.peran_rawat === 'Konsul' && !note && !visitedTodayPatientIds.has(p.id)) {
         const itemId = `konsul-role-${p.id}`
         if (!completedPlanIds.has(itemId)) {
           terapi.push({

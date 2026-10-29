@@ -280,11 +280,11 @@ export default function RekamMedis() {
                       </span>
                       {p.peran_rawat === 'Raber' || (p.dpjp_utama && p.dpjp_utama !== 'Neuro' && p.peran_rawat !== 'Konsul') ? (
                         <span className="rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200 px-2.5 py-0.5 text-xs font-bold">
-                          Raber{p.dpjp_utama && p.dpjp_utama !== 'Neuro' ? ` · ${p.dpjp_utama}` : ''}
+                          {p.dpjp_utama && p.dpjp_utama !== 'Neuro' ? p.dpjp_utama : 'Raber'}
                         </span>
                       ) : p.peran_rawat === 'Konsul' ? (
                         <span className="rounded-full bg-sky-50 text-sky-700 border border-sky-200 px-2.5 py-0.5 text-xs font-bold">
-                          Konsul{p.dpjp_utama && p.dpjp_utama !== 'Neuro' ? ` · ${p.dpjp_utama}` : ''}
+                          {p.dpjp_utama && p.dpjp_utama !== 'Neuro' ? `${p.dpjp_utama} (Konsul)` : 'Konsul'}
                         </span>
                       ) : (
                         p.tim_raber && p.tim_raber.length > 0 && (
