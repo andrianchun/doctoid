@@ -413,6 +413,13 @@ export function extractDemografi(
     if (!rawClean.includes('/')) continue
     // Abaikan baris url atau header chat WhatsApp ber-timestamp
     if (/(?:^|\s)\[\d{1,2}[/-]\d{1,2}/.test(line) || /https?:\/\//i.test(line)) continue
+    // Abaikan baris terapi, advis, instruksi, dan baris bertanda bullet/dosis
+    if (
+      /^\s*(?:[•\-+]|\d+\.|\b(?:a|p|ptx|pdx|tx|dx|s|o|th|terapi|instruksi|advis|rencana|hobe|ivfd|inj|inf|po|drip|bolus|tab|syr|pulv|lab|thorax|cor|pulmo|ct|ekg|gda|gds)\b\s*[:\.\-=])/i.test(rawClean) ||
+      /\b(?:mg|mcg|tpm|gtt|iu|lpm|kolf|amp|vial|kp|prn)\b/i.test(rawClean)
+    ) {
+      continue
+    }
     // Abaikan baris tanda vital / TTV misal "TD 120/80", "Suhu(C) : 36.5", "TTV: ...", "Nadi: 80"
     if (
       /^\s*(?:td|tensi|vital\s*sign|ttv|suhu|temp|nadi|hr|rr|spo2)\b/i.test(rawClean) ||
@@ -541,8 +548,15 @@ export function extractDemografi(
     for (const line of lines) {
       if (/dokter\s*(?:jaga|spesialis|ruangan|igd|konsulen|dpjp)|pemeriksa\s*:|asal\s*rujukan|mohon\s*ijin|mohon\s*izin/i.test(line)) continue
       if (/(?:^|\s)\[\d{1,2}[/-]\d{1,2}/.test(line)) continue // skip timestamp lines
+      // Abaikan baris terapi, advis, instruksi, dan baris bertanda bullet/dosis
+      if (
+        /^\s*(?:[•\-+]|\d+\.|\b(?:a|p|ptx|pdx|tx|dx|s|o|th|terapi|instruksi|advis|rencana|hobe|ivfd|inj|inf|po|drip|bolus|tab|syr|pulv|lab|thorax|cor|pulmo|ct|ekg|gda|gds)\b\s*[:\.\-=])/i.test(line) ||
+        /\b(?:mg|mcg|tpm|gtt|iu|lpm|kolf|amp|vial|kp|prn)\b/i.test(line)
+      ) {
+        continue
+      }
 
-      const titleMatch = line.match(/[*_~#]*\s*\b(dr|dok|dokter|Tn|Ny|Sdri|Sdr|An|By)\.?\s*([A-Za-z'.-]+(?:[ \t]+[A-Za-z'.-]+){0,3})/i)
+      const titleMatch = line.match(/[*_~#]*\s*\b(dr|dok|dokter|Tn|Ny|Sdri|Sdr|An|By)\b(?:\.|\s)\s*([A-Za-z'.-]+(?:[ \t]+[A-Za-z'.-]+){0,3})/i)
       if (titleMatch) {
         const rawGelar = titleMatch[1].toLowerCase()
         const candidateName = titleMatch[2].replace(/[/,*_–—|]/g, '').trim()

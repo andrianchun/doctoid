@@ -189,18 +189,47 @@ async function setupDoctoGroupBranding(groupId, currentSubject = '', customIconB
 function isValidWaName(candidate) {
   if (!candidate || candidate.length < 2 || candidate.length > 40) return false
   const lower = candidate.toLowerCase().trim()
+
+  // Karakter non-nama terlarang
+  if (/[:()[\]{}=<>+*#_~0-9\/\\@$%^&|;?]/.test(candidate)) return false
+
   const BAD_TERMS = [
-    'igd', 'atas nama', 'atas', 'nama', 'pasien', 'konsul', 'mohon', 'izin', 'dokter', 'perawat',
+    // Struktur & Peran
+    'igd', 'atas nama', 'atas', 'nama', 'pasien', 'konsul', 'konsulan', 'mohon', 'izin', 'dokter', 'perawat',
     'bidan', 'jaga', 'ruangan', 'bangsal', 'suhu', 'temp', 'temperature', 'tensi', 'td', 'nadi',
     'hr', 'rr', 'respirasi', 'spo2', 'gcs', 'ku', 'gda', 'gds', 'subjektif', 'objektif',
     'assessment', 'planning', 'terapi', 'ttv', 'bpjs', 'umum', 'asuransi', 'inhealth', 'rujukan',
-    'muntah', 'mual', 'thorax', 'foto thorax', 'cor', 'paru', 'pulmo', 'rontgen', 'ekg', 'lab',
-    'darah', 'infus', 'injeksi', 'pulang', 'rujuk', 'kanan', 'kiri', 'ap', 'pa', 'pemeriksaan', 'hasil'
+    'pulang', 'rujuk', 'kanan', 'kiri', 'ap', 'pa', 'pemeriksaan', 'hasil', 'pagi', 'siang', 'sore', 'malam',
+    // Gejala & Keluhan
+    'muntah', 'mual', 'nyeri', 'batuk', 'pilek', 'sesak', 'demam', 'panas', 'lemas', 'pusing', 'kejang',
+    'mencret', 'diare', 'pendarahan', 'perdarahan', 'luka', 'bengkak', 'sadar', 'penurunan', 'koma',
+    // Organ & Penunjang
+    'thorax', 'foto thorax', 'cor', 'paru', 'pulmo', 'rontgen', 'ekg', 'ecg', 'lab', 'ct', 'ct scan',
+    'darah', 'infus', 'injeksi', 'infark', 'cva', 'stroke', 'uap', 'kardio', 'jantung',
+    // Obat & Terapi
+    'drip', 'inj', 'po', 'iv', 'im', 'sc', 'ivfd', 'bolus', 'hobe', 'head up', 'nc', 'nrbm', 'o2',
+    'ranitidine', 'metochlopramide', 'nicardipin', 'citicholine', 'citicoline', 'aspilet', 'aspirin',
+    'clopidogrel', 'simvastatin', 'atorvastatin', 'ceftriaxone', 'cefotaxime', 'meropenem', 'paracetamol',
+    'furosemide', 'ketorolac', 'omeprazole', 'pantoprazole', 'novorapid', 'lantus', 'levemir', 'aspart',
+    'glargine', 'nacl', 'rl', 'ns', 'ondansetron', 'vitamin', 'vit', 'b complex', 'asam traneksamat',
+    // Dosis & Frekuensi
+    'tpm', 'gtt', 'mg', 'mcg', 'gr', 'gram', 'ml', 'cc', 'iu', 'amp', 'ampul', 'vial', 'fls', 'kolf',
+    'kp', 'prn', 'bila', 'target', 'turun', 'naik', 'jam', 'hari', 'kali'
   ]
+
+  const words = lower.split(/[\s'.-]+/).filter(Boolean)
+  if (words.length === 0) return false
+
+  for (const w of words) {
+    if (BAD_TERMS.includes(w)) return false
+  }
+
   if (BAD_TERMS.some((term) => lower === term || lower.startsWith(term + ' ') || lower.endsWith(' ' + term) || lower.includes(' atas nama') || lower.includes('igd '))) {
     return false
   }
-  if (/[:()[\]{}=0-9]/.test(candidate)) return false
+
+  if (!/[a-zA-Z]/.test(candidate)) return false
+
   return true
 }
 
@@ -213,6 +242,17 @@ function extractWaPatientInfo(text) {
   let no_rm = ''
   let jaminan = ''
 
+  const cleanText = text.replace(/[*_~#]/g, '').trim()
+
+  // Jika pesan jelas merupakan balasan advis dokter / instruksi terapi / soap lanjutan tanpa identitas konsul:
+  const isPureAdvisOrTherapy =
+    /^\s*(?:[•\-+]|\d+\.|\b(?:a|p|ptx|pdx|tx|dx|terapi|instruksi|advis)\b\s*[:\.\-=])/i.test(cleanText) &&
+    !/(?:mohon\s*izin\s*konsul|izin\s*konsul|konsul\s*pasien|pasien\s*baru|identitas\s*pasien|atas\s*nama|a\s*[\/.]\s*n)\b/i.test(cleanText)
+
+  if (isPureAdvisOrTherapy) {
+    return { title: '', nama_depan: '', usia: '', no_rm: '', jaminan: '' }
+  }
+
   const lines = text.split(/\r?\n/)
 
   // 1. Cek baris bergaris miring (format standar konsul medis: "*Tn Suyanto / 69 th / BPJS*")
@@ -220,6 +260,15 @@ function extractWaPatientInfo(text) {
     const rawClean = line.replace(/[*_~#]/g, '').trim()
     if (!rawClean.includes('/')) continue
     if (/(?:^|\s)\[\d{1,2}[/-]\d{1,2}/.test(line) || /https?:\/\//i.test(line)) continue
+
+    // Abaikan baris terapi, advis, instruksi, dan baris bertanda bullet/dosis
+    if (
+      /^\s*(?:[•\-+]|\d+\.|\b(?:a|p|ptx|pdx|tx|dx|s|o|th|terapi|instruksi|advis|rencana|hobe|ivfd|inj|inf|po|drip|bolus|tab|syr|pulv|lab|thorax|cor|pulmo|ct|ekg|gda|gds)\b\s*[:\.\-=])/i.test(rawClean) ||
+      /\b(?:mg|mcg|tpm|gtt|iu|lpm|kolf|amp|vial|kp|prn)\b/i.test(rawClean)
+    ) {
+      continue
+    }
+
     // Abaikan baris TTV misal "TD 120/80" atau temuan fisik
     if (/^\s*(?:td|tensi|ttv|vital|suhu|temp|nadi|hr|rr|spo2)\b/i.test(rawClean) || /^\s*\d{2,3}\/\d{2,3}\b/i.test(rawClean)) continue
 
@@ -270,9 +319,10 @@ function extractWaPatientInfo(text) {
 
       // Nama pasien
       if (!nama_depan) {
-        const titleM = seg.match(/^(dr|dok|dokter|Tn|Ny|Sdri|Sdr|An|By)\.?\s*(.+)$/i)
+        const cleanSeg = seg.replace(/^(?:pasien\s+baru|pasien|px|identitas)\s*[:-]?\s*/i, '').trim()
+        const titleM = cleanSeg.match(/^(dr|dok|dokter|Tn|Ny|Sdri|Sdr|An|By)\b(?:\.|\s)\s*(.+)$/i)
         let cGelar = ''
-        let cNama = seg
+        let cNama = cleanSeg
         if (titleM) {
           cGelar = titleM[1].toLowerCase()
           cNama = titleM[2].trim()
@@ -294,14 +344,17 @@ function extractWaPatientInfo(text) {
 
   // 2. Cek label "atas nama", "a.n.", "a/n", "nama:", "pasien:"
   if (!nama_depan) {
-    const anMatch = text.match(/(?:(?:pasien\s+(?:igd|bangsal|ruangan|[A-Za-z0-9\s]+?)\s+)?(?:atas\s*nama|a\s*[\/.]\s*n|an\.|nama(?:\s*pasien)?|identitas)\s*[:=–-]?\s*[*_~#]*\s*)(?:(dr|dok|dokter|Tn|Ny|Sdri|Sdr|An|By)\.?\s*)?([A-Za-z][A-Za-z'.-]+(?:[ \t]+[A-Za-z'.-]+){0,3})/i)
+    const anMatch = text.match(/(?:(?:pasien\s+(?:igd|bangsal|ruangan|[A-Za-z0-9\s]+?)\s+)?(?:atas\s*nama|a\s*[\/.]\s*n|an\.|nama(?:\s*pasien)?|identitas)\s*[:=–-]?\s*[*_~#]*\s*)(?:(dr|dok|dokter|Tn|Ny|Sdri|Sdr|An|By)\b(?:\.|\s)\s*)?([A-Za-z][A-Za-z'.-]+(?:[ \t]+[A-Za-z'.-]+){0,3})/i)
     if (anMatch) {
       const cGelar = anMatch[1]
       let cNama = anMatch[2].trim()
       cNama = cNama.replace(/\b(?:usia|umur|th|thn|tahun|rm|no\.?\s*rm)\b.*$/i, '').trim()
       if (isValidWaName(cNama)) {
         if (cGelar) {
-          title = cGelar.charAt(0).toUpperCase() + cGelar.slice(1).toLowerCase() + (cGelar.endsWith('.') ? '' : '.')
+          const lowerGelar = cGelar.toLowerCase()
+          title = (lowerGelar === 'dr' || lowerGelar === 'dok' || lowerGelar === 'dokter')
+            ? 'dr.'
+            : lowerGelar.charAt(0).toUpperCase() + lowerGelar.slice(1) + (cGelar.endsWith('.') ? '' : '.')
         }
         nama_depan = cNama
       }
@@ -312,7 +365,14 @@ function extractWaPatientInfo(text) {
   if (!nama_depan) {
     for (const line of lines) {
       if (/dokter\s*(?:jaga|spesialis|ruangan|igd|konsulen|dpjp)|pemeriksa\s*:|asal\s*rujukan|mohon\s*ijin|mohon\s*izin/i.test(line)) continue
-      const titleM = line.match(/[*_~#]*\s*\b(dr|dok|dokter|Tn|Ny|Sdri|Sdr|An|By)\.?\s*([A-Za-z'.-]+(?:[ \t]+[A-Za-z'.-]+){0,3})/i)
+      // Abaikan baris terapi, advis, instruksi, dan baris bertanda bullet/dosis
+      if (
+        /^\s*(?:[•\-+]|\d+\.|\b(?:a|p|ptx|pdx|tx|dx|s|o|th|terapi|instruksi|advis|rencana|hobe|ivfd|inj|inf|po|drip|bolus|tab|syr|pulv|lab|thorax|cor|pulmo|ct|ekg|gda|gds)\b\s*[:\.\-=])/i.test(line) ||
+        /\b(?:mg|mcg|tpm|gtt|iu|lpm|kolf|amp|vial|kp|prn)\b/i.test(line)
+      ) {
+        continue
+      }
+      const titleM = line.match(/[*_~#]*\s*\b(dr|dok|dokter|Tn|Ny|Sdri|Sdr|An|By)\b(?:\.|\s)\s*([A-Za-z'.-]+(?:[ \t]+[A-Za-z'.-]+){0,3})/i)
       if (titleM) {
         const cGelar = titleM[1].toLowerCase()
         let cNama = titleM[2].replace(/[/,*_–—|]/g, '').trim()
@@ -617,7 +677,7 @@ async function initBaileys() {
 
         // Cek apakah pesan ini membawa identitas pasien baru (awalan konsulan baru)
         const hasNewPatientHeader = Boolean(
-          extractedName ||
+          (extractedName && (parsedInfo.usia || parsedInfo.jaminan || parsedInfo.no_rm || /(?:tn|ny|an|by|sdr|sdri)\./i.test(parsedInfo.title))) ||
           /(?:mohon izin konsul|izin konsul|konsul pasien|pasien baru|identitas pasien)\b/i.test(textContent) ||
           /(?:subjektif|keluhan utama|rps)\s*[:\.]/i.test(textContent)
         )
@@ -668,33 +728,33 @@ async function initBaileys() {
             const diffMs = now - new Date(it.created_at).getTime()
             if (diffMs > 20 * 60 * 1000) return false // Jendela 20 menit agar dokter leluasa membaca & membalas
 
-            // A. JIKA PESAN BARU MEMBAWA IDENTITAS PASIEN (Awalan konsul baru atau nama pasien tertera):
-            if (hasNewPatientHeader || extractedName) {
+            // A. JIKA PESAN BARU MEMBAWA IDENTITAS PASIEN LENGKAP:
+            if (hasNewPatientHeader && extractedName) {
               // Jika item aktif sebelumnya belum memiliki nama pasien & teksnya minim (misal foto dikirim duluan):
-              if (!it.parsed_data?.nama_depan && (!it.raw_text || it.raw_text.length < 30)) {
+              if (!it.parsed_data?.nama_depan && (!it.raw_text || it.raw_text.length < 50 || /foto|rontgen|thorax|ct|ekg|lab/i.test(it.raw_text))) {
                 return true // Isi item tersebut dengan identitas pasien ini
               }
-              // Jika kedua pesan membawa nama pasien:
-              if (extractedName && it.parsed_data?.nama_depan) {
+              // Jika item aktif membawa nama pasien yang sama:
+              if (it.parsed_data?.nama_depan) {
                 const normNew = extractedName.toLowerCase().replace(/[^a-z]/g, '')
                 const normOld = it.parsed_data.nama_depan.toLowerCase().replace(/[^a-z]/g, '')
                 if (normNew === normOld) {
                   return true // Pasien yang sama persis
                 }
               }
-              // Jika nama berbeda ATAU membawa header konsul baru: JANGAN DIGABUNG! Wajib jadi pasien baru terpisah!
+              // Jika nama berbeda dan jelas pasien baru: JANGAN DIGABUNG! Wajib jadi pasien baru terpisah!
               return false
             }
 
             // B. JIKA PESAN TANPA IDENTITAS PASIEN BARU:
-            // 1. Pesan balasan dokter (advis / terapi): gabungkan ke konsulan aktif terakhir
+            // 1. Pesan balasan dokter (advis / terapi): SELALU gabungkan ke konsulan aktif terakhir
             if (isFromDoctor) return true
 
-            // 2. Kiriman foto / media lanjutan (lampiran lab, EKG, rontgen): gabungkan
-            if (mediaDataUrl) return true
+            // 2. Kiriman foto / media lanjutan (lampiran lab, EKG, rontgen): SELALU gabungkan
+            if (mediaDataUrl || mediaUrl) return true
 
-            // 3. Chat teks lanjutan singkat dari pengirim yang sama (misal info tambahan)
-            return it.sender_phone === inboxItem.sender_phone
+            // 3. Chat teks lanjutan singkat dalam grup/pengirim yang sama
+            return true
           })
 
           if (recentItem) {
@@ -703,7 +763,8 @@ async function initBaileys() {
               if (inboxItem.parsed_data?.nama_depan) recentItem.parsed_data = inboxItem.parsed_data
             } else if (inboxItem.raw_text) {
               // Tambahkan teks baru (advis dokter atau chat lanjutan) dengan pemisah baris rapi
-              if (isFromDoctor && !recentItem.raw_text.includes('*Jawaban / Advis Dokter:*')) {
+              const isAdvis = isFromDoctor || /^\s*(?:[•\-+]|\d+\.|\b(?:a|p|ptx|pdx|tx|dx|terapi|instruksi|advis)\b\s*[:\.\-=])/i.test(inboxItem.raw_text.trim())
+              if (isAdvis && !recentItem.raw_text.includes('*Jawaban / Advis Dokter:*')) {
                 recentItem.raw_text += '\n\n---\n*Jawaban / Advis Dokter:*\n' + inboxItem.raw_text
               } else {
                 recentItem.raw_text += '\n\n' + inboxItem.raw_text
@@ -733,10 +794,10 @@ async function initBaileys() {
             if (inboxItem.attachments && inboxItem.attachments.length > 0) {
               const curAtts = recentItem.attachments || []
               for (const newAtt of inboxItem.attachments) {
-                // Jangan deteksi duplikat hanya dari slice(0, 80) karena semua header WebP/JPEG identik!
                 const isDup = curAtts.some((a) => {
                   if (a.id && newAtt.id && a.id === newAtt.id) return true
                   if (a.url && newAtt.url && a.url === newAtt.url) return true
+                  if (a.name && newAtt.name && a.name === newAtt.name) return true
                   if (!a.dataUrl || !newAtt.dataUrl) return false
                   if (a.dataUrl === newAtt.dataUrl) return true
                   return a.dataUrl.length === newAtt.dataUrl.length && a.dataUrl.slice(-120) === newAtt.dataUrl.slice(-120)
@@ -765,8 +826,8 @@ async function initBaileys() {
           botState.lastSync = new Date().toISOString()
           broadcastState()
 
-          // Sinkronisasi otomatis ke Cloud Firestore agar langsung masuk ke APK HP dokter
-          syncInboxToFirestore(trimmedList)
+          // Sinkronisasi otomatis ke Cloud Firestore (debounced agar album multi-foto tidak putus/balapan)
+          syncInboxToFirestoreDebounced(trimmedList, 600)
 
           // Picu FCM Push Notification Real-time ke HP Dokter (Status Bar & Lockscreen)
           triggerFcmNotificationDebounced(recentItem || inboxItem, 300)
@@ -970,6 +1031,29 @@ async function syncInboxToFirestore(inboxList) {
   } catch (err) {
     console.warn('Gagal sync ke Cloud Firestore:', err.message)
   }
+}
+
+let firestoreSyncTimer = null
+let isFirestoreSyncing = false
+let pendingFirestoreList = null
+
+function syncInboxToFirestoreDebounced(inboxList, delayMs = 600) {
+  pendingFirestoreList = inboxList
+  if (firestoreSyncTimer) clearTimeout(firestoreSyncTimer)
+  firestoreSyncTimer = setTimeout(async () => {
+    if (isFirestoreSyncing) {
+      syncInboxToFirestoreDebounced(pendingFirestoreList, 300)
+      return
+    }
+    isFirestoreSyncing = true
+    try {
+      await syncInboxToFirestore(pendingFirestoreList)
+    } catch (err) {
+      console.warn('Sync firestore debounced error:', err.message)
+    } finally {
+      isFirestoreSyncing = false
+    }
+  }, delayMs)
 }
 
 function fromFirestoreVal(val) {
@@ -1774,19 +1858,19 @@ async function sanitizeAndMigrateInbox() {
     let inboxList = JSON.parse(fs.readFileSync(INBOX_JSON_PATH, 'utf-8'))
     let modified = false
     for (const it of inboxList) {
-      // 1. Sanitasi identitas pasien (perbaiki jika sebelumnya keliru "IGD atas nama")
-      if (!it.parsed_data?.nama_depan || /atas nama|igd/i.test(it.parsed_data.nama_depan)) {
+      // 1. Sanitasi identitas pasien (perbaiki jika sebelumnya keliru "IGD atas nama", "muntah", dll)
+      if (!it.parsed_data?.nama_depan || /atas nama|igd/i.test(it.parsed_data.nama_depan) || !isValidWaName(it.parsed_data.nama_depan)) {
         const info = extractWaPatientInfo(it.raw_text)
+        it.parsed_data = {
+          ...(it.parsed_data || {}),
+          title: info.title || '',
+          nama_depan: info.nama_depan || '',
+          usia: info.usia || it.parsed_data?.usia || '',
+          no_rm: info.no_rm || it.parsed_data?.no_rm || '',
+          jaminan: info.jaminan || it.parsed_data?.jaminan || '',
+        }
+        modified = true
         if (info.nama_depan) {
-          it.parsed_data = {
-            ...(it.parsed_data || {}),
-            title: info.title || it.parsed_data?.title || '',
-            nama_depan: info.nama_depan,
-            usia: info.usia || it.parsed_data?.usia || '',
-            no_rm: info.no_rm || it.parsed_data?.no_rm || '',
-            jaminan: info.jaminan || it.parsed_data?.jaminan || '',
-          }
-          modified = true
           console.log(`✓ Koreksi otomatis nama konsulan: "${info.nama_depan}" (${info.usia})`)
         }
       }

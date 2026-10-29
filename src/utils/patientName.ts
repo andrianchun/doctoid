@@ -31,6 +31,10 @@ export const INVALID_NAME_TERMS = [
   'gcs', 'kesadaran', 'ku', 'keadaan umum',
   'gda', 'gds', 'gdp', 'gula darah',
   'bb', 'tb', 'imt', 'bmi', 'crt',
+  // Gejala & Keluhan Klinis
+  'muntah', 'mual', 'nyeri', 'batuk', 'pilek', 'sesak', 'demam', 'panas',
+  'lemas', 'pusing', 'kejang', 'diare', 'mencret', 'perdarahan', 'pendarahan',
+  'luka', 'bengkak', 'sadar', 'penurunan', 'koma',
   // Komponen SOAP & Medis
   'subjektif', 'subjektive', 'objektif', 'objective', 'assesment', 'assessment', 'planning',
   'keluhan', 'keluhan utama', 'rps', 'rpd', 'rpo', 'rpk', 'alergi',
@@ -38,6 +42,10 @@ export const INVALID_NAME_TERMS = [
   'laboratorium', 'lab', 'radiologi', 'rontgen', 'ct scan', 'ekg', 'ecg',
   'diagnosis', 'diagnosa', 'terapi', 'instruksi', 'advis',
   'catatan', 'resume', 'konsul', 'konsulan', 'rujukan',
+  // Organ & Terapi
+  'thorax', 'cor', 'paru', 'pulmo', 'jantung', 'infark', 'cva', 'stroke', 'uap', 'kardio',
+  'drip', 'inj', 'injeksi', 'infus', 'ivfd', 'po', 'iv', 'im', 'sc', 'hobe',
+  'ranitidine', 'metochlopramide', 'nicardipin', 'citicholine', 'aspilet', 'simvastatin',
   // Peran Medis
   'dokter', 'dr', 'perawat', 'bidan', 'dpjp', 'pemeriksa', 'ts', 'jaga',
   // Ruangan & Form
@@ -59,7 +67,7 @@ export function isValidPatientName(candidate?: string): boolean {
   if (clean.length < 2 || clean.length > 50) return false
 
   // Tolak jika mengandung karakter non-nama (seperti :, (), [], {}, =, <, >, +, *, angka, dsb)
-  if (/[:()[\]{}=<>+*#_~0-9\/\\@$%^&|;]/.test(clean)) return false
+  if (/[:()[\]{}=<>+*#_~0-9\/\\@$%^&|;?]/.test(clean)) return false
 
   // Tolak jika merupakan token jenis kelamin murni
   if (isGenderToken(clean)) return false
@@ -78,7 +86,9 @@ export function isValidPatientName(candidate?: string): boolean {
     'vital', 'spo2', 'gcs', 'gda', 'gds', 'gdp', 'pemfis', 'subjektif',
     'objektif', 'assessment', 'planning', 'diagnosa', 'diagnosis', 'terapi',
     'laboratorium', 'radiologi', 'dpjp', 'pasien', 'identitas', 'catatan',
-    'igd', 'atas', 'nama', 'konsul', 'mohon', 'izin'
+    'igd', 'atas', 'nama', 'konsul', 'mohon', 'izin',
+    'muntah', 'mual', 'nyeri', 'batuk', 'sesak', 'demam', 'pusing', 'kejang',
+    'thorax', 'rontgen', 'ekg', 'drip', 'inj', 'ivfd', 'nicardipin'
   ])
   if (words.some((w) => forbiddenKeywords.has(w))) {
     return false
