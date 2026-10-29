@@ -228,12 +228,14 @@ export default function PredictiveInput({
       {/* Floating Suggestions List */}
       {isOpen && suggestions.length > 0 && (
         <div className="absolute left-0 right-0 top-full z-50 mt-1 max-h-72 overflow-y-auto rounded-2xl border border-slate-200/90 bg-white p-1.5 shadow-xl backdrop-blur-md animate-in fade-in duration-100 divide-y divide-slate-100">
-          <div className="flex items-center gap-1.5 px-2.5 py-1 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-            <Sparkles size={11} className="text-primary" />
-            <span>
-              Rekomendasi {type === 'drug' ? 'Standar Fornas' : type === 'procedure' ? 'ICD-9-CM' : type === 'diagnosis' ? 'ICD-10' : 'Keluhan Visite'}
-            </span>
-          </div>
+          {type !== 'complaint' && (
+            <div className="flex items-center gap-1.5 px-2.5 py-1 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+              <Sparkles size={11} className="text-primary" />
+              <span>
+                Rekomendasi {type === 'drug' ? 'Standar Fornas' : type === 'procedure' ? 'ICD-9-CM' : 'ICD-10'}
+              </span>
+            </div>
+          )}
 
           <div className="py-1 space-y-0.5">
             {suggestions.map((item, idx) => {

@@ -42,6 +42,7 @@ import DateInput from '../components/DateInput'
 import { useBodyScrollLock } from '../utils/useBodyScrollLock'
 import { extractClinicalMetrics } from '../utils/clinicalExtractor'
 import { analyzeAndClassifyAttachments } from '../utils/clinicalVision'
+import { notifyParserFinished } from '../utils/nativeNotify'
 import { triggerCloudSync } from '../sync'
 import {
   clearAllDeliveredNotifications,
@@ -1285,19 +1286,34 @@ export default function Brainstorm() {
       // 1. Kompresi gambar menjadi WebP max 1600px untuk kecepatan transmisi & ketajaman teks SIMRS
       const webp = await convertToWebP(file, 1600, 0.85)
 
-      // 2. Siapkan prompt konteks spesifik untuk layar monitor komputer SIMRS / SPRI admisi MRS
+      // 2. Langsung lampirkan foto ke Lampiran Penunjang (Optimistic & Safe — ala LogMeal)
+      // Sekalipun proses AI lambat atau dokter langsung simpan, foto asli tidak hilang!
+      const simrsAttId = Math.random().toString(36).substring(7)
+      setAttachments((prev) => [
+        ...prev,
+        {
+          id: simrsAttId,
+          name: `SIMRS_${getLocalDateString()}`,
+          type: 'image/webp',
+          dataUrl: webp,
+          kategori: 'penunjang',
+          tag: 'Lab',
+        },
+      ])
+
+      // 3. Siapkan prompt konteks spesifik untuk layar monitor komputer SIMRS / SPRI admisi MRS
       const selectedHosp = hospitals.find((h) => h.id === hospitalId)
       const contextPrompt = selectedHosp
         ? `Faskes RS: ${selectedHosp.nama}\nFoto Layar Monitor Komputer SIMRS / Lembar SPRI Admisi Masuk Rumah Sakit (MRS)`
         : `Foto Layar Monitor Komputer SIMRS / Lembar SPRI Admisi Masuk Rumah Sakit (MRS)`
 
-      // 3. Panggil rapikan multimodal AI
+      // 4. Panggil rapikan multimodal AI
       const r = await rapikan(contextPrompt, [{ type: 'image/webp', dataUrl: webp }], false)
 
       const tglMrs = r.tgl_mrs || today()
       const tglOnset = r.tgl_onset || tglMrs
 
-      // 4. Update form state dengan data hasil parse
+      // 5. Update form state dengan data hasil parse
       const { title: resolvedTitle, nama_depan: resolvedNama } = splitTitleAndName(
         r.nama_depan || form.nama_depan,
         (r.title as any) || form.title
@@ -1341,38 +1357,13 @@ export default function Brainstorm() {
         await simpanRegexBaru(r.regex_baru)
       }
 
-      // Arsipkan foto ke Lampiran Penunjang agar dokter memiliki arsip visual asli
-      setAttachments((prev) => [
-        ...prev,
-        {
-          id: Math.random().toString(36).substring(7),
-          name: `SIMRS_${getLocalDateString()}`,
-          type: 'image/webp',
-          dataUrl: webp,
-          kategori: 'penunjang',
-          tag: 'Lab',
-        },
-      ])
-
       flashHighlight(['nama_depan', 'usia', 'no_rm', 'S', 'O_pemfis', 'O_penunjang', 'A', 'P'], 'amber')
-      notify('Layar SIMRS berhasil diparsing ke data pasien MRS!')
+      const pName = resolvedNama ? `${resolvedTitle ? resolvedTitle + ' ' : ''}${resolvedNama}` : 'Pasien'
+      notifyParserFinished(pName, 'Layar SIMRS berhasil diparsing ke form')
+      notify(`Data ${pName} siap diterapkan ke form ✓`)
     } catch (e: any) {
       console.warn('Gagal memproses gambar SIMRS via AI multimodal:', e)
-      // Fallback ke Tesseract OCR jika offline atau API error
-      try {
-        setBusy('ocr')
-        notify('AI Vision terkendala, mencoba OCR lokal (Tesseract)...')
-        const { default: Tesseract } = await import('tesseract.js')
-        const { data } = await Tesseract.recognize(file, 'ind')
-        if (data.text.trim()) {
-          setRaw((r) => (r ? r + '\n' : '') + data.text.trim())
-          notify('Teks terekstrak ke kotak input mentah.')
-        } else {
-          notify('Teks tidak terdeteksi di gambar.')
-        }
-      } catch (errFallback: any) {
-        notify('Gagal membaca gambar: ' + (e?.message || 'Error'))
-      }
+      notify('AI Vision terkendala. Foto SIMRS aman tersimpan di Lampiran Penunjang; Anda bisa klik "Pindai Lampiran" untuk mengulangi.')
     } finally {
       setBusy('')
     }

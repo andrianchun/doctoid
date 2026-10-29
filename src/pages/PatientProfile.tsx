@@ -3,7 +3,7 @@ import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
 import {
   ArrowLeft, Pill, HeartPulse, ClipboardCopy, X, Send,
-  Loader2, LogOut, RotateCcw, Check, History, Sparkles, Activity, ShieldCheck, Stethoscope,
+  Loader2, LogOut, RotateCcw, RotateCw, Check, History, Sparkles, Activity, ShieldCheck, Stethoscope,
   Mic, Eye, EyeOff, Pencil, Trash2, Plus, CheckSquare, Square,
   FlaskConical, Image as ImageIcon, Upload, AlertTriangle, ArrowLeftRight,
   FileText, Volume2, Play
@@ -28,10 +28,11 @@ import { triggerCloudSync } from '../sync'
 import Masked from '../components/Masked'
 import { useUi } from '../store'
 import { verifyBiometric } from '../webauthn'
-import { chatPasien, type ChatMsg } from '../ai'
+import { chatPasien, rapikan, type ChatMsg } from '../ai'
 import { applyMicroUpdate } from '../microUpdate'
 import { formatDate, hariKe, getLocalDateString } from '../utils/dateFormat'
 import { cleanNamaDepan, formatPatientDisplayName } from '../utils/patientName'
+import { notifyParserFinished } from '../utils/nativeNotify'
 import VisiteModal from '../components/VisiteModal'
 import DateInput from '../components/DateInput'
 import { useBodyScrollLock } from '../utils/useBodyScrollLock'
@@ -958,6 +959,70 @@ export default function PatientProfile() {
     if (window.confirm(`Hapus catatan CPPT tanggal ${formatDate(tgl)}?`)) {
       await db.progressNotes.delete(noteId)
       notify('Catatan CPPT berhasil dihapus')
+    }
+  }
+
+  /* Pindai & Parse Ulang Foto Lampiran SIMRS (ala LogMeal) */
+  const [reparsingNoteId, setReparsingNoteId] = useState<number | null>(null)
+
+  const handleReparseNoteAttachment = async (note: ProgressNote) => {
+    if (!note.id || !note.attachments || note.attachments.length === 0 || !patient) return
+    const imageAtt = note.attachments.find((a) => a.type?.startsWith('image/') && (a.dataUrl || a.url))
+    if (!imageAtt) {
+      notify('Tidak ditemukan lampiran gambar pada catatan ini')
+      return
+    }
+
+    setReparsingNoteId(note.id)
+    notify('Menganalisis foto layar SIMRS dari lampiran...')
+
+    try {
+      const srcUrl = imageAtt.dataUrl || imageAtt.url || ''
+      const promptContext = `Pasien: ${formatPatientDisplayName(patient.title, patient.nama_depan)}\nTanggal Visite: ${note.tanggal}\nFoto Layar Monitor Komputer SIMRS (CPPT / Catatan Perkembangan Pasien Terintegrasi / Instruksi Terapi Harian) atau Screenshot Chat WA Ruangan`
+      const r = await rapikan(promptContext, [{ type: 'image/webp', dataUrl: srcUrl }], false)
+
+      const newS = r.S?.trim()
+        ? note.S ? `${note.S}\n\n${r.S.trim()}` : r.S.trim()
+        : note.S
+      const newPemfis = r.O_pemfis?.trim()
+        ? note.O_pemfis ? `${note.O_pemfis}\n\n${r.O_pemfis.trim()}` : r.O_pemfis.trim()
+        : note.O_pemfis
+      const newPenunjang = r.O_penunjang?.trim()
+        ? note.O_penunjang ? `${note.O_penunjang}\n\n${r.O_penunjang.trim()}` : r.O_penunjang.trim()
+        : note.O_penunjang
+
+      let newP = [...note.P]
+      if (r.P && r.P.length > 0) {
+        const existingNames = new Set(note.P.map((p) => p.nama_item.trim().toLowerCase()))
+        const incoming = r.P
+          .filter((p) => p.nama_item.trim() && !existingNames.has(p.nama_item.trim().toLowerCase()))
+          .map((p) => ({
+            nama_item: p.nama_item.trim(),
+            dosis_keterangan: p.dosis_keterangan || '',
+            kategori: p.kategori || 'Farmakologi',
+            tgl_mulai: note.tanggal,
+            tgl_stop: null,
+            status: 'aktif' as const,
+          }))
+        newP = [...newP, ...incoming]
+      }
+
+      await db.progressNotes.update(note.id, {
+        S: newS,
+        O_pemfis: newPemfis,
+        O_penunjang: newPenunjang,
+        P: newP,
+      })
+
+      triggerCloudSync(50)
+      const pDisp = formatPatientDisplayName(patient.title, patient.nama_depan)
+      notifyParserFinished(pDisp, 'Hasil foto SIMRS berhasil diekstrak ke CPPT')
+      notify(`Data ${pDisp} telah disimpan ke CPPT ✓`)
+    } catch (err: any) {
+      console.error(err)
+      notify('Gagal menganalisis foto: ' + (err?.message || 'Error koneksi'))
+    } finally {
+      setReparsingNoteId(null)
     }
   }
 
@@ -2120,9 +2185,27 @@ export default function PatientProfile() {
             )}
             {n.attachments && n.attachments.length > 0 && (
               <div className="mt-2 pt-2 border-t border-surface/80 space-y-1.5">
-                <span className="text-[10px] font-bold text-ink-muted uppercase tracking-wider block">
-                  Lampiran ({n.attachments.length}):
-                </span>
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-bold text-ink-muted uppercase tracking-wider block">
+                    Lampiran ({n.attachments.length}):
+                  </span>
+                  {n.attachments.some((a) => a.type?.startsWith('image/')) && (
+                    <button
+                      type="button"
+                      disabled={reparsingNoteId === n.id}
+                      onClick={() => handleReparseNoteAttachment(n)}
+                      className="text-[11px] font-semibold text-primary hover:text-primary-deep flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                      title="Ekstrak data dari foto lampiran SIMRS ini ke catatan CPPT"
+                    >
+                      {reparsingNoteId === n.id ? (
+                        <Loader2 size={12} className="animate-spin text-primary" />
+                      ) : (
+                        <RotateCw size={12} />
+                      )}
+                      <span>{reparsingNoteId === n.id ? 'Menganalisis…' : 'Ekstrak SIMRS'}</span>
+                    </button>
+                  )}
+                </div>
                 <div className="flex items-center gap-2 overflow-x-auto pb-1 hide-scrollbar">
                   {n.attachments.map((att, attIdx) => (
                     <ClinicalMediaCard
