@@ -79,6 +79,25 @@ function splitConsultAndAdvis(rawText: string): { consult: string; advis: string
   if (mohonAdvisMatch && mohonAdvisMatch.index !== undefined) {
     const afterMohon = mohonAdvisMatch[2].trim()
     if (afterMohon.length > 0) {
+      // Cek apakah di dalam afterMohon terdapat pemisah ke jawaban/advis dokter (misal "A:", "Assessment:", "PTx:", "PDx:", "Terapi:", "Advis:")
+      const doctorReplyMatch = afterMohon.match(/(?:^|\n)\s*(\*?(?:A|Assessment|Asesmen|Dx|Diagnosis|PTx|PDx|Planning|Plan|Terapi|Tx|Advis|Instruksi)\s*[:/][\s\S]*)/i)
+      if (doctorReplyMatch && doctorReplyMatch.index !== undefined) {
+        const offset = doctorReplyMatch[0].startsWith('\n') ? 1 : 0
+        const replyStart = doctorReplyMatch.index + offset
+        const preDoctorText = afterMohon.slice(0, replyStart).trim()
+        const actualAdvis = afterMohon.slice(replyStart).trim()
+
+        const consultEnd = mohonAdvisMatch.index + mohonAdvisMatch[1].length + 1
+        const fullConsult = preDoctorText
+          ? `${rawText.slice(0, consultEnd).trim()}\n\n${preDoctorText}`
+          : rawText.slice(0, consultEnd).trim()
+
+        return {
+          consult: fullConsult,
+          advis: cleanAdvis(actualAdvis),
+        }
+      }
+
       const consultEnd = mohonAdvisMatch.index + mohonAdvisMatch[1].length + 1
       return {
         consult: rawText.slice(0, consultEnd).trim(),
@@ -414,6 +433,13 @@ export default function Brainstorm() {
             if (advisP.length === 0) {
               const directP = parsePlanningLines(advis.split('\n'), today())
               if (directP.length > 0) advisP = directP
+            }
+
+            // O (Penunjang): Bila ada bacaan penunjang / radiologi yang terselip di advis, gabungkan ke O_penunjang!
+            if (advisParsed.data.O_penunjang) {
+              parsedSoapData.O_penunjang = [parsedSoapData.O_penunjang, advisParsed.data.O_penunjang]
+                .filter(Boolean)
+                .join('\n\n')
             }
 
             // A (Diagnosis): Tempatkan diagnosis advis dokter di posisi utama, disusul diagnosis IGD

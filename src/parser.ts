@@ -727,9 +727,9 @@ const SECTION_HEADER_PATTERNS: { regex: RegExp; section: keyof RawSections }[] =
     regex: /^\s*(?:[*_~#]*\s*)?(?:S|Subjektif|Subjektive|Subyektif|Subyektive|Subjective|Subjectif|Anamnesis|Keluhan|Keluhan\s*Utama|RPS)\b[*_~#:\s\-–—/]*\s*(.*)$/i,
     section: 'S',
   },
-  // O - Penunjang Khusus
+  // O - Penunjang Khusus (Lab, Radiologi, Ro Thorax, EKG, CT-Scan, dll.)
   {
-    regex: /^\s*(?:[*_~#]*\s*)?(?:Penunjang|Pemeriksaan\s*Penunjang|Hasil\s*Penunjang|Hasil\s*Lab|Laboratorium|Radiologi|CT[\s-]?Scan|Foto\s*Rontgen|EKG)\b[*_~#:\s\-–—/]*\s*(.*)$/i,
+    regex: /^\s*(?:[*_~#]*\s*)?(?:(?:Yth[.,\s]+(?:dr\.?\s*)?TS[.,\s]+)?(?:Hasil\s*)?(?:Pemeriksaan\s*|Bacaan\s*)?(?:Penunjang|Pemeriksaan\s*Penunjang|Hasil\s*Penunjang|Hasil\s*Lab|Laboratorium|Lab|Radiologi|CT[\s-]?Scan|MSCT|MRI|USG|Echo(?:cardiografi)?|EKG|ECG|BGA|AGD|Foto\s*Rontgen|Foto\s*(?:Thorax|Thoraks|Toraks|Torax)|Ro\s*(?:Thorax|Thoraks|Toraks|Torax)|Rontgen\s*(?:Thorax|Thoraks|Toraks|Torax)|(?:Thorax|Thoraks|Toraks|Torax)\s*Foto|X[\s-]?Ray(?:\s*(?:Thorax|Thoraks|Toraks|Torax))?|Darah\s*Lengkap|Urinalisis))\b[*_~#:\s\-–—/]*\s*(.*)$/i,
     section: 'O_penunjang',
   },
   // O - Pemfis / Objektif Umum - mendukung O/, O:, *O/*, *O:*
@@ -821,7 +821,13 @@ function sectionize(raw: string): RawSections {
         }
       }
 
-      if (inlineContent && !/^[*_~#:\s\-–—/]+$/.test(inlineContent)) {
+      if (matchedSection === 'O_penunjang') {
+        // Bersihkan sapaan WhatsApp ("Yth, TS.") dan simpan baris penunjang dengan nama pemeriksaan utuh
+        const cleanPenunjang = line.replace(/^\s*(?:[*_~#]*\s*)?(?:Yth[.,\s]+(?:dr\.?\s*)?TS[.,\s]+)/i, '').trim()
+        if (cleanPenunjang) {
+          sections.O_penunjang.push(cleanPenunjang)
+        }
+      } else if (inlineContent && !/^[*_~#:\s\-–—/]+$/.test(inlineContent)) {
         sections[current].push(inlineContent)
       }
     } else if (current) {
@@ -831,9 +837,12 @@ function sectionize(raw: string): RawSections {
         continue
       }
 
-      // Deteksi penunjang yang terselip di dalam O (misal: "GDA 186 mg/dl" atau "CT Scan Kepala:")
-      if (current === 'O_pemfis' && /^(?:GDA|GDS|GDP|HbA1c|Hasil\s*Lab|Lab:|Radiologi:|CT[\s-]?Scan)\b/i.test(line)) {
-        sections.O_penunjang.push(line)
+      // Deteksi penunjang yang terselip di dalam O_pemfis atau P (misal: "GDA 186 mg/dl", "Hasil Foto Thorax:", "CT Scan Kepala:")
+      const isPenunjangLine = /^(?:(?:Yth[.,\s]+(?:dr\.?\s*)?TS[.,\s]+)?(?:Hasil\s*)?(?:Pemeriksaan\s*|Bacaan\s*)?(?:Foto\s*(?:Thorax|Thoraks|Toraks|Torax)|Ro\s*(?:Thorax|Thoraks|Toraks|Torax)|Rontgen\s*(?:Thorax|Thoraks|Toraks|Torax)|(?:Thorax|Thoraks|Toraks|Torax)\s*Foto|Radiologi|CT[\s-]?Scan|MSCT|MRI|USG|Echo|EKG|GDA|GDS|GDP|HbA1c|Hasil\s*Lab|Lab:))\b/i.test(line)
+      if (isPenunjangLine) {
+        current = 'O_penunjang'
+        const cleanPenunjang = line.replace(/^\s*(?:[*_~#]*\s*)?(?:Yth[.,\s]+(?:dr\.?\s*)?TS[.,\s]+)/i, '').trim()
+        sections.O_penunjang.push(cleanPenunjang)
       } else {
         sections[current].push(line)
       }
