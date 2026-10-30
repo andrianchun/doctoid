@@ -1016,7 +1016,12 @@ export default function PatientProfile() {
 
       triggerCloudSync(50)
       const pDisp = formatPatientDisplayName(patient.title, patient.nama_depan)
-      notifyParserFinished(pDisp, 'Hasil foto SIMRS berhasil diekstrak ke CPPT')
+      notifyParserFinished(pDisp, 'Hasil foto SIMRS berhasil diekstrak ke CPPT', {
+        type: 'patient_profile',
+        route: `/pasien/${patient.id}`,
+        patientId: patient.id,
+        patientName: pDisp,
+      })
       notify(`Data ${pDisp} telah disimpan ke CPPT ✓`)
     } catch (err: any) {
       console.error(err)
@@ -2276,12 +2281,12 @@ export default function PatientProfile() {
               ))}
               {busy && <Loader2 size={18} className="animate-spin text-primary mx-auto my-2" />}
               {pendingEdit && (
-                <div className="rounded-2xl border border-emerald-300 bg-emerald-50 p-3.5 text-xs space-y-2">
-                  <p className="font-bold text-emerald-900">Usulan pembaruan terapi:</p>
-                  <p className="font-mono text-xs text-emerald-800 bg-white/80 p-2 rounded-xl border border-emerald-200">{pendingEdit}</p>
+                <div className="rounded-2xl border border-primary/30 bg-primary/5 p-3.5 text-xs space-y-2">
+                  <p className="font-bold text-primary-deep">Usulan pembaruan terapi:</p>
+                  <p className="font-mono text-xs text-slate-800 bg-white/90 p-2 rounded-xl border border-slate-200">{pendingEdit}</p>
                   <button
                     onClick={terapkanEdit}
-                    className="flex h-9 cursor-pointer items-center gap-1.5 rounded-xl bg-emerald-600 px-3.5 font-bold text-white shadow-sm hover:bg-emerald-700 active:scale-95 transition-all"
+                    className="flex h-9 cursor-pointer items-center gap-1.5 rounded-xl bg-primary hover:bg-primary-deep px-3.5 font-bold text-white shadow-sm active:scale-95 transition-all"
                   >
                     <Check size={15} /> Terapkan ke CPPT Hari Ini
                   </button>

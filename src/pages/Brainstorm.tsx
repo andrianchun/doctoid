@@ -22,7 +22,7 @@ const ShareReceiver: ShareReceiverPlugin | null = Capacitor.isNativePlatform()
 import {
   Mic,
   Loader2, X, ChevronDown, Send,
-  Search, Paperclip, Bell, ScanEye, RotateCw, Play
+  Search, Paperclip, Bell, ScanEye, RotateCw, Play, Check
 } from 'lucide-react'
 import { db, type Jaminan, type TerapiItem, type DiagnosisItem, type RegexField, type Patient, type RawatEpisode, type PeranRawat, type InboxItem, type AttachmentTag } from '../db'
 import { DEPT_ALIH_RAWAT } from './PatientProfile'
@@ -604,6 +604,12 @@ export default function Brainstorm() {
       await new Promise((resolve) => setTimeout(resolve, 350))
 
       setShowInboxModal(false)
+      const pDisp = (parsedSoapData.nama_depan || (form.nama_depan as string) || 'Pasien').trim()
+      notifyParserFinished(pDisp, 'Konsul WhatsApp berhasil diproses ke Catat Pasien', {
+        type: 'brainstorm',
+        route: '/brainstorm',
+        patientName: pDisp,
+      })
       notify('Data konsul WhatsApp & temuan lampiran berhasil dimuat ke formulir')
     } catch (err) {
       console.error('Import inbox error:', err)
@@ -666,7 +672,9 @@ export default function Brainstorm() {
     notify('Seluruh antrean konsul berhasil dibersihkan')
   }
 
-  const [showFaskesMenu, setShowFaskesMenu] = useState(false)
+  const [showFaskesModal, setShowFaskesModal] = useState(false)
+  useBodyScrollLock(showFaskesModal)
+  const [faskesSearchQ, setFaskesSearchQ] = useState('')
   const [saranP, setSaranP] = useState<Suggestion[]>([])
   const [highlight, setHighlight] = useState<{ fields: Set<string>; variant: 'amber' | 'red' }>({ fields: new Set(), variant: 'amber' })
   const highlightTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -1359,7 +1367,11 @@ export default function Brainstorm() {
 
       flashHighlight(['nama_depan', 'usia', 'no_rm', 'S', 'O_pemfis', 'O_penunjang', 'A', 'P'], 'amber')
       const pName = resolvedNama ? `${resolvedTitle ? resolvedTitle + ' ' : ''}${resolvedNama}` : 'Pasien'
-      notifyParserFinished(pName, 'Layar SIMRS berhasil diparsing ke form')
+      notifyParserFinished(pName, 'Layar SIMRS berhasil diparsing ke form', {
+        type: 'brainstorm',
+        route: '/brainstorm',
+        patientName: pName,
+      })
       notify(`Data ${pName} siap diterapkan ke form ✓`)
     } catch (e: any) {
       console.warn('Gagal memproses gambar SIMRS via AI multimodal:', e)
@@ -1575,6 +1587,13 @@ export default function Brainstorm() {
       })
       await simpanRegexBaru(r.regex_baru)
       setRaw('')
+      const pName = r.nama_depan ? `${r.title ? r.title + ' ' : ''}${r.nama_depan}` : 'Pasien'
+      notifyParserFinished(pName, 'Catatan medis berhasil diparsing ke form', {
+        type: 'brainstorm',
+        route: '/brainstorm',
+        patientName: pName,
+      })
+      notify(`Catatan medis ${pName} berhasil diparsing ke form ✓`)
     } catch (e) {
       notify((e as Error).message)
     } finally {
@@ -1615,6 +1634,27 @@ export default function Brainstorm() {
       )
     )
   }, [allPatients, patientSearchQ])
+
+  const filteredFaskesList = useMemo(() => {
+    if (!hospitals) return []
+    const q = faskesSearchQ.trim().toLowerCase()
+    return hospitals.map((h) => {
+      const hWards = (allWards || [])
+        .filter((w) => w.hospital_id === h.id)
+        .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+
+      if (!q) {
+        return { hospital: h, wards: hWards }
+      }
+
+      const hospMatch = h.nama.toLowerCase().includes(q)
+      const matchedWards = hospMatch
+        ? hWards
+        : hWards.filter((w) => w.nama.toLowerCase().includes(q))
+
+      return { hospital: h, wards: matchedWards }
+    }).filter((group) => group.wards.length > 0)
+  }, [hospitals, allWards, faskesSearchQ])
 
   const simpan = async () => {
     if (!form.nama_depan.trim()) {
@@ -1917,6 +1957,24 @@ export default function Brainstorm() {
         </div>
       </div>
 
+      {/* Indikator Latar Belakang jika Import Konsulan Sedang Berjalan */}
+      {importingInboxId && !showInboxModal && (
+        <div className="flex items-center justify-between gap-3 px-4 py-2.5 rounded-2xl bg-primary/10 border border-primary/20 text-slate-800 animate-in fade-in slide-in-from-top-2">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <Loader2 className="w-4 h-4 animate-spin text-primary shrink-0" />
+            <span className="text-xs font-semibold truncate">
+              {importStepText || 'Memproses konsulan di latar belakang...'} ({Math.floor(importProgress)}%)
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowInboxModal(true)}
+            className="text-xs font-bold text-primary hover:underline shrink-0 cursor-pointer"
+          >
+            Lihat Status
+          </button>
+        </div>
+      )}
 
       {/* Banner Deteksi Pasien Lama / Aktif Realtime */}
       {detectedPatient && !selectedPatient && (
@@ -1951,7 +2009,7 @@ export default function Brainstorm() {
                   <button
                     type="button"
                     onClick={() => handleUpdateActivePatientSoap(detectedPatient)}
-                    className="rounded-xl bg-gradient-to-br from-emerald-600 to-teal-700 px-3.5 py-1.5 text-xs font-bold text-white shadow-md shadow-emerald-700/20 hover:brightness-110 active:scale-95 transition-all cursor-pointer"
+                    className="rounded-xl bg-gradient-to-br from-primary to-primary-deep px-3.5 py-1.5 text-xs font-bold text-white shadow-md shadow-primary/25 hover:brightness-110 active:scale-95 transition-all cursor-pointer"
                   >
                     Update CPPT
                   </button>
@@ -2054,7 +2112,7 @@ export default function Brainstorm() {
       )}
 
       {/* KARTU 1: IDENTITAS & LOKASI PASIEN */}
-      <div className={`glass-card rounded-3xl p-5 shadow-sm space-y-4 animate-in fade-in slide-in-from-bottom-2 border border-slate-300/80 relative transition-all ${showFaskesMenu ? 'z-30' : 'z-10'}`}>
+      <div className="glass-card rounded-3xl p-5 shadow-sm space-y-4 animate-in fade-in slide-in-from-bottom-2 border border-slate-300/80 relative z-10">
         <div className="flex items-center justify-between pb-2 border-b border-slate-200">
           <h2 className="text-xs font-extrabold text-slate-800 uppercase tracking-wider">
             {selectedPatient ? 'Identitas Pasien (Readmisi)' : 'Identitas Pasien'}
@@ -2209,11 +2267,11 @@ export default function Brainstorm() {
         </div>
 
         {/* Baris 4: Faskes & Ruangan */}
-        <div className="relative">
+        <div>
           <button
             ref={faskesRef}
             type="button"
-            onClick={() => setShowFaskesMenu(!showFaskesMenu)}
+            onClick={() => setShowFaskesModal(true)}
             className={inputCls + ' flex items-center justify-between text-left cursor-pointer' + hl('faskes')}
           >
             {hospitalId && wardId && hospitals && allWards ? (() => {
@@ -2233,45 +2291,6 @@ export default function Brainstorm() {
             )}
             <ChevronDown size={16} className="text-ink-muted shrink-0 ml-2" />
           </button>
-          
-          {showFaskesMenu && (
-            <>
-              {/* Backdrop klik luar untuk menutup dropdown */}
-              <div
-                className="fixed inset-0 z-40"
-                onClick={() => setShowFaskesMenu(false)}
-              />
-              <div className="absolute top-full left-0 right-0 z-50 mt-1 max-h-64 overflow-y-auto rounded-2xl bg-white border border-slate-300 shadow-2xl p-2 space-y-3 animate-in fade-in zoom-in-95">
-                {hospitals?.map(h => {
-                   const hWards = allWards?.filter(w => w.hospital_id === h.id).sort((a, b) => (a.order ?? 0) - (b.order ?? 0)) || [];
-                   if (hWards.length === 0) return null;
-                   return (
-                     <div key={h.id} className="space-y-1">
-                       <div className="flex items-center gap-2 px-2 py-1 bg-slate-100 rounded-xl">
-                         <span className="text-xs font-bold text-slate-700">{h.nama}</span>
-                       </div>
-                       {hWards.map(w => (
-                         <button 
-                           key={w.id} 
-                           type="button"
-                           className="flex items-center gap-2 w-full px-2 py-2 hover:bg-slate-100 rounded-xl text-left pl-4 cursor-pointer transition-colors"
-                           onClick={() => {
-                             setHospitalId(h.id!);
-                             setWardId(w.id!);
-                             setShowFaskesMenu(false);
-                           }}
-                         >
-                           <span className="size-2.5 rounded-full shadow-xs shrink-0" style={{ backgroundColor: w.kode_warna }} />
-                           <span className="text-xs font-semibold text-slate-800">{w.nama}</span>
-                         </button>
-                       ))}
-                     </div>
-                   )
-                })}
-                {!hospitals?.length && <p className="text-xs text-center text-slate-400 p-2">Belum ada faskes. Tambah di Pengaturan.</p>}
-              </div>
-            </>
-          )}
         </div>
       </div>
 
@@ -2996,6 +3015,142 @@ export default function Brainstorm() {
         )
       })()}
 
+      {/* Modal Dedicated Popup Pilih Faskes & Ruangan */}
+      {showFaskesModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/60 backdrop-blur-sm p-0 sm:p-4 animate-in fade-in overscroll-contain touch-none select-none"
+          onClick={() => {
+            setShowFaskesModal(false)
+            setFaskesSearchQ('')
+          }}
+        >
+          <div
+            className="flex h-[80dvh] max-h-[580px] w-full max-w-lg flex-col rounded-t-3xl sm:rounded-3xl bg-white shadow-2xl border border-slate-200 overscroll-contain touch-auto select-auto overflow-hidden animate-in slide-in-from-bottom sm:zoom-in-95 duration-200"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header Modal */}
+            <div className="flex items-center justify-between border-b border-slate-200 p-4">
+              <div>
+                <p className="text-sm font-bold text-ink">Pilih Faskes & Ruangan</p>
+                <p className="caption text-ink-muted">Tentukan rumah sakit dan ruangan rawat pasien</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowFaskesModal(false)
+                  setFaskesSearchQ('')
+                }}
+                aria-label="Tutup"
+                className="cursor-pointer rounded-full p-1.5 text-ink-muted hover:bg-slate-100 transition-colors"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* Pencarian Cepat */}
+            <div className="p-3 border-b border-slate-100 bg-slate-50/50">
+              <div className="relative">
+                <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-muted" />
+                <input
+                  value={faskesSearchQ}
+                  onChange={(e) => setFaskesSearchQ(e.target.value)}
+                  placeholder="Cari faskes atau ruangan…"
+                  className={inputCls + ' pl-9 pr-8 text-xs'}
+                />
+                {faskesSearchQ && (
+                  <button
+                    type="button"
+                    onClick={() => setFaskesSearchQ('')}
+                    aria-label="Hapus pencarian"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
+                  >
+                    <X size={14} />
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Daftar Faskes & Ruangan */}
+            <div className="flex-1 overflow-y-auto overscroll-contain p-4 space-y-4">
+              {filteredFaskesList.length > 0 ? (
+                filteredFaskesList.map(({ hospital: h, wards: hWards }) => (
+                  <div key={h.id} className="space-y-1.5">
+                    <div className="flex items-center justify-between px-3 py-1.5 bg-slate-100/80 rounded-xl">
+                      <span className="text-xs font-bold text-slate-700 tracking-wide">{h.nama}</span>
+                      <span className="text-[10px] font-semibold text-slate-400">{hWards.length} ruangan</span>
+                    </div>
+                    <div className="space-y-1">
+                      {hWards.map((w) => {
+                        const isSelected = hospitalId === h.id && wardId === w.id
+                        return (
+                          <button
+                            key={w.id}
+                            type="button"
+                            onClick={() => {
+                              setHospitalId(h.id!)
+                              setWardId(w.id!)
+                              setShowFaskesModal(false)
+                              setFaskesSearchQ('')
+                            }}
+                            className={`w-full flex items-center justify-between px-3.5 py-3 rounded-2xl transition-all cursor-pointer text-left ${
+                              isSelected
+                                ? 'bg-primary/10 border border-primary/30 text-primary-deep font-bold shadow-xs'
+                                : 'hover:bg-slate-50 active:bg-slate-100 text-slate-800 border border-transparent font-medium'
+                            }`}
+                          >
+                            <div className="flex items-center gap-3 min-w-0">
+                              <span
+                                className="size-3 rounded-full shrink-0 shadow-xs"
+                                style={{ backgroundColor: w.kode_warna || '#0d9488' }}
+                              />
+                              <span className="text-xs truncate">{w.nama}</span>
+                            </div>
+                            {isSelected && (
+                              <Check size={16} className="text-primary font-bold shrink-0 ml-2" />
+                            )}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div className="py-12 text-center space-y-1">
+                  <p className="text-xs font-semibold text-slate-600">
+                    {!hospitals?.length
+                      ? 'Belum ada fasilitas kesehatan terdaftar'
+                      : 'Ruangan atau faskes tidak ditemukan'}
+                  </p>
+                  <p className="caption text-slate-400">
+                    {!hospitals?.length
+                      ? 'Silakan tambahkan rumah sakit dan ruangan di menu Pengaturan.'
+                      : `Tidak ada hasil yang cocok dengan "${faskesSearchQ}".`}
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* Footer jika ada faskes terpilih */}
+            {hospitalId > 0 && (
+              <div className="border-t border-slate-100 p-3 bg-slate-50/50">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setHospitalId(0)
+                    setWardId(0)
+                    setShowFaskesModal(false)
+                    setFaskesSearchQ('')
+                  }}
+                  className="w-full text-center py-2 text-xs font-semibold text-rose-500 hover:text-rose-600 transition-colors cursor-pointer"
+                >
+                  Kosongkan Pilihan Ruangan
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Modal Pilih Pasien Lama / Readmisi */}
       {showSearchModal && (
         <div
@@ -3092,7 +3247,7 @@ export default function Brainstorm() {
       {showInboxModal && (
         <div
           className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/60 backdrop-blur-sm p-0 sm:p-4 animate-in fade-in overscroll-contain touch-none select-none"
-          onClick={() => !importingInboxId && setShowInboxModal(false)}
+          onClick={() => setShowInboxModal(false)}
         >
           <div
             className="relative flex h-[85dvh] max-h-[680px] w-full max-w-lg flex-col rounded-t-3xl sm:rounded-3xl bg-white shadow-2xl border border-slate-200 overscroll-contain touch-auto select-auto overflow-hidden animate-in zoom-in-95 duration-200"
@@ -3123,6 +3278,16 @@ export default function Brainstorm() {
                         style={{ width: `${Math.max(importProgress, 5)}%` }}
                       />
                     </div>
+                  </div>
+
+                  <div className="pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowInboxModal(false)}
+                      className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors cursor-pointer"
+                    >
+                      Lanjutkan di Latar Belakang
+                    </button>
                   </div>
                 </div>
               </div>
@@ -3165,6 +3330,15 @@ export default function Brainstorm() {
                     Hapus Semua
                   </button>
                 )}
+                <button
+                  type="button"
+                  onClick={() => setShowInboxModal(false)}
+                  className="rounded-full p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-all cursor-pointer ml-1"
+                  title="Tutup Inbox"
+                  aria-label="Tutup Inbox"
+                >
+                  <X size={16} />
+                </button>
               </div>
             </div>
 

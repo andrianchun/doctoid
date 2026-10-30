@@ -719,7 +719,7 @@ export default function RawatJalan() {
       {toast && (
         <aside
           aria-label="Notifikasi"
-          className="fixed inset-x-0 bottom-24 z-50 mx-auto w-fit max-w-[90%] rounded-2xl bg-gradient-to-r from-teal-700 to-teal-800 px-5 py-2.5 text-xs font-bold text-white shadow-xl shadow-teal-900/35 border border-white/20 animate-in fade-in slide-in-from-bottom-2"
+          className="fixed inset-x-0 bottom-24 z-50 mx-auto w-fit max-w-[90%] rounded-2xl bg-gradient-to-r from-primary to-primary-deep px-5 py-2.5 text-xs font-bold text-white shadow-xl shadow-primary/35 border border-white/20 animate-in fade-in slide-in-from-bottom-2"
         >
           {toast}
         </aside>

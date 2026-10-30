@@ -118,6 +118,17 @@ function GcsDigitBox({
   )
 }
 
+// Global store untuk background OCR di VisiteModal agar tidak hilang saat modal ditutup sementara
+export interface PendingVisiteOcrTask {
+  status: 'busy' | 'done' | 'error'
+  result?: any
+  patientId: number
+  patientDisp: string
+  attachmentId?: string
+  message: string
+}
+export const pendingVisiteOcrStore = new Map<number, PendingVisiteOcrTask>()
+
 export default function VisiteModal({
   patient,
   latestNote,
@@ -204,6 +215,37 @@ export default function VisiteModal({
   const [previewImage, setPreviewImage] = useState<string | null>(null)
   const simrsCameraRef = useRef<HTMLInputElement>(null)
   const simrsGalleryRef = useRef<HTMLInputElement>(null)
+
+  // Sinkronisasi status background OCR dari pendingVisiteOcrStore
+  useEffect(() => {
+    if (!patient?.id) return
+    const stored = pendingVisiteOcrStore.get(patient.id)
+    if (stored) {
+      if (stored.status === 'done' && stored.result) {
+        setPendingOcrResult(stored.result)
+        setIsOcrBusy(false)
+        setOcrMessage(stored.message)
+      } else if (stored.status === 'busy') {
+        setIsOcrBusy(true)
+        setActiveOcrAttId(stored.attachmentId || null)
+        setOcrMessage(stored.message)
+      }
+    }
+
+    const ocrReadyHandler = (e: any) => {
+      const pid = patient?.id
+      if (pid && e.detail?.patientId === pid) {
+        const updated = pendingVisiteOcrStore.get(pid)
+        if (updated?.result) {
+          setPendingOcrResult(updated.result)
+          setIsOcrBusy(false)
+          setOcrMessage(updated.message)
+        }
+      }
+    }
+    window.addEventListener('doctoid_visite_ocr_ready', ocrReadyHandler)
+    return () => window.removeEventListener('doctoid_visite_ocr_ready', ocrReadyHandler)
+  }, [patient?.id])
 
   // Interaksi Status Keluhan (Diklik muncul popover atau diswipe horizontal muncul pilihan)
   const [activeStatusMenuId, setActiveStatusMenuId] = useState<string | null>(null)
@@ -425,35 +467,62 @@ export default function VisiteModal({
     }
   }
 
-  // Worker OCR per lampiran — dapat dipanggil ulang kapan saja (Retryable ala LogMeal)
+  // Worker OCR per lampiran — dapat dipanggil ulang kapan saja & berjalan di background
   const runOcrOnAttachment = (att: ClinicalMediaItem) => {
+    const patientDisp = formatPatientDisplayName(patient.title, patient.nama_depan)
+    const patientId = patient.id!
     setIsOcrBusy(true)
     setActiveOcrAttId(att.id || null)
-    setOcrMessage('Sedang membaca SIMRS / WA di background... Foto aman terlampir')
+    const busyMsg = 'Menganalisis foto layar SIMRS / chat WA di background... (bisa ditutup/ditinggal)'
+    setOcrMessage(busyMsg)
     setPendingOcrResult(null)
+
+    pendingVisiteOcrStore.set(patientId, {
+      status: 'busy',
+      patientId,
+      patientDisp,
+      attachmentId: att.id,
+      message: busyMsg,
+    })
 
     ;(async () => {
       try {
-        const promptContext = `Pasien: ${formatPatientDisplayName(patient.title, patient.nama_depan)}\nTanggal Visite: ${tanggal}\nFoto Layar Monitor Komputer SIMRS (CPPT / Catatan Perkembangan Pasien Terintegrasi / Instruksi Terapi Harian) atau Screenshot Chat WA Ruangan`
+        const promptContext = `Pasien: ${patientDisp}\nTanggal Visite: ${tanggal}\nFoto Layar Monitor Komputer SIMRS (CPPT / Catatan Perkembangan Pasien Terintegrasi / Instruksi Terapi Harian) atau Screenshot Chat WA Ruangan`
         const r = await rapikan(promptContext, [{ type: 'image/webp', dataUrl: att.dataUrl || att.url || '' }], false)
 
-        setPendingOcrResult(r)
         const foundTherapies = r.P?.length || 0
         const foundLab = r.O_penunjang?.trim() ? 1 : 0
-        const patientDisp = formatPatientDisplayName(patient.title, patient.nama_depan)
+        const readyMsg = `Data ${patientDisp} siap diterapkan (${foundTherapies} terapi${foundLab ? ', lab' : ''})`
 
-        // 1. Notifikasi Pop-up Status Bar Android (Heads-up) & Web Notification
+        pendingVisiteOcrStore.set(patientId, {
+          status: 'done',
+          result: r,
+          patientId,
+          patientDisp,
+          attachmentId: att.id,
+          message: readyMsg,
+        })
+
+        setPendingOcrResult(r)
+        setOcrMessage(readyMsg)
+
+        // 1. Notifikasi Pop-up Status Bar Android (Heads-up) & Web Notification dengan routing tepat ke Visite Pasien ini
         notifyParserFinished(
           patientDisp,
-          `Ditemukan ${foundTherapies} terapi${foundLab ? ', hasil penunjang/lab' : ''}. Siap diterapkan.`
+          `Ditemukan ${foundTherapies} terapi${foundLab ? ', hasil penunjang/lab' : ''}. Siap diterapkan.`,
+          {
+            type: 'visite',
+            route: '/rawatinap',
+            patientId,
+            date: tanggal,
+            patientName: patientDisp,
+          }
         )
 
-        // 2. Toast pendek in-app
-        setOcrMessage(
-          `Data ${patientDisp} siap diterapkan (${foundTherapies} terapi${foundLab ? ', lab' : ''})`
-        )
+        window.dispatchEvent(new CustomEvent('doctoid_visite_ocr_ready', { detail: { patientId } }))
       } catch (err: any) {
         console.error('Gagal OCR multimodal:', err)
+        pendingVisiteOcrStore.delete(patientId)
         setOcrMessage('AI Vision terkendala. Foto asli tetap tersimpan aman; Anda bisa klik "Ulangi Parsing".')
       } finally {
         setIsOcrBusy(false)
@@ -465,6 +534,9 @@ export default function VisiteModal({
   const handleRemoveAttachment = (id: string) => {
     setAttachments((prev) => prev.filter((a) => a.id !== id))
     if (activeOcrAttId === id) {
+      if (patient?.id) {
+        pendingVisiteOcrStore.delete(patient.id)
+      }
       setIsOcrBusy(false)
       setActiveOcrAttId(null)
       setPendingOcrResult(null)
@@ -475,6 +547,9 @@ export default function VisiteModal({
   // Handler Terapkan Data OCR Cerdas (Non-destructive)
   const handleApplyOcrResult = () => {
     if (!pendingOcrResult) return
+    if (patient?.id) {
+      pendingVisiteOcrStore.delete(patient.id)
+    }
     const r = pendingOcrResult
 
     if (r.S && r.S.trim()) {
@@ -846,15 +921,15 @@ export default function VisiteModal({
               isOcrBusy
                 ? 'bg-blue-50 text-blue-700 border-blue-100'
                 : pendingOcrResult
-                ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                ? 'bg-primary/10 text-primary-deep border-primary/20'
                 : 'bg-slate-50 text-slate-700 border-slate-200'
             }`}
           >
             <div className="flex items-center gap-2 min-w-0 flex-1">
               {isOcrBusy ? (
-                <Loader2 size={13} className="animate-spin shrink-0 text-blue-600" />
+                <Loader2 size={13} className="animate-spin shrink-0 text-primary" />
               ) : pendingOcrResult ? (
-                <Sparkles size={13} className="shrink-0 text-emerald-600" />
+                <Sparkles size={13} className="shrink-0 text-primary" />
               ) : (
                 <AlertCircle size={13} className="shrink-0 text-amber-600" />
               )}
@@ -866,7 +941,7 @@ export default function VisiteModal({
                 <button
                   type="button"
                   onClick={handleApplyOcrResult}
-                  className="h-6 px-2.5 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs transition-colors cursor-pointer shadow-2xs"
+                  className="h-6 px-2.5 rounded-md bg-primary hover:bg-primary-deep text-white font-bold text-xs transition-colors cursor-pointer shadow-2xs"
                 >
                   Terapkan
                 </button>

@@ -1109,6 +1109,7 @@ export default function RawatInap() {
     window.addEventListener('doctoid_data_synced', handleRemoteSync)
     return () => window.removeEventListener('doctoid_data_synced', handleRemoteSync)
   }, [])
+
   const [lastMovedWardId, setLastMovedWardId] = useState<number | null>(null)
   const [addWardHospital, setAddWardHospital] = useState<Hospital | null>(null)
   useBodyScrollLock(Boolean(addWardHospital))
@@ -1221,6 +1222,36 @@ export default function RawatInap() {
         return (a.id ?? 0) - (b.id ?? 0)
       })
   }, [aktif, optimisticOrder, optimisticWard])
+
+  // Otomatis buka VisiteModal saat notifikasi status bar diklik
+  useEffect(() => {
+    const checkAndOpenPendingVisite = async (targetId?: number) => {
+      const pIdStr = targetId ? String(targetId) : sessionStorage.getItem('doctoid_open_visite_patient_id')
+      if (!pIdStr) return
+      sessionStorage.removeItem('doctoid_open_visite_patient_id')
+      const pId = Number(pIdStr)
+      if (!pId) return
+
+      let targetPatient = (sortedAktif || []).find((p) => p.id === pId)
+      if (!targetPatient) {
+        targetPatient = await db.patients.get(pId)
+      }
+      if (targetPatient) {
+        const notes = await db.progressNotes.where('patient_id').equals(pId).toArray()
+        const sortedNotes = notes.sort((a, b) => new Date(b.tanggal).getTime() - new Date(a.tanggal).getTime())
+        setVisiteTarget({ patient: targetPatient, latestNote: sortedNotes[0] })
+      }
+    }
+
+    const handler = (e: any) => {
+      checkAndOpenPendingVisite(e.detail?.patientId)
+    }
+
+    window.addEventListener('doctoid_trigger_open_visite', handler)
+    checkAndOpenPendingVisite()
+
+    return () => window.removeEventListener('doctoid_trigger_open_visite', handler)
+  }, [sortedAktif])
 
   const allNotes = useLiveQuery(
     async () => {
@@ -1849,20 +1880,20 @@ export default function RawatInap() {
         </div>
       )}
 
-      {/* Floating Confirmation Bar ala Xiaomi (Konfirmasi Batal [X] / Simpan [V]) */}
+      {/* Floating Confirmation Bar (Konfirmasi Batal [X] / Simpan [V]) */}
       {pendingReorder && (
         <aside
           aria-label="Konfirmasi Perubahan Urutan"
-          className="fixed bottom-20 sm:bottom-24 left-1/2 -translate-x-1/2 z-40 flex items-center gap-3 px-4 py-2 bg-slate-900/95 text-white rounded-2xl shadow-2xl border border-slate-700/80 backdrop-blur-md animate-in slide-in-from-bottom-4 duration-200 select-none max-w-[92vw]"
+          className="fixed bottom-20 sm:bottom-24 left-1/2 -translate-x-1/2 z-40 flex items-center gap-3 px-4 py-2 bg-white/95 text-slate-800 rounded-2xl shadow-2xl shadow-slate-900/15 border border-slate-200/90 backdrop-blur-md animate-in slide-in-from-bottom-4 duration-200 select-none max-w-[92vw]"
         >
-          <span className="text-xs font-semibold text-slate-200 whitespace-nowrap pl-0.5">
+          <span className="text-xs font-bold text-slate-800 whitespace-nowrap pl-0.5">
             Simpan urutan baru?
           </span>
           <div className="flex items-center gap-1.5 shrink-0">
             <button
               type="button"
               onClick={handleCancelReorder}
-              className="size-8 rounded-xl bg-slate-800 hover:bg-rose-950/80 hover:text-rose-400 text-slate-300 flex items-center justify-center transition-all cursor-pointer border border-slate-700 active:scale-95"
+              className="size-8 rounded-xl bg-slate-100 hover:bg-rose-50 hover:text-rose-600 text-slate-500 flex items-center justify-center transition-all cursor-pointer border border-slate-200 active:scale-95"
               title="Batal (X) - Kembalikan urutan semula"
               aria-label="Batalkan perubahan urutan"
             >
@@ -1871,7 +1902,7 @@ export default function RawatInap() {
             <button
               type="button"
               onClick={handleSaveReorder}
-              className="h-8 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer shadow-sm active:scale-95"
+              className="h-8 px-3 rounded-xl bg-gradient-to-r from-primary to-primary-deep hover:from-primary-deep hover:to-primary text-white font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer shadow-md shadow-primary/25 active:scale-95"
               title="Simpan (V)"
               aria-label="Simpan perubahan urutan"
             >

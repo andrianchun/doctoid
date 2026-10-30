@@ -456,8 +456,29 @@ if (typeof window !== 'undefined') {
       setupPushNotifications()
 
       LocalNotifications.addListener('localNotificationActionPerformed', async (notification) => {
-        openWaInboxInApp()
-        syncWaInboxToDexie()
+        const extra = notification.notification?.extra || {}
+        const channelId = notification.notification?.channelId
+        const notifType = extra.type || (channelId === 'wa_inbox_channel' ? 'wa_inbox' : 'brainstorm')
+
+        if (notifType === 'wa_inbox') {
+          openWaInboxInApp()
+          syncWaInboxToDexie()
+        } else if (notifType === 'visite') {
+          if (extra.patientId) {
+            sessionStorage.setItem('doctoid_open_visite_patient_id', String(extra.patientId))
+            window.dispatchEvent(new CustomEvent('doctoid_nav_visite', { detail: extra }))
+          }
+        } else if (notifType === 'patient_profile') {
+          if (extra.patientId) {
+            window.dispatchEvent(new CustomEvent('doctoid_nav_route', { detail: { route: extra.route || `/pasien/${extra.patientId}` } }))
+          }
+        } else {
+          // Default Brainstorm / Catat Pasien: buka form rekam medis, JANGAN buka modal inbox
+          sessionStorage.removeItem('doctoid_auto_open_inbox')
+          localStorage.removeItem('doctoid_auto_open_inbox')
+          window.dispatchEvent(new CustomEvent('doctoid_nav_route', { detail: { route: '/brainstorm' } }))
+        }
+
         if (notification.notification) {
           await LocalNotifications.removeDeliveredNotifications({
             notifications: [notification.notification],
@@ -518,8 +539,9 @@ export async function sendLocalNotification(item: any) {
             channelId: 'wa_inbox_channel',
             sound: 'default',
             smallIcon: 'ic_stat_doctoid',
-            iconColor: '#0D9488',
+            iconColor: '#2563EB',
             extra: {
+              type: 'wa_inbox',
               inboxId: item.id,
             },
           },

@@ -36,7 +36,7 @@ export default function Layout() {
     ? 4
     : -1
 
-  // Navigasi otomatis ke Catat Pasien (/brainstorm) dan buka modal Inbox saat notifikasi status bar diklik
+  // Navigasi otomatis saat notifikasi status bar diklik
   useEffect(() => {
     const handleNavInbox = () => {
       localStorage.setItem('doctoid_auto_open_inbox', 'true')
@@ -49,8 +49,35 @@ export default function Layout() {
       }, 100)
     }
 
+    const handleNavRoute = (e: any) => {
+      const route = e.detail?.route
+      if (route && location.pathname !== route) {
+        navigate(route)
+      }
+    }
+
+    const handleNavVisite = (e: any) => {
+      const patientId = e.detail?.patientId
+      if (patientId) {
+        sessionStorage.setItem('doctoid_open_visite_patient_id', String(patientId))
+        if (location.pathname !== '/rawatinap') {
+          navigate('/rawatinap')
+        }
+        setTimeout(() => {
+          window.dispatchEvent(new CustomEvent('doctoid_trigger_open_visite', { detail: e.detail }))
+        }, 150)
+      }
+    }
+
     window.addEventListener('doctoid_nav_inbox', handleNavInbox)
-    return () => window.removeEventListener('doctoid_nav_inbox', handleNavInbox)
+    window.addEventListener('doctoid_nav_route', handleNavRoute as EventListener)
+    window.addEventListener('doctoid_nav_visite', handleNavVisite as EventListener)
+
+    return () => {
+      window.removeEventListener('doctoid_nav_inbox', handleNavInbox)
+      window.removeEventListener('doctoid_nav_route', handleNavRoute as EventListener)
+      window.removeEventListener('doctoid_nav_visite', handleNavVisite as EventListener)
+    }
   }, [navigate, location.pathname])
 
   // Gestur Swipe Horizontal antar Tab Utama
