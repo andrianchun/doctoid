@@ -345,15 +345,14 @@ export default function UpdaterAlert() {
     )
   }
 
-  // Mode 2: NON-FORCED UPDATE (Modal elegan dengan backdrop hitam transparan & shadow tegas)
+  // Mode 2: NON-FORCED UPDATE (Floating Bottom Card di atas navigasi bawah — tidak memblokir layar)
   return (
     <div
       aria-label="Notifikasi Pembaruan"
-      className="fixed inset-0 z-[9999] flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-4 sm:p-6 animate-in fade-in duration-200 overscroll-contain select-none"
-      onClick={!isDownloading ? handleDismiss : undefined}
+      className="fixed bottom-24 inset-x-4 z-[9999] flex justify-center pointer-events-none animate-in slide-in-from-bottom-8 fade-in duration-300 select-none"
     >
       <div
-        className="w-full max-w-sm rounded-3xl border border-white/20 bg-card p-5 shadow-2xl shadow-black/40 flex flex-col gap-3.5 relative overflow-hidden animate-in zoom-in-95 duration-200 select-auto touch-auto mb-6 sm:mb-0"
+        className="pointer-events-auto w-full max-w-sm rounded-2xl border border-white/20 bg-card p-4 shadow-2xl shadow-black/40 flex flex-col gap-3.5 relative overflow-hidden select-auto touch-auto"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between gap-3">

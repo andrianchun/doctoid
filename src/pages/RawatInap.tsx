@@ -1880,34 +1880,33 @@ export default function RawatInap() {
         </div>
       )}
 
-      {/* Floating Confirmation Bar (Konfirmasi Batal [X] / Simpan [V]) */}
+      {/* Floating Confirmation Bar (Konfirmasi Simpan Urutan: Batal / Simpan) */}
       {pendingReorder && (
         <aside
           aria-label="Konfirmasi Perubahan Urutan"
-          className="fixed bottom-20 sm:bottom-24 left-1/2 -translate-x-1/2 z-40 flex items-center gap-3 px-4 py-2 bg-white/95 text-slate-800 rounded-2xl shadow-2xl shadow-slate-900/15 border border-slate-200/90 backdrop-blur-md animate-in slide-in-from-bottom-4 duration-200 select-none max-w-[92vw]"
+          className="fixed inset-x-2 bottom-[calc(4.75rem+max(1rem,env(safe-area-inset-bottom,0px)))] sm:bottom-24 z-50 mx-auto max-w-sm flex items-center justify-between px-4 py-2.5 bg-white/95 text-slate-800 rounded-3xl shadow-xl backdrop-blur-md animate-in slide-in-from-bottom-4 duration-200 select-none animate-bar-glow border border-sky-400/70"
         >
-          <span className="text-xs font-bold text-slate-800 whitespace-nowrap pl-0.5">
-            Simpan urutan baru?
+          <span className="text-xs font-bold text-slate-800 whitespace-nowrap tracking-tight pl-1">
+            Simpan Urutan
           </span>
-          <div className="flex items-center gap-1.5 shrink-0">
+          <div className="flex items-center gap-2 shrink-0">
             <button
               type="button"
               onClick={handleCancelReorder}
-              className="size-8 rounded-xl bg-slate-100 hover:bg-rose-50 hover:text-rose-600 text-slate-500 flex items-center justify-center transition-all cursor-pointer border border-slate-200 active:scale-95"
-              title="Batal (X) - Kembalikan urutan semula"
+              className="h-9 px-4 rounded-2xl bg-rose-600 hover:bg-rose-500 active:bg-rose-700 text-white font-bold text-xs transition-all cursor-pointer shadow-md shadow-rose-600/30 active:scale-95"
+              title="Kembalikan urutan semula"
               aria-label="Batalkan perubahan urutan"
             >
-              <X size={16} />
+              Batal
             </button>
             <button
               type="button"
               onClick={handleSaveReorder}
-              className="h-8 px-3 rounded-xl bg-gradient-to-r from-primary to-primary-deep hover:from-primary-deep hover:to-primary text-white font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer shadow-md shadow-primary/25 active:scale-95"
-              title="Simpan (V)"
+              className="h-9 px-4 rounded-2xl bg-gradient-to-r from-primary to-primary-deep hover:from-primary-deep hover:to-primary text-white font-bold text-xs transition-all cursor-pointer shadow-md shadow-primary/30 active:scale-95 animate-flicker-blue"
+              title="Simpan urutan"
               aria-label="Simpan perubahan urutan"
             >
-              <Check size={16} className="stroke-[2.5]" />
-              <span>Simpan</span>
+              Simpan
             </button>
           </div>
         </aside>

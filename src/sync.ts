@@ -1,11 +1,12 @@
 import { db } from './db'
 import { encryptJson, decryptJson, syncIdFromEntropy } from './crypto'
+import { Capacitor } from '@capacitor/core'
 import { getFirestore, initializeFirestore, doc, getDoc, setDoc, onSnapshot, type Firestore } from 'firebase/firestore'
 import {
   getFirebaseApp, getFirebaseAuth, getSavedUserProfile, saveUserProfile,
   saveDoctorSpecialty, getDoctorSpecialty, ensureFirebaseAuthSession, type UserProfile
 } from './auth'
-import { cachePatients, cacheAllPatients, cacheNotes } from './utils/dataCache'
+import { cachePatients, cacheAllPatients, cacheNotes, cacheHospitals, cacheWards } from './utils/dataCache'
 import { isNonTherapyText } from './parser'
 import { getLocalDateString } from './utils/dateFormat'
 import { normalizeMediaUrl } from './components/ClinicalMediaCard'
@@ -125,6 +126,8 @@ export function initRealtimeCloudSync(uid: string): () => void {
         photoURL?: string
         specialty?: string
         email?: string
+        source?: string
+        isAuthoritative?: boolean
       }
 
       if (remote.tables && typeof remote.tables === 'object') {
@@ -142,16 +145,23 @@ export function initRealtimeCloudSync(uid: string): () => void {
         const isRemoteNewer = remoteUpdatedAt > lastPush
         const isNewRemoteSnapshot = remoteUpdatedAt > 0 && remoteUpdatedAt !== lastImportedRemote
 
+        // APK adalah Single Source of Truth (SSOT). Jika remote dari APK atau client saat ini adalah Web, terapkan snapshot secara presisi (authoritative)
+        const isClientWeb = !Capacitor.isNativePlatform()
+        const isAuthoritative = remote.source === 'apk' || remote.isAuthoritative === true || isClientWeb
+        const sessionReconciled = sessionStorage.getItem('doctoid_reconciled_ts') === String(remoteUpdatedAt)
+
         // Tarik data (pull) jika:
         // 1. Ada snapshot remote baru yang belum diimpor oleh device ini, ATAU
         // 2. Snapshot berasal dari perangkat lain (misal APK di HP), ATAU
         // 3. Timestamp remote lebih baru, ATAU
-        // 4. Perangkat lokal baru belum pernah sinkron
-        if (isNewRemoteSnapshot || isFromOtherDevice || isRemoteNewer || isDeviceFresh) {
-          const imported = await safeImportTables(remote.tables, remote.deletedIds)
+        // 4. Perangkat lokal baru belum pernah sinkron, ATAU
+        // 5. Client adalah Web dan belum rekonsiliasi authoritative di sesi ini
+        if (isNewRemoteSnapshot || isFromOtherDevice || isRemoteNewer || isDeviceFresh || (isClientWeb && !sessionReconciled)) {
+          const imported = await safeImportTables(remote.tables, remote.deletedIds, isAuthoritative)
           if (imported) {
             localStorage.setItem('doctoid_last_imported_remote', String(remoteUpdatedAt))
             localStorage.setItem('doctoid_last_push', String(remoteUpdatedAt || Date.now()))
+            sessionStorage.setItem('doctoid_reconciled_ts', String(remoteUpdatedAt))
             window.dispatchEvent(new CustomEvent('doctoid_data_synced'))
           }
         }
@@ -238,14 +248,14 @@ export async function exportTables(): Promise<Record<string, unknown[]>> {
     }
 
     // 3. progressNotes, penunjang, & poliLogs:
-    // Pertahankan dataUrl berukuran thumbnail (<= 65KB, mis. WebP preview yang sangat tajam & hemat kuota).
-    // Hanya kosongkan jika ukuran dataUrl sangat besar (> 65KB) agar tidak melampaui batas 1 MB Firestore.
+    // PENTING: Batasi ukuran dataUrl thumbnail (<= 8KB) agar total dokumen Firestore TIDAK PERNAH
+    // melampaui batas keras 1 MB Firebase. Foto lokal di HP dokter tetap 100% utuh beresolusi tinggi di Dexie.
     if (t === 'progressNotes') {
       cleanedList = cleanedList.map((item: any) => {
         const safeItem = { ...item }
         if (Array.isArray(safeItem.attachments)) {
           safeItem.attachments = safeItem.attachments.map((att: any) => {
-            if (att.dataUrl && att.dataUrl.length > 65000) {
+            if (att.dataUrl && att.dataUrl.length > 8000) {
               return { ...att, dataUrl: '' }
             }
             return att
@@ -260,16 +270,16 @@ export async function exportTables(): Promise<Record<string, unknown[]>> {
         const safeItem = { ...item }
         if (Array.isArray(safeItem.attachments)) {
           safeItem.attachments = safeItem.attachments.map((att: any) => {
-            if (att.dataUrl && att.dataUrl.length > 65000) {
+            if (att.dataUrl && att.dataUrl.length > 8000) {
               return { ...att, dataUrl: '' }
             }
             return att
           })
         }
-        if (safeItem.dataUrl && safeItem.dataUrl.length > 65000) {
+        if (safeItem.dataUrl && safeItem.dataUrl.length > 8000) {
           safeItem.dataUrl = ''
         }
-        if (safeItem.foto_url && safeItem.foto_url.length > 65000) {
+        if (safeItem.foto_url && safeItem.foto_url.length > 8000) {
           safeItem.foto_url = ''
         }
         return safeItem
@@ -281,7 +291,7 @@ export async function exportTables(): Promise<Record<string, unknown[]>> {
         const safeItem = { ...item }
         if (Array.isArray(safeItem.foto_urls)) {
           safeItem.foto_urls = safeItem.foto_urls.filter(
-            (url: string) => !url.startsWith('data:') || url.length <= 65000
+            (url: string) => !url.startsWith('data:') || url.length <= 8000
           )
         }
         return safeItem
@@ -480,7 +490,8 @@ export async function autoRecoverPreSyncBackup(): Promise<number> {
 /* Two-Way Smart Merge: Menggabungkan data cloud ke database lokal dengan propagasi penghapusan aman */
 export async function safeImportTables(
   tables: Record<string, unknown[]>,
-  remoteDeletedIds?: Record<string, number[]>
+  remoteDeletedIds?: Record<string, number[]>,
+  isAuthoritative = false
 ): Promise<boolean> {
   if (!tables || typeof tables !== 'object') {
     throw new Error('Data tabel tidak valid untuk diimpor.')
@@ -525,11 +536,28 @@ export async function safeImportTables(
         const localMap = new Map(localItems.map((item: any) => [item.id, item]))
         const locallyDeleted = new Set(getDeletedRecordIds()[t] || [])
 
+        // Jika sinkronisasi mode Authoritative (misal remote berasal dari APK Android sebagai Single Source of Truth):
+        // Bersihkan data lokal pada Web/Localhost yang tidak ada di snapshot APK agar data tidak bertumpuk/usang
+        if (isAuthoritative) {
+          const remoteIdSet = new Set(remoteList.map((item: any) => item?.id).filter((id) => id != null))
+          for (const localItem of localItems) {
+            if (localItem?.id != null && !remoteIdSet.has(localItem.id)) {
+              try {
+                await db.table(t).delete(localItem.id)
+                if (t === 'patients') {
+                  await db.progressNotes.where('patient_id').equals(localItem.id).delete()
+                  await db.penunjang.where('patient_id').equals(localItem.id).delete()
+                }
+              } catch {}
+            }
+          }
+        }
+
         // Lakukan penggabungan cerdas untuk setiap item dari remote
         for (const remoteItem of remoteList) {
           if (!remoteItem || remoteItem.id == null) continue
-          // Abaikan jika item ini sudah dihapus di perangkat ini
-          if (locallyDeleted.has(remoteItem.id)) continue
+          // Abaikan jika item ini sudah dihapus di perangkat ini (kecuali mode authoritative dari APK SSOT)
+          if (!isAuthoritative && locallyDeleted.has(remoteItem.id)) continue
           const existingLocal = localMap.get(remoteItem.id)
 
           if (existingLocal) {
@@ -613,6 +641,10 @@ export async function safeImportTables(
       cacheAllPatients(allPatientsList)
       const notesList = await db.progressNotes.toArray()
       cacheNotes(notesList)
+      const hospitalsList = (await db.hospitals.toArray()).sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+      cacheHospitals(hospitalsList)
+      const wardsList = (await db.wards.toArray()).sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+      cacheWards(wardsList)
     } catch {
       // ignore
     }
@@ -695,6 +727,8 @@ export async function syncUserCloud(uid: string, forcePush = false): Promise<str
       photoURL?: string
       specialty?: string
       email?: string
+      source?: string
+      isAuthoritative?: boolean
     }
     devices = remote.devices ?? {}
     const remoteUpdatedAt = typeof remote.updatedAt === 'number'
@@ -704,9 +738,12 @@ export async function syncUserCloud(uid: string, forcePush = false): Promise<str
     const isFromOtherDevice = !!remote.lastModifiedBy && remote.lastModifiedBy !== deviceId
     const isNewRemoteSnapshot = remoteUpdatedAt > 0 && remoteUpdatedAt !== lastImportedRemote
 
+    // APK adalah Single Source of Truth (SSOT). Jika remote berasal dari APK atau client saat ini adalah Web, sinkronkan secara authoritative
+    const isAuthoritative = remote.source === 'apk' || remote.isAuthoritative === true || !Capacitor.isNativePlatform()
+
     // PULL & MERGE DATA jika ada snapshot remote baru, berasal dari perangkat lain, atau remote lebih baru
     if (!forcePush && (isNewRemoteSnapshot || isFromOtherDevice || (remoteUpdatedAt && remoteUpdatedAt > lastPush)) && remote.tables) {
-      const imported = await safeImportTables(remote.tables, remote.deletedIds)
+      const imported = await safeImportTables(remote.tables, remote.deletedIds, isAuthoritative)
       if (imported) {
         localStorage.setItem('doctoid_last_imported_remote', String(remoteUpdatedAt))
         localStorage.setItem('doctoid_last_push', String(remoteUpdatedAt || Date.now()))
@@ -752,6 +789,7 @@ export async function syncUserCloud(uid: string, forcePush = false): Promise<str
   const currentProfile = getSavedUserProfile()
 
   try {
+    const isNative = Capacitor.isNativePlatform()
     await setDoc(
       ref,
       {
@@ -760,6 +798,8 @@ export async function syncUserCloud(uid: string, forcePush = false): Promise<str
         devices,
         updatedAt,
         lastModifiedBy: deviceId,
+        source: isNative ? 'apk' : 'web',
+        isAuthoritative: isNative,
         displayName: currentProfile?.displayName || null,
         photoURL: currentProfile?.photoURL || null,
         specialty: currentProfile?.specialty || getDoctorSpecialty(),
@@ -820,7 +860,8 @@ export async function forcePullCloud(uid: string): Promise<{ success: boolean; c
     return { success: false, count: 0, message: 'Format data di cloud tidak valid atau kosong.' }
   }
 
-  const imported = await safeImportTables(remote.tables)
+  const isAuthoritative = remote.source === 'apk' || remote.isAuthoritative === true || !Capacitor.isNativePlatform()
+  const imported = await safeImportTables(remote.tables, remote.deletedIds, isAuthoritative)
   if (imported) {
     const updatedAt = typeof remote.updatedAt === 'number' ? remote.updatedAt : Date.now()
     localStorage.setItem('doctoid_last_imported_remote', String(updatedAt))

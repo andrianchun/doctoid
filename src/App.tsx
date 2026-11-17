@@ -19,7 +19,7 @@ import PatientProfile from './pages/PatientProfile'
 import Settings from './pages/Settings'
 import DoctorProfile from './pages/DoctorProfile'
 import { initAuthListener } from './auth'
-import { checkRevoked, initRealtimeCloudSync, fbConfigured, autoRecoverPreSyncBackup, autoRepairMissingAttachmentMedia } from './sync'
+import { checkRevoked, initRealtimeCloudSync, fbConfigured, autoRecoverPreSyncBackup, autoRepairMissingAttachmentMedia, forcePullCloud } from './sync'
 import { useWaInboxSync } from './utils/waInboxSync'
 import { sanitizeExistingPatientNamesInDb } from './utils/patientName'
 import { sanitizeMedicalRecordsInDb } from './utils/sanitizeRecords'
@@ -123,6 +123,22 @@ export default function App() {
   useEffect(() => {
     if (!user || !fbConfigured() || user.uid === 'local') return
     const unsubscribe = initRealtimeCloudSync(user.uid)
+    // Di Web / Localhost: Selaraskan otomatis dengan APK (Single Source of Truth) saat aplikasi dibuka
+    if (!Capacitor.isNativePlatform()) {
+      forcePullCloud(user.uid).catch((err) => console.warn('Auto initial pull error:', err))
+
+      // Otomatis tarik saat tab browser kembali dibuka (focus) atau koneksi online
+      const handleFocus = () => {
+        forcePullCloud(user.uid).catch(() => {})
+      }
+      window.addEventListener('focus', handleFocus)
+      window.addEventListener('online', handleFocus)
+      return () => {
+        unsubscribe()
+        window.removeEventListener('focus', handleFocus)
+        window.removeEventListener('online', handleFocus)
+      }
+    }
     return () => {
       unsubscribe()
     }

@@ -1,6 +1,8 @@
 import { initializeApp, getApps, type FirebaseApp } from 'firebase/app'
 import {
   getAuth,
+  initializeAuth,
+  indexedDBLocalPersistence,
   signInWithPopup,
   signInWithCredential,
   GoogleAuthProvider,
@@ -68,9 +70,23 @@ export function getFirebaseApp(): FirebaseApp {
   }
 }
 
+let _auth: Auth | null = null
+
 export function getFirebaseAuth(): Auth {
+  if (_auth) return _auth
   const app = getFirebaseApp()
-  return getAuth(app)
+  try {
+    if (Capacitor.isNativePlatform()) {
+      _auth = initializeAuth(app, {
+        persistence: indexedDBLocalPersistence,
+      })
+    } else {
+      _auth = getAuth(app)
+    }
+  } catch {
+    _auth = getAuth(app)
+  }
+  return _auth
 }
 
 /**
@@ -91,10 +107,18 @@ export async function ensureFirebaseAuthSession(): Promise<User | null> {
       if (user) {
         const { token } = await FirebaseAuthentication.getIdToken({ forceRefresh: false })
         if (token) {
-          const credential = GoogleAuthProvider.credential(token)
-          const userCred = await signInWithCredential(auth, credential)
-          console.log('[Auth] ✓ Berhasil auto-restore sesi Firebase dari native token Android:', userCred.user.uid)
-          return userCred.user
+          // Coba restore sesi Google OAuth jika tersedia
+          try {
+            const res = await FirebaseAuthentication.signInWithGoogle({ skipNativeAuth: false })
+            if (res.credential?.idToken) {
+              const credential = GoogleAuthProvider.credential(res.credential.idToken)
+              const userCred = await signInWithCredential(auth, credential)
+              console.log('[Auth] ✓ Berhasil restore sesi Firebase dari Google token:', userCred.user.uid)
+              return userCred.user
+            }
+          } catch {
+            // Abaikan jika dialog ditolak
+          }
         }
       }
     } catch (err) {
