@@ -1,9 +1,13 @@
 package com.andrianchun.doctoid;
 
+import android.content.ContentValues;
 import android.content.Context;
 import android.content.Intent;
 import android.database.Cursor;
 import android.net.Uri;
+import android.os.Build;
+import android.os.Environment;
+import android.provider.MediaStore;
 import android.provider.OpenableColumns;
 import android.util.Base64;
 import com.getcapacitor.JSArray;
@@ -13,7 +17,11 @@ import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileOutputStream;
 import java.io.InputStream;
+import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 
 @CapacitorPlugin(name = "ShareReceiver")
@@ -51,6 +59,66 @@ public class ShareReceiverPlugin extends Plugin {
     public void clearPendingShare(PluginCall call) {
         pendingShare = null;
         call.resolve();
+    }
+
+    @PluginMethod
+    public void saveToDownloads(PluginCall call) {
+        String fileName = call.getString("fileName");
+        String content = call.getString("content");
+        String mimeType = call.getString("mimeType", "application/json");
+
+        if (fileName == null || content == null) {
+            call.reject("Nama berkas dan konten tidak boleh kosong");
+            return;
+        }
+
+        try {
+            Context ctx = getContext();
+            boolean success = false;
+            Uri fileUri = null;
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                ContentValues values = new ContentValues();
+                values.put(MediaStore.MediaColumns.DISPLAY_NAME, fileName);
+                values.put(MediaStore.MediaColumns.MIME_TYPE, mimeType);
+                values.put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS);
+
+                fileUri = ctx.getContentResolver().insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
+                if (fileUri != null) {
+                    try (OutputStream os = ctx.getContentResolver().openOutputStream(fileUri)) {
+                        if (os != null) {
+                            os.write(content.getBytes(StandardCharsets.UTF_8));
+                            os.flush();
+                            success = true;
+                        }
+                    }
+                }
+            } else {
+                File downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
+                if (!downloadsDir.exists()) {
+                    downloadsDir.mkdirs();
+                }
+                File outFile = new File(downloadsDir, fileName);
+                try (FileOutputStream fos = new FileOutputStream(outFile)) {
+                    fos.write(content.getBytes(StandardCharsets.UTF_8));
+                    fos.flush();
+                    success = true;
+                    fileUri = Uri.fromFile(outFile);
+                }
+            }
+
+            if (success) {
+                JSObject ret = new JSObject();
+                ret.put("success", true);
+                ret.put("fileName", fileName);
+                if (fileUri != null) ret.put("uri", fileUri.toString());
+                call.resolve(ret);
+            } else {
+                call.reject("Gagal menulis berkas ke folder Downloads");
+            }
+        } catch (Exception e) {
+            call.reject("Gagal menyimpan ke folder Downloads: " + e.getMessage());
+        }
     }
 
     public static void handleShareIntent(Context ctx, Intent intent) {

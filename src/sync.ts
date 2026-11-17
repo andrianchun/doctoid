@@ -147,6 +147,17 @@ export function initRealtimeCloudSync(uid: string): () => void {
 
         // APK adalah Single Source of Truth (SSOT). Jika remote dari APK atau client saat ini adalah Web, terapkan snapshot secara presisi (authoritative)
         const isClientWeb = !Capacitor.isNativePlatform()
+
+        // Proteksi Otoritas Mutlak APK (Single Source of Truth):
+        // Jika client saat ini adalah APK di HP, dan data di cloud berasal dari 'web' atau tidak authoritative,
+        // DILARANG MENARIK (pull) data tersebut agar 130 pasien di HP dokter tidak pernah tertimpa data usang web!
+        // Sebaliknya, APK menjadwalkan PUSH otoritasnya ke cloud.
+        if (!isClientWeb && (remote.source === 'web' || !remote.isAuthoritative)) {
+          console.log('[Sync SSOT] Cloud saat ini berasal dari Web/tidak authoritative. Menolak pull, menjadwalkan PUSH otoritas dari APK.')
+          triggerCloudSync(500)
+          return
+        }
+
         const isAuthoritative = remote.source === 'apk' || remote.isAuthoritative === true || isClientWeb
         const sessionReconciled = sessionStorage.getItem('doctoid_reconciled_ts') === String(remoteUpdatedAt)
 
@@ -708,6 +719,7 @@ export async function syncUserCloud(uid: string, forcePush = false): Promise<str
   }
   const { fs, doc, getDoc, setDoc } = await fb()
   const deviceId = getDeviceId()
+  const isClientNative = Capacitor.isNativePlatform()
   const ref = doc(fs, 'users', uid)
   const snap = await getDoc(ref)
 
@@ -738,11 +750,18 @@ export async function syncUserCloud(uid: string, forcePush = false): Promise<str
     const isFromOtherDevice = !!remote.lastModifiedBy && remote.lastModifiedBy !== deviceId
     const isNewRemoteSnapshot = remoteUpdatedAt > 0 && remoteUpdatedAt !== lastImportedRemote
 
+    const isRemoteFromWeb = remote.source === 'web' || !remote.isAuthoritative
+
     // APK adalah Single Source of Truth (SSOT). Jika remote berasal dari APK atau client saat ini adalah Web, sinkronkan secara authoritative
-    const isAuthoritative = remote.source === 'apk' || remote.isAuthoritative === true || !Capacitor.isNativePlatform()
+    const isAuthoritative = remote.source === 'apk' || remote.isAuthoritative === true || !isClientNative
+
+    // Jika client saat ini adalah APK di HP, dan remote berasal dari Web (tidak authoritative):
+    // DILARANG pull agar APK tidak menimpa 130 data pasien dokter dengan data web!
+    // Langsung lewati blok pull ini sehingga APK mengeksekusi PUSH otoritatif ke cloud.
+    const skipPullForApkMaster = isClientNative && isRemoteFromWeb
 
     // PULL & MERGE DATA jika ada snapshot remote baru, berasal dari perangkat lain, atau remote lebih baru
-    if (!forcePush && (isNewRemoteSnapshot || isFromOtherDevice || (remoteUpdatedAt && remoteUpdatedAt > lastPush)) && remote.tables) {
+    if (!skipPullForApkMaster && !forcePush && (isNewRemoteSnapshot || isFromOtherDevice || (remoteUpdatedAt && remoteUpdatedAt > lastPush)) && remote.tables) {
       const imported = await safeImportTables(remote.tables, remote.deletedIds, isAuthoritative)
       if (imported) {
         localStorage.setItem('doctoid_last_imported_remote', String(remoteUpdatedAt))
@@ -775,6 +794,17 @@ export async function syncUserCloud(uid: string, forcePush = false): Promise<str
       await setDoc(ref, { devices }, { merge: true })
       localStorage.setItem('doctoid_devices', JSON.stringify(devices))
       return arah
+    }
+  }
+
+  // Proteksi SSOT untuk Web Client:
+  // Jika client adalah Web biasa dan remote berasal dari APK authoritative,
+  // Web dilarang menimpa snapshot APK secara otomatis (kecuali dokter sengaja klik forcePush)
+  if (!isClientNative && !forcePush && snap.exists()) {
+    const remoteData = snap.data() as any
+    if (remoteData?.source === 'apk' && remoteData?.isAuthoritative) {
+      console.log('[Sync SSOT] Client Web menahan auto-push karena Cloud dikuasai oleh APK Android SSOT.')
+      return 'idle'
     }
   }
 
@@ -890,8 +920,14 @@ export async function forcePullCloud(uid: string): Promise<{ success: boolean; c
   return { success: false, count: 0, message: 'Gagal menarik data cloud.' }
 }
 
-/* Ekspor Cadangan Data Offline (JSON File Download) */
-export async function downloadBackupJson(): Promise<void> {
+export interface BackupExportResult {
+  success: boolean
+  method: 'native' | 'share' | 'download' | 'clipboard'
+  message: string
+}
+
+/* Ekspor Cadangan Data Offline (JSON File Download / Native Share / MediaStore) */
+export async function downloadBackupJson(): Promise<BackupExportResult> {
   const tables = await exportTables()
   const payload = {
     app: 'Doctoid',
@@ -899,16 +935,118 @@ export async function downloadBackupJson(): Promise<void> {
     exported_at: new Date().toISOString(),
     tables,
   }
-  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
+  const jsonStr = JSON.stringify(payload, null, 2)
   const dateStr = new Date().toISOString().slice(0, 10)
-  a.href = url
-  a.download = `doctoid_backup_${dateStr}.json`
-  document.body.appendChild(a)
-  a.click()
-  document.body.removeChild(a)
-  URL.revokeObjectURL(url)
+  const fileName = `doctoid_backup_${dateStr}.json`
+
+  // 1. Jika di Android native, coba simpan via plugin ShareReceiver.saveToDownloads (masuk langsung ke folder Unduhan)
+  if (Capacitor.isNativePlatform()) {
+    try {
+      const { registerPlugin } = await import('@capacitor/core')
+      const ShareReceiver = registerPlugin<any>('ShareReceiver')
+      if (ShareReceiver && typeof ShareReceiver.saveToDownloads === 'function') {
+        const res = await ShareReceiver.saveToDownloads({ fileName, content: jsonStr, mimeType: 'application/json' })
+        if (res?.success) {
+          return {
+            success: true,
+            method: 'native',
+            message: `Cadangan tersimpan di folder Unduhan ponsel: ${fileName} ✓`,
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[Backup] Native saveToDownloads belum tersedia pada versi APK ini:', e)
+    }
+
+    // 2. Web Share API dengan Berkas File (Native Android Share Sheet -> Drive, WhatsApp, File Manager)
+    try {
+      const blob = new Blob([jsonStr], { type: 'application/json' })
+      const file = new File([blob], fileName, { type: 'application/json' })
+
+      if (typeof navigator.canShare === 'function' && navigator.canShare({ files: [file] })) {
+        await navigator.share({
+          files: [file],
+          title: 'Cadangan Database Doctoid',
+          text: `Cadangan data rekam medis Docto.id (${dateStr})`,
+        })
+        return {
+          success: true,
+          method: 'share',
+          message: 'Cadangan berhasil disimpan / dibagikan ✓',
+        }
+      }
+    } catch (err: any) {
+      if (err.name === 'AbortError') {
+        return { success: false, method: 'share', message: 'Penyimpanan cadangan dibatalkan.' }
+      }
+      console.warn('[Backup] Web Share file gagal:', err)
+    }
+
+    // 3. Web Share API teks fallback
+    if (typeof navigator.share === 'function') {
+      try {
+        await navigator.share({
+          title: fileName,
+          text: jsonStr,
+        })
+        return {
+          success: true,
+          method: 'share',
+          message: 'Teks cadangan berhasil dibagikan ✓',
+        }
+      } catch (err: any) {
+        if (err.name === 'AbortError') {
+          return { success: false, method: 'share', message: 'Berbagi cadangan dibatalkan.' }
+        }
+      }
+    }
+  }
+
+  // 4. Unduhan Standar Browser (Desktop / PWA)
+  try {
+    const blob = new Blob([jsonStr], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = fileName
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    setTimeout(() => URL.revokeObjectURL(url), 2000)
+    return {
+      success: true,
+      method: 'download',
+      message: `Berkas ${fileName} berhasil diunduh ✓`,
+    }
+  } catch (err: any) {
+    // 5. Fallback Salin ke Clipboard jika browser memblokir unduhan
+    if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+      await navigator.clipboard.writeText(jsonStr)
+      return {
+        success: true,
+        method: 'clipboard',
+        message: 'Data JSON cadangan disalin ke Clipboard! Tempelkan ke catatan Anda.',
+      }
+    }
+    throw new Error('Perangkat tidak mendukung pengunduhan berkas: ' + (err.message || 'Unknown'))
+  }
+}
+
+/* Salin Cadangan JSON langsung ke Clipboard */
+export async function copyBackupJson(): Promise<boolean> {
+  const tables = await exportTables()
+  const payload = {
+    app: 'Doctoid',
+    version: typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '0.1.0',
+    exported_at: new Date().toISOString(),
+    tables,
+  }
+  const jsonStr = JSON.stringify(payload, null, 2)
+  if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+    await navigator.clipboard.writeText(jsonStr)
+    return true
+  }
+  return false
 }
 
 /* Pulihkan Data dari Cadangan JSON */

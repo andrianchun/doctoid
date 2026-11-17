@@ -2,14 +2,14 @@ import { useState, useRef, useEffect } from 'react'
 import {
   ShieldCheck, RefreshCw, Lock as LockIcon, Trash2, Loader2, Fingerprint,
   KeyRound, Download, Upload, Database, CheckCircle2, Sparkles, DownloadCloud,
-  Cloud, AlertTriangle, ArrowDownToLine, ArrowUpToLine
+  Cloud, AlertTriangle, ArrowDownToLine, ArrowUpToLine, Copy
 } from 'lucide-react'
 import { Capacitor } from '@capacitor/core'
 import { CapacitorUpdater } from '@capgo/capacitor-updater'
 import { useUi } from '../store'
 import {
   syncUserCloud, forcePushCloud, forcePullCloud, getDeviceId, selfDestruct,
-  downloadBackupJson, restoreBackupJson
+  downloadBackupJson, copyBackupJson, restoreBackupJson
 } from '../sync'
 import { loginWithGoogle } from '../auth'
 import { verifyBiometric } from '../webauthn'
@@ -233,10 +233,27 @@ export default function SecuritySection({ notify }: { notify: (m: string) => voi
 
   const handleExportBackup = async () => {
     try {
-      await downloadBackupJson()
-      notify('Cadangan data berhasil diunduh (JSON) ✓')
+      const res = await downloadBackupJson()
+      if (res && res.message) {
+        notify(res.message)
+      } else {
+        notify('Cadangan data berhasil diekspor ✓')
+      }
     } catch (e: any) {
       notify(`Gagal membuat cadangan: ${e.message}`)
+    }
+  }
+
+  const handleCopyBackup = async () => {
+    try {
+      const ok = await copyBackupJson()
+      if (ok) {
+        notify('Data JSON cadangan disalin ke Clipboard! Tempelkan ke catatan atau berkas Anda ✓')
+      } else {
+        notify('Gagal menyalin ke clipboard.')
+      }
+    } catch (e: any) {
+      notify(`Gagal menyalin cadangan: ${e.message}`)
     }
   }
 
@@ -278,6 +295,12 @@ export default function SecuritySection({ notify }: { notify: (m: string) => voi
             className="flex cursor-pointer items-center gap-1.5 rounded-xl bg-primary/10 hover:bg-primary/20 text-primary-deep px-3.5 py-2 text-xs font-bold transition-colors"
           >
             <Download size={14} /> Unduh Cadangan (JSON)
+          </button>
+          <button
+            onClick={handleCopyBackup}
+            className="flex cursor-pointer items-center gap-1.5 rounded-xl bg-surface hover:bg-surface/80 text-ink px-3.5 py-2 text-xs font-bold transition-colors"
+          >
+            <Copy size={14} /> Salin JSON
           </button>
           <button
             onClick={() => fileInputRef.current?.click()}
