@@ -134,7 +134,7 @@ export default function Rekap() {
       {/* Header Banner */}
       <div className="glass-blue-hero rounded-3xl p-5 text-white shadow-xl">
         <h1 className="h1 text-2xl font-black text-white">Rekap & Alat Klinis</h1>
-        <p className="caption text-xs font-medium text-white/85 mt-0.5">Arsip rekam medis, kalkulator neurologi, & template operan</p>
+        <p className="caption text-xs font-medium text-white/85 mt-0.5">Arsip buku log pasien, kalkulator neurologi, & template operan</p>
       </div>
 
       {/* Pill Sub-Navigation */}

@@ -967,7 +967,7 @@ export async function downloadBackupJson(): Promise<BackupExportResult> {
         await navigator.share({
           files: [file],
           title: 'Cadangan Database Doctoid',
-          text: `Cadangan data rekam medis Docto.id (${dateStr})`,
+          text: `Cadangan data buku log pasien Docto.id (${dateStr})`,
         })
         return {
           success: true,
@@ -1028,7 +1028,7 @@ export async function downloadBackupJson(): Promise<BackupExportResult> {
         message: 'Data JSON cadangan disalin ke Clipboard! Tempelkan ke catatan Anda.',
       }
     }
-    throw new Error('Perangkat tidak mendukung pengunduhan berkas: ' + (err.message || 'Unknown'))
+    throw new Error('Perangkat tidak mendukung pengunduhan berkas: ' + (err.message || 'Unknown'), { cause: err })
   }
 }
 
@@ -1060,7 +1060,7 @@ export async function restoreBackupJson(jsonString: string): Promise<{ success: 
     const imported = await safeImportTables(tables)
     if (imported) {
       triggerCloudSync(100)
-      return { success: true, message: 'Seluruh data rekam medis berhasil dipulihkan ✓' }
+      return { success: true, message: 'Seluruh data buku log pasien berhasil dipulihkan ✓' }
     } else {
       return { success: false, message: 'Pemulihan dibatalkan oleh pelindung data.' }
     }

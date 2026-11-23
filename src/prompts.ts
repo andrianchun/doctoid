@@ -38,12 +38,14 @@ ATURAN WAJIB (CONCISENESS):
    - Identitas Pasien: Cari baris identitas pasien asli (misal: "*Gelar.Nama/Usia/Gender/Jaminan*" atau "Nama: ..."). JANGAN PERNAH mengambil nama pengirim chat, dokter jaga, atau pemohon konsul (misal "DOKTER JAGA IGD", "Iship Bella", "dr. Jaga") sebagai nama pasien! DILARANG KERAS mengisi "nama_depan" dengan jenis kelamin atau inisial gender ("L", "P", "Lk", "Pr", "Laki-laki", "Perempuan", "Pria", "Wanita"). DILARANG KERAS mengisi "nama_depan" dengan label tanda vital/pemeriksaan fisik/header SIMRS (misal: "Suhu", "Suhu(C)", "Suhu(C) :", "Tensi", "TD", "Nadi", "HR", "RR", "SpO2", "GCS", "KU", "Laboratorium", "Diagnosa", dll.). Field "nama_depan" HANYA untuk nama asli orang. Jika di teks/foto SIMRS tidak ada nama orang yang jelas tertera, kosongkan "nama_depan" (""). Untuk "title": Jika jenis kelamin pasien Laki-laki / L, gunakan "Tn." (atau "An." jika anak/usia < 18 th); jika Perempuan / P, gunakan "Ny." (atau "Sdri."/"An.").
    - S vs O: Suhu tubuh seperti "S : 36 C" / "S: 36.5" / "Suhu(C): 36.5" / "S: afebris" adalah PEMERIKSAAN FISIK (O_pemfis), BUKAN Anamnesis / Subjektif (S). Anamnesis riwayat keluhan adalah Subjektif (S).
    - Prioritas Advis / Revisi Spesialis: Jika di dalam teks terdapat balasan/revisi dari dokter spesialis / konsulen (misal diawali "[waktu] Nama: A: ... PDx: ... PTx: ..." atau "Advis: ..."), maka diagnosis (A) dan terapi (P) WAJIB MENGGUNAKAN revisi/advis definitif dari dokter spesialis tersebut (menggantikan draft awal dokter IGD/pemohon konsul agar tidak terjadi duplikasi resep).
-7. ATURAN PEMILAHAN LAMPIRAN GAMBAR/FOTO MULTIMODAL (EKG, LAB, RADIOLOGI, CT SCAN, X-RAY):
-   - Jika terdapat gambar/foto yang dilampirkan: identifikasi jenis modalitas klinisnya secara otomatis dan masukkan ke "O_penunjang" dengan label terstruktur:
-     a) EKG / ECG (gelombang P-QRS-T, irama strip): tuliskan "[EKG] Irama ..., HR ... bpm, Axis ..., Gelombang/ST/T: ..., Kesan: ...".
-     b) Laboratorium (kertas printout lab, foto hasil): ekstrak nilai abnormal dan nilai kritis pada "[Laboratorium] Hb ..., Leu ..., Plt ..., GDA ..., Ureum/Cr ..., Elektrolit (Na/K/Cl) ..., dll.".
-     c) CT Scan Kepala / MRI / Neuroimaging: tuliskan temuan pada "[Radiologi - CT Scan] Kesan: ... (misal: Infark luas hemisfer kiri / Perdarahan intraserebral)".
-     d) Foto Rontgen / X-Ray Thorax: tuliskan pada "[Radiologi - Thorax] Kesan: ... (misal: Kardiomegali, Infiltrat pulmonal)".
+7. ATURAN PEMILAHAN & PENULISAN PENUNJANG (LAB, EKG, RADIOLOGI - TELEGRAFIS):
+   - Masukkan hasil penunjang ke "O_penunjang" dengan seksi terpisah berawalan "Lab:", "EKG:", dan "Radiologi:" (TANPA kurung siku dan JANGAN pakai kata "Laboratorium", cukup "Lab"):
+     a) EKG / ECG: "EKG:\n- Irama ..., HR ... bpm, ST-T: ..., Kesan: ...".
+     b) Lab: "Lab:\n- Hb ..., Leu ..., Plt ..., GDA ..., Ur/Cr ..., Na/K/Cl ..." (fokus nilai abnormal ↑/↓).
+     c) CT Scan Kepala / MRI: WAJIB SINGKAT & TELEGRAFIS tanpa kalimat "menunjukkan lesi..." atau "tampak gambaran...". Langsung sebutkan patologi, lokasi & sisi (D/S), serta volume bila ada:
+        "- CT Scan Kepala: Perdarahan frontal S (± 15 cc)" atau "- CT Scan Kepala: Perdarahan intraventrikular" atau "- CT Scan Kepala: Infark basal ganglia D".
+     d) X-Ray / Rontgen Thorax: WAJIB pakai label "Xray Thorax:" tanpa kata "menunjukkan". Bila ragu/suspek gunakan "Kesan ...":
+        "- Xray Thorax: Kardiomegali", "- Xray Thorax: Pneumonia", atau "- Xray Thorax: Kesan Pneumonia".
      e) Foto Luka / Fisik Klinis: tuliskan deskripsinya pada "O_pemfis" pada bagian status lokalis.
 8. ATURAN FOTO MONITOR SIMRS (CPPT SIMRS) & SCREENSHOT CHAT WA LAPORAN RUANGAN / ADVIS MALAM:
    - JIKA GAMBAR ADALAH FOTO LAYAR MONITOR / SCREENSHOT SIMRS (Khanza, Medifirst, SIMETRIS, TrustMedis, SIMRS Klinik Puspa, dll.):
@@ -69,7 +71,7 @@ Balas HANYA JSON valid dengan skema persis:
   "tgl_onset": string,          // "YYYY-MM-DD" (ikuti aturan poin 5: hitung mundur hari dari tgl_mrs, atau samakan dengan tgl_mrs jika jam/akut/tidak disebut)
   "S": string,                  // FORMAT WAJIB: Keluhan Utama: ... \nRPS: ... \nRPD: ... \nRPO: ... \nRPK/Sos: ... \nAlergi: ... (Pisahkan dengan baris baru \n)
   "O_pemfis": string,           // FORMAT WAJIB: [Vital Sign] TD: ... HR: ... RR: ... Suhu: ... SpO2: ... \n[Status Interna] K/L: ... Thorax: ... Abdomen: ... Ekstremitas: ... \n[Status Neurologis / Khusus] GCS: ... \nPupil/TR: ... \nMeningeal Sign: ... \nN. Cranialis: ... \nMotorik: ... \nSensorik: ... \nRefleks Fisiologis: ... \nRefleks Patologis: ... \nOtonom: ...
-  "O_penunjang": string,
+  "O_penunjang": string,        // Format wajib: Lab:\n- ...\nEKG:\n- ...\nRadiologi:\n- CT Scan Kepala: Perdarahan frontal S (± 15 cc) / Perdarahan intraventrikular\n- Xray Thorax: Kardiomegali / Pneumonia / Kesan Pneumonia
   "A": [
     { "kategori": "Utama", "nama_diagnosis": "Stroke Infark Akut S dd Hemoragik", "icd10": "" },
     { "kategori": "Sekunder", "nama_diagnosis": "Hemiparese D", "icd10": "" }
@@ -94,7 +96,7 @@ Balas HANYA JSON valid dengan skema persis:
 
 export function getAnalisisInstruksi(customSpecialty?: string): string {
   const role = (customSpecialty || getDoctorSpecialty()).trim()
-  return `Tugas: bertindak sebagai Konsultan Senior / PPDS Senior spesialisasi [${role}] yang mereviu rekam medis pasien (S, O, A, P).
+  return `Tugas: bertindak sebagai Konsultan Senior / PPDS Senior spesialisasi [${role}] yang mereviu catatan buku log klinis pasien (S, O, A, P).
 ATURAN WAJIB:
 1. Teliti Assessment (A) dan Planning (P) pasien berdasarkan data Subjective (S) dan Objective (O) dengan sudut pandang presisi keahlian [${role}].
 2. Tambahkan/koreksi diagnosis di (A) jika ada yang kurang atau perlu diferensial (termasuk memastikan ICD-10 terisi akurat).

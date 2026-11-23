@@ -1,8 +1,6 @@
 import React, { useState } from 'react'
 import {
   FileText,
-  Play,
-  Pause,
   EyeOff,
   X,
   Volume2,
@@ -61,12 +59,9 @@ export const ClinicalMediaCard: React.FC<ClinicalMediaCardProps> = ({
   onDelete,
 }) => {
   const { unmasked, setUnmasked } = useUi()
-  // Sensor foto/video murni mengikuti status sensor privasi data pasien (cukup 1 tombol utama)
-  const isVisualMedia = item.type.startsWith('image/') || item.type.startsWith('video/')
+  // Sensor foto murni mengikuti status sensor privasi data pasien (cukup 1 tombol utama)
+  const isVisualMedia = item.type.startsWith('image/')
   const isBlurred = isVisualMedia && !unmasked
-  const [isPlayingAudio, setIsPlayingAudio] = useState(false)
-  const [audioRef, setAudioRef] = useState<HTMLAudioElement | null>(null)
-  const [showVideoModal, setShowVideoModal] = useState(false)
   const [showViewer, setShowViewer] = useState(false)
 
   const normalizedUrl = normalizeMediaUrl(item.url, item.name)
@@ -80,134 +75,44 @@ export const ClinicalMediaCard: React.FC<ClinicalMediaCardProps> = ({
     }
   }
 
-  const toggleAudio = () => {
-    if (!audioRef) return
-    if (isPlayingAudio) {
-      audioRef.pause()
-      setIsPlayingAudio(false)
-    } else {
-      audioRef.play().then(() => setIsPlayingAudio(true)).catch(() => {})
-    }
-  }
-
-  // Tipe Berkas: Video (mis. Video Kejang)
+  // Tipe Berkas: Video (Pratinjau Aman & Non-Aktif Demi Mencegah Ekstensi Unduhan)
   if (item.type.startsWith('video/')) {
-    const videoSrc = item.url || item.dataUrl
     return (
-      <>
-        <div className="relative group size-20 sm:size-24 rounded-2xl bg-slate-900 border border-slate-300 overflow-hidden shrink-0 flex flex-col items-center justify-center shadow-xs">
-          <video
-            src={videoSrc}
-            className={`size-full object-cover transition-all duration-200 ${
-              isBlurred ? 'blur-md scale-110' : ''
-            }`}
-          />
-
-          {/* Privacy Overlay jika sedang diblur */}
-          {isBlurred ? (
-            <button
-              type="button"
-              onClick={handleMasterUnlock}
-              className="absolute inset-0 flex flex-col items-center justify-center bg-slate-900/60 p-1 text-center cursor-pointer hover:bg-slate-900/40 transition-colors"
-              title="Buka Sensor Privasi (Biometrik)"
-            >
-              <EyeOff size={16} className="text-white mb-0.5" />
-              <span className="text-[9px] font-bold text-white leading-tight">Video Kejang</span>
-              <span className="text-[8px] text-white/80">Buka Sensor</span>
-            </button>
-          ) : (
-            <div className="absolute inset-0 flex items-center justify-center bg-black/30 group-hover:bg-black/20 transition-colors">
-              <button
-                type="button"
-                onClick={() => setShowVideoModal(true)}
-                className="size-8 rounded-full bg-white/90 text-primary flex items-center justify-center shadow-md hover:scale-110 active:scale-95 transition-all cursor-pointer"
-                title="Putar Video"
-              >
-                <Play size={14} className="ml-0.5 fill-primary" />
-              </button>
-            </div>
-          )}
-
-          {/* Tombol Hapus */}
-          {onDelete && (
-            <button
-              type="button"
-              onClick={onDelete}
-              className="absolute top-1 right-1 bg-rose-600 text-white rounded-full p-1 hover:bg-rose-700 transition-colors cursor-pointer shadow-xs"
-              title="Hapus"
-            >
-              <X size={10} />
-            </button>
-          )}
-
-          <div className="absolute bottom-1 right-1 bg-black/70 px-1 py-0.5 rounded text-[8px] font-bold text-white flex items-center gap-0.5">
-            <VideoIcon size={9} />
-            <span>Video</span>
-          </div>
+      <div className="relative group size-20 sm:size-24 rounded-2xl bg-slate-800 border border-slate-700/80 overflow-hidden shrink-0 flex flex-col items-center justify-center p-2 text-center shadow-xs select-none">
+        <div className="size-8 rounded-xl bg-blue-500/20 text-blue-400 flex items-center justify-center mb-1">
+          <VideoIcon size={16} />
         </div>
+        <span className="text-[10px] font-bold text-white truncate max-w-full px-1">
+          {item.name || 'Video Klinis'}
+        </span>
+        <span className="text-[8px] text-slate-400">Media Terproteksi</span>
 
-        {/* Modal Pemutar Video Full / Loop untuk Analisis Kejang */}
-        {showVideoModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4">
-            <div className="relative max-w-lg w-full bg-slate-950 rounded-3xl overflow-hidden shadow-2xl border border-slate-800 p-2 space-y-2">
-              <div className="flex items-center justify-between px-2 pt-1">
-                <span className="text-xs font-bold text-white truncate max-w-[80%]">
-                  🎥 {item.name || 'Video Klinis Pasien'}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setShowVideoModal(false)}
-                  className="text-white/80 hover:text-white p-1 rounded-full cursor-pointer"
-                >
-                  <X size={18} />
-                </button>
-              </div>
-
-              <div className="rounded-2xl overflow-hidden bg-black flex items-center justify-center max-h-[70vh]">
-                <video
-                  src={videoSrc}
-                  controls
-                  autoPlay
-                  loop
-                  playsInline
-                  className="max-h-[65vh] w-full object-contain"
-                />
-              </div>
-
-              <div className="text-[11px] text-slate-400 px-2 pb-1 text-center">
-                💡 Video diatur <i>looping otomatis</i> agar dokter dapat mengamati fase tonik, klonik, deviasi konjugat mata, dan automatisme berulang kali.
-              </div>
-            </div>
-          </div>
+        {onDelete && (
+          <button
+            type="button"
+            onClick={onDelete}
+            className="absolute top-1 right-1 bg-rose-600 text-white rounded-full p-1 hover:bg-rose-700 transition-colors cursor-pointer shadow-xs"
+            title="Hapus"
+          >
+            <X size={10} />
+          </button>
         )}
-      </>
+      </div>
     )
   }
 
-  // Tipe Berkas: Audio (Voice Note WhatsApp)
+  // Tipe Berkas: Audio (Voice Note WhatsApp - Tanpa Tag Audio yang Memicu Download Manager)
   if (item.type.startsWith('audio/')) {
     return (
-      <div className="relative group h-14 sm:h-16 px-3 rounded-2xl bg-amber-50 border border-amber-200 shrink-0 flex items-center gap-2.5 shadow-xs">
-        <audio
-          ref={(node) => setAudioRef(node)}
-          src={item.url || item.dataUrl}
-          onEnded={() => setIsPlayingAudio(false)}
-          className="hidden"
-        />
-
-        <button
-          type="button"
-          onClick={toggleAudio}
-          className="size-9 rounded-full bg-amber-500 text-white flex items-center justify-center shadow-xs hover:bg-amber-600 active:scale-95 transition-all cursor-pointer shrink-0"
-        >
-          {isPlayingAudio ? <Pause size={15} /> : <Play size={15} className="ml-0.5 fill-white" />}
-        </button>
+      <div className="relative group h-14 sm:h-16 px-3 rounded-2xl bg-amber-50 border border-amber-200 shrink-0 flex items-center gap-2.5 shadow-xs select-none">
+        <div className="size-9 rounded-full bg-amber-500 text-white flex items-center justify-center shadow-xs shrink-0">
+          <Volume2 size={16} />
+        </div>
 
         <div className="flex flex-col min-w-[90px] max-w-[140px]">
           <span className="text-xs font-bold text-amber-950 truncate">{item.name || 'Voice Note WA'}</span>
           <span className="text-[10px] text-amber-700 flex items-center gap-1 font-semibold">
-            <Volume2 size={11} />
-            <span>Rekaman Suara</span>
+            <span>Audio Terproteksi</span>
           </span>
         </div>
 

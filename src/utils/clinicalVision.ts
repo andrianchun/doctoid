@@ -1,4 +1,5 @@
 import type { AttachmentTag } from '../db'
+import { normalizePenunjangText } from './penunjangNormalizer'
 
 export interface VisionAttachmentItem {
   id?: string
@@ -199,9 +200,11 @@ ATURAN KLINIS WAJIB:
      * Irama dasar (Sinus Rhythm / lainnya), Heart Rate (HR bpm), Axis
      * Iskemia/infark akut (ST elevasi, ST depresi, T inverted).
 
-4. INTERPRETASI RADIOLOGI (CT SCAN / THORAX):
-   - Prioritas Utama: Jika foto memuat teks lembar bacaan / ekspertise resmi dokter Sp.Rad, kutip langsung kesimpulan/kesan resmi tersebut.
-   - Jika foto adalah film CT polos tanpa teks ekspertise: berikan kesan orientasi (Ada/tidaknya perdarahan ICH/SAH/SDH/EDH, infark/lesi hipodens teritorial, edema serebri, midline shift / herniasi).
+4. INTERPRETASI RADIOLOGI (CT SCAN / XRAY THORAX):
+   - WAJIB SINGKAT, PADAT, TELEGRAFIS (tanpa kalimat pengisi seperti "menunjukkan lesi...", "tampak gambaran...", atau "didapatkan hasil").
+   - Untuk CT Scan Kepala: Langsung tulis modalitas + patologi + lokasi & sisi (D/S) + perkiraan volume (jika bisa diukur). Contoh: "CT Scan Kepala: Perdarahan frontal S (± 15 cc)", "CT Scan Kepala: Perdarahan intraventrikular", "CT Scan Kepala: Infark basal ganglia D".
+   - Untuk X-Ray / Rontgen Thorax: WAJIB pakai label "Xray Thorax:". Langsung tulis patologinya, atau awali "Kesan " bila ragu/suspek. Contoh: "Xray Thorax: Kardiomegali", "Xray Thorax: Pneumonia", "Xray Thorax: Kesan Pneumonia".
+   - Jika ada beberapa modalitas (misal CT Kepala dan Xray Thorax), pisahkan di baris baru agar jelas.
 
 5. PLANNING DIAGNOSTIK (pdx):
    - JANGAN masukkan pemeriksaan yang gambarnya/hasilnya SUDAH ADA di lampiran ke dalam pdx! (Karena hasil pemeriksaan tersebut sudah masuk ke data penunjang).
@@ -214,7 +217,7 @@ OUTPUT HARUS BERUPA JSON VALID dengan struktur persis seperti ini:
   ],
   "lab_abnormal": ["Leukosit 14.500 ↑", "GDS 245 ↑"],
   "ekg_summary": "Sinus Rhythm, HR 78 bpm, tidak tampak aritmia/PVC/AF, ST-T changes (-)",
-  "radiologi_summary": "CT Scan Kepala: Tidak tampak perdarahan intrakranial, infark kronis lakunar kapsula interna",
+  "radiologi_summary": "CT Scan Kepala: Infark lakunar kapsula interna D\nXray Thorax: Kardiomegali",
   "pdx": []
 }`
 
@@ -284,15 +287,20 @@ function mergeVisionResult(
   const penunjangSections: string[] = []
 
   if (visionData.lab_abnormal && visionData.lab_abnormal.length > 0) {
-    penunjangSections.push(`[Laboratorium]:\n${visionData.lab_abnormal.map((l) => `- ${l}`).join('\n')}`)
+    penunjangSections.push(`Lab:\n${visionData.lab_abnormal.map((l) => `- ${l}`).join('\n')}`)
   }
 
   if (visionData.ekg_summary && visionData.ekg_summary.trim()) {
-    penunjangSections.push(`[EKG]:\n- ${visionData.ekg_summary.trim()}`)
+    penunjangSections.push(`EKG:\n- ${visionData.ekg_summary.trim()}`)
   }
 
   if (visionData.radiologi_summary && visionData.radiologi_summary.trim()) {
-    penunjangSections.push(`[Radiologi]:\n- ${visionData.radiologi_summary.trim()}`)
+    const radLines = visionData.radiologi_summary
+      .split('\n')
+      .map((l) => l.trim().replace(/^[-•]\s*/, ''))
+      .filter(Boolean)
+      .map((l) => `- ${l}`)
+    penunjangSections.push(`Radiologi:\n${radLines.join('\n')}`)
   }
 
   const pdxSuggestions = (visionData.pdx || []).map((name) => ({
@@ -304,7 +312,7 @@ function mergeVisionResult(
   return {
     classifiedAttachments: classified,
     pdxSuggestions,
-    penunjangTextSummary: penunjangSections.join('\n\n'),
+    penunjangTextSummary: normalizePenunjangText(penunjangSections.join('\n\n')),
     hasAbnormalLab: Boolean(visionData.lab_abnormal && visionData.lab_abnormal.length > 0),
   }
 }
@@ -379,7 +387,7 @@ function runHeuristicClassifier(
 
   const penunjangSections: string[] = []
   if (labLines.length > 0) {
-    penunjangSections.push(`[Laboratorium]:\n${labLines.map((l) => `- ${l}`).join('\n')}`)
+    penunjangSections.push(`Lab:\n${labLines.map((l) => `- ${l}`).join('\n')}`)
   }
 
   const pdxSuggestions = Array.from(pdxSet).map((name) => ({

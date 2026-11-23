@@ -1,4 +1,5 @@
 import type { ProgressNote, ClinicalMetrics } from '../db'
+import { normalizePenunjangText } from './penunjangNormalizer'
 
 /**
  * Pembersih dan ekstraktor temuan klinis positif (pertinent positives)
@@ -667,7 +668,8 @@ interface PrioritizedFinding {
  */
 export function extractObjectivePositives(rawPemfis?: string, rawPenunjang?: string): string[] {
   const items: PrioritizedFinding[] = []
-  const text = `${rawPemfis || ''}\n${rawPenunjang || ''}`
+  const normalizedPenunjang = normalizePenunjangText(rawPenunjang)
+  const text = `${rawPemfis || ''}\n${normalizedPenunjang}`
   if (!text.trim()) return []
 
   const add = (findingText: string, priority: number) => {
@@ -945,9 +947,13 @@ export function extractObjectivePositives(rawPemfis?: string, rawPenunjang?: str
   const ctMatch = text.match(/\b(?:CT[\s-]?Scan(?:\s*kepala)?|MSCT)\s*[:-]?\s*([^.\n;]+)/i)
   if (ctMatch) {
     let ctRes = ctMatch[1].trim()
-    ctRes = ctRes.replace(/^(?:tampak|kesan|didapatkan|hasil)\s*[:-]?\s*/i, '').trim()
+    ctRes = ctRes
+      .replace(/^(?:yang\s+)?(?:menunjukkan|menunjukan|memperlihatkan|tampak|didapatkan|hasil)\s*(?:adanya\s+|gambaran\s+)?[:-]?\s*/i, '')
+      .replace(/^lesi\s+hiperdens\s*[/,]?\s*(?:atau\s*)?(perdarahan|ich)/i, '$1')
+      .replace(/^lesi\s+hipodens\s*[/,]?\s*(?:atau\s*)?(infark)/i, '$1')
+      .trim()
     if (ctRes && !NEGATIVE_FINDINGS.some((n) => n.test(ctRes))) {
-      add(ctRes.length > 35 ? `CT: ${ctRes.substring(0, 35)}...` : `CT: ${ctRes}`, 5)
+      add(ctRes.length > 38 ? `CT: ${ctRes.substring(0, 38)}...` : `CT: ${ctRes}`, 5)
     }
   } else {
     const radKey = text.match(/\b(infark\s*(?:luas|cerebri|lacunar|cerebel)|ICH\s*(?:vol\s*\d+cc)?|EDH|SDH|SAH|edema\s*serebri|midline\s*shift)\b/i)
@@ -956,7 +962,7 @@ export function extractObjectivePositives(rawPemfis?: string, rawPenunjang?: str
     }
   }
 
-  const thMatch = text.match(/\b(kardiomegali|cardiomegaly|infiltrat\s*(?:paru)?|bronkopneumonia|edema\s*paru|efusi\s*pleura)\b/i)
+  const thMatch = text.match(/\b(pneumonia|bronkopneumonia|kardiomegali|cardiomegaly|infiltrat\s*(?:paru)?|edema\s*paru|efusi\s*pleura)\b/i)
   if (thMatch && !NEGATIVE_FINDINGS.some((n) => n.test(thMatch[0]))) {
     add(thMatch[1].charAt(0).toUpperCase() + thMatch[1].slice(1), 24)
   }

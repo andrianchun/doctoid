@@ -6,7 +6,7 @@ import {
   Loader2, LogOut, RotateCcw, RotateCw, Check, History, Sparkles, Activity, ShieldCheck, Stethoscope,
   Mic, Eye, EyeOff, Pencil, Trash2, Plus, CheckSquare, Square,
   FlaskConical, Image as ImageIcon, Upload, AlertTriangle, ArrowLeftRight,
-  FileText, Volume2, Play
+  FileText, Volume2, Play, ListChecks
 } from 'lucide-react'
 import {
   db,
@@ -34,6 +34,7 @@ import { formatDate, hariKe, getLocalDateString } from '../utils/dateFormat'
 import { cleanNamaDepan, formatPatientDisplayName } from '../utils/patientName'
 import { notifyParserFinished } from '../utils/nativeNotify'
 import VisiteModal from '../components/VisiteModal'
+import BatchTerapiModal from '../components/BatchTerapiModal'
 import DateInput from '../components/DateInput'
 import { useBodyScrollLock } from '../utils/useBodyScrollLock'
 import ClinicalTrendingView from '../components/ClinicalTrendingView'
@@ -44,6 +45,8 @@ import { PemfisVisualizer } from '../components/PemfisVisualizer'
 import { ClinicalMediaCard, normalizeMediaUrl } from '../components/ClinicalMediaCard'
 import { ImageViewerModal, type ViewerImage } from '../components/ImageViewerModal'
 import { isNonTherapyText } from '../parser'
+import { cleanDuplicateMedicalPrefixes } from '../utils/visitePemfis'
+import { FormattedPenunjang } from '../components/FormattedPenunjang'
 
 // Helper untuk mencocokkan item PDX dengan hasil pemeriksaan penunjang yang sudah tercatat
 function findMatchingPenunjang(pdxName: string, penunjangs: PenunjangItem[]): PenunjangItem | undefined {
@@ -173,16 +176,16 @@ function getTerapiTrackingBadge(item: TerapiItem, noteDate?: string) {
   if (item.tracking) {
     if (item.tracking.tipe === 'tapering') {
       return (
-        <span className="rounded-full bg-amber-50 text-amber-800 border border-amber-200/80 px-2 py-0.5 text-[10px] font-bold">
-          ⚡ Tap H-{day}
+        <span className="rounded-full bg-amber-50 text-amber-800 border border-amber-200/80 px-2.5 py-0.5 text-xs font-bold">
+          Tap H-{day}
         </span>
       )
     }
     if (item.tracking.tipe === 'durasi') {
       const target = item.tracking.target_hari || 7
       return (
-        <span className="rounded-full bg-blue-50 text-blue-800 border border-blue-200/80 px-2 py-0.5 text-[10px] font-bold">
-          ⏱ H-{day}/{target}
+        <span className="rounded-full bg-blue-50 text-blue-800 border border-blue-200/80 px-2.5 py-0.5 text-xs font-bold">
+          H-{day}/{target}
         </span>
       )
     }
@@ -191,36 +194,36 @@ function getTerapiTrackingBadge(item: TerapiItem, noteDate?: string) {
   const name = `${item.nama_item} ${item.dosis_keterangan}`.toLowerCase()
   if (name.includes('manitol') || name.includes('mannitol')) {
     return (
-      <span className="rounded-full bg-amber-50 text-amber-800 border border-amber-200/80 px-2 py-0.5 text-[10px] font-bold">
-        ⚡ Manitol H-{day}
+      <span className="rounded-full bg-amber-50 text-amber-800 border border-amber-200/80 px-2.5 py-0.5 text-xs font-bold">
+        Manitol H-{day}
       </span>
     )
   }
   if (name.includes('dexa')) {
     return (
-      <span className="rounded-full bg-amber-50 text-amber-800 border border-amber-200/80 px-2 py-0.5 text-[10px] font-bold">
-        ⚡ Dexa H-{day}
+      <span className="rounded-full bg-amber-50 text-amber-800 border border-amber-200/80 px-2.5 py-0.5 text-xs font-bold">
+        Dexa H-{day}
       </span>
     )
   }
   if (name.includes('ceftri')) {
     return (
-      <span className="rounded-full bg-blue-50 text-blue-800 border border-blue-200/80 px-2 py-0.5 text-[10px] font-bold">
-        ⏱ Ceftri H-{day}/7
+      <span className="rounded-full bg-blue-50 text-blue-800 border border-blue-200/80 px-2.5 py-0.5 text-xs font-bold">
+        Ceftri H-{day}/7
       </span>
     )
   }
   if (name.includes('nimodipine') || name.includes('nimotop')) {
     return (
-      <span className="rounded-full bg-blue-50 text-blue-800 border border-blue-200/80 px-2 py-0.5 text-[10px] font-bold">
-        ⏱ Nimodipine H-{day}/21
+      <span className="rounded-full bg-blue-50 text-blue-800 border border-blue-200/80 px-2.5 py-0.5 text-xs font-bold">
+        Nimodipine H-{day}/21
       </span>
     )
   }
   if ((name.includes('clopidogrel') && name.includes('aspirin')) || name.includes('dapt')) {
     return (
-      <span className="rounded-full bg-blue-50 text-blue-800 border border-blue-200/80 px-2 py-0.5 text-[10px] font-bold">
-        ⏱ DAPT H-{day}/21
+      <span className="rounded-full bg-blue-50 text-blue-800 border border-blue-200/80 px-2.5 py-0.5 text-xs font-bold">
+        DAPT H-{day}/21
       </span>
     )
   }
@@ -238,6 +241,9 @@ function TerapiRow({
   onEdit,
   onDelete,
   onToggleStatus,
+  isSelectionMode = false,
+  isSelected = false,
+  onSelectToggle,
 }: {
   item: TerapiItem
   index: number
@@ -248,6 +254,9 @@ function TerapiRow({
   onEdit?: (item: TerapiItem, index: number, noteId: number) => void
   onDelete?: (index: number, noteId: number) => void
   onToggleStatus?: (index: number, noteId: number) => void
+  isSelectionMode?: boolean
+  isSelected?: boolean
+  onSelectToggle?: (index: number) => void
 }) {
   const isDiagnostic = item.kategori === 'Diagnostik'
   const baru = item.status === 'aktif' && item.tgl_mulai === noteDate
@@ -257,9 +266,33 @@ function TerapiRow({
   const isStopped = item.status === 'stop' || hasPenunjangResult
 
   return (
-    <div className="group flex items-center justify-between py-1.5 px-2 rounded-xl hover:bg-surface/60 transition-colors gap-2">
-      <div className="min-w-0 flex-1 flex items-center gap-2">
-        {isDiagnostic && onToggleStatus && (
+    <div
+      onClick={isSelectionMode ? () => onSelectToggle?.(index) : undefined}
+      className={`group flex items-center justify-between py-2 px-2.5 rounded-xl transition-all gap-2 ${
+        isSelectionMode
+          ? isSelected
+            ? 'bg-primary/10 ring-1 ring-primary/25 cursor-pointer'
+            : 'hover:bg-slate-100/70 cursor-pointer'
+          : 'hover:bg-surface/50'
+      }`}
+    >
+      <div className="min-w-0 flex-1 flex items-center gap-2.5">
+        {isSelectionMode ? (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation()
+              onSelectToggle?.(index)
+            }}
+            className="cursor-pointer text-ink-muted hover:text-primary transition-colors shrink-0"
+          >
+            {isSelected ? (
+              <CheckSquare size={16} className="text-primary" />
+            ) : (
+              <Square size={16} className="text-slate-300" />
+            )}
+          </button>
+        ) : isDiagnostic && onToggleStatus ? (
           <button
             type="button"
             onClick={() => onToggleStatus(index, noteId)}
@@ -272,7 +305,14 @@ function TerapiRow({
               <Square size={16} className="text-slate-400" />
             )}
           </button>
-        )}
+        ) : !isDiagnostic ? (
+          <span
+            className={`size-2 rounded-full shrink-0 transition-colors ${
+              isStopped ? 'bg-slate-300' : 'bg-primary'
+            }`}
+          />
+        ) : null}
+
         <div className="min-w-0 flex-1">
           {isDiagnostic ? (
             <p className="text-xs leading-snug flex items-center gap-1.5 flex-wrap">
@@ -286,24 +326,24 @@ function TerapiRow({
               ) : resultText ? (
                 <span className="text-primary font-medium ml-1">: {resultText}</span>
               ) : item.dosis_keterangan ? (
-                <span className="text-ink-muted ml-1">({item.dosis_keterangan})</span>
+                <span className="text-ink-muted ml-1 font-normal">({item.dosis_keterangan})</span>
               ) : (
-                <span className="text-amber-600 font-medium ml-1 text-[11px]">(Menunggu hasil)</span>
+                <span className="text-amber-600/90 font-medium ml-1 text-[11px]">(Menunggu hasil)</span>
               )}
             </p>
           ) : isStopped ? (
-            <p className="text-xs text-ink-muted/70">
-              <del className="text-rose-500/80">
+            <p className="text-xs text-ink-muted/70 leading-snug">
+              <del className="text-slate-400 font-medium">
                 {item.nama_item} {item.dosis_keterangan}
               </del>{' '}
-              <span className="caption text-[11px] text-rose-600 font-semibold">
+              <span className="caption text-[11px] text-rose-500 font-semibold ml-1">
                 (stop {formatDate(item.tgl_stop)})
               </span>
             </p>
           ) : (
             <p className="text-xs text-ink leading-snug">
-              <b className="font-bold">{item.nama_item}</b>{' '}
-              <span className="text-ink-muted">{item.dosis_keterangan}</span>
+              <b className="font-bold text-ink">{item.nama_item}</b>{' '}
+              <span className="text-ink-muted font-normal">{item.dosis_keterangan}</span>
               {item.icd9 && (
                 <span className="ml-1.5 font-mono caption font-bold text-primary bg-primary/10 px-1.5 py-0.5 rounded text-[10px]">
                   ICD-9: {item.icd9}
@@ -322,7 +362,7 @@ function TerapiRow({
           </span>
         )}
 
-        {!isDiagnostic && onToggleStatus && (
+        {!isSelectionMode && !isDiagnostic && onToggleStatus && (
           <button
             type="button"
             onClick={() => onToggleStatus(index, noteId)}
@@ -330,33 +370,33 @@ function TerapiRow({
             aria-label={isStopped ? 'Aktifkan kembali' : 'Stop obat'}
             className={`px-2 py-0.5 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${
               isStopped
-                ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200'
-                : 'text-ink-muted hover:bg-rose-50 hover:text-rose-600'
+                ? 'bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100'
+                : 'text-slate-500 border border-slate-200 hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600'
             }`}
           >
             {isStopped ? 'Re-aktif' : 'Stop'}
           </button>
         )}
 
-        {onEdit && (
+        {!isSelectionMode && onEdit && (
           <button
             type="button"
             onClick={() => onEdit(item, index, noteId)}
             title="Edit item terapi"
             aria-label="Edit item terapi"
-            className="p-1 rounded-lg text-ink-muted hover:text-primary hover:bg-primary/10 transition-colors cursor-pointer"
+            className="p-1 rounded-lg text-slate-300 hover:text-primary hover:bg-primary/10 transition-colors cursor-pointer"
           >
             <Pencil size={13} />
           </button>
         )}
 
-        {onDelete && (
+        {!isSelectionMode && onDelete && (
           <button
             type="button"
             onClick={() => onDelete(index, noteId)}
             title="Hapus item terapi"
             aria-label="Hapus item terapi"
-            className="p-1 rounded-lg text-ink-muted hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
+            className="p-1 rounded-lg text-slate-300 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
           >
             <Trash2 size={13} />
           </button>
@@ -560,7 +600,7 @@ export default function PatientProfile() {
   const handleDeletePatient = async () => {
     if (!patient) return
     const displayName = formatPatientDisplayName(patient.title, patient.nama_depan || (patient as any).inisial || 'pasien ini')
-    if (window.confirm(`Yakin ingin menghapus seluruh data rekam medis ${displayName}? Tindakan ini tidak dapat dibatalkan.`)) {
+    if (window.confirm(`Yakin ingin menghapus seluruh data buku log pasien ${displayName}? Tindakan ini tidak dapat dibatalkan.`)) {
       await db.progressNotes.where('patient_id').equals(pid).delete()
       await db.patients.delete(pid)
       triggerCloudSync(50)
@@ -807,7 +847,133 @@ export default function PatientProfile() {
     return penunjangList
   }, [penunjangList, penunjangFilter])
 
-  /* CRUD Item Terapi */
+  const latest = notes && notes.length > 0 ? notes[notes.length - 1] : undefined
+
+  // Bersihkan item non-terapi (seperti "Jawaban / Advis Dokter:*", "Raseno", dll.)
+  const cleanP = useMemo(() => {
+    return (latest?.P ?? []).filter((p) => !isNonTherapyText(p.nama_item))
+  }, [latest?.P])
+
+  const farmako = useMemo(() => cleanP.filter((p) => p.kategori === 'Farmakologi'), [cleanP])
+  const nonFarmako = useMemo(() => cleanP.filter((p) => p.kategori === 'Non-Farmakologi'), [cleanP])
+  const diagnostik = useMemo(() => cleanP.filter((p) => p.kategori === 'Diagnostik'), [cleanP])
+  const monitoring = useMemo(() => cleanP.filter((p) => p.kategori === 'Monitoring'), [cleanP])
+  const edukasi = useMemo(() => cleanP.filter((p) => p.kategori === 'Edukasi'), [cleanP])
+
+  // Auto-sanitasi: bersihkan item non-terapi dan auto-centang PDx yang sudah ada hasilnya
+  useEffect(() => {
+    if (!latest?.id || !latest.P?.length) return
+    let changed = false
+
+    // 1. Buang sampah non-terapi (seperti "Jawaban / Advis Dokter:*", "Raseno", dsb.)
+    const filtered = latest.P.filter((p) => {
+      if (isNonTherapyText(p.nama_item)) {
+        changed = true
+        return false
+      }
+      return true
+    })
+
+    // 2. Auto-centang PDx jika pemeriksaan penunjang sudah ada hasilnya
+    const updated = filtered.map((p) => {
+      if (p.kategori === 'Diagnostik' && p.status === 'aktif') {
+        const match = findMatchingPenunjang(p.nama_item, penunjangList)
+        if (match && (match.status === 'selesai' || match.hasil?.trim() || match.attachments?.length)) {
+          changed = true
+          return {
+            ...p,
+            status: 'stop' as const,
+            tgl_stop: p.tgl_mulai || getLocalDateString(),
+          }
+        }
+      }
+      return p
+    })
+
+    if (changed) {
+      db.progressNotes.update(latest.id, { P: updated }).catch((err) => {
+        console.warn('Gagal auto-update sanitasi note:', err)
+      })
+    }
+  }, [latest?.id, latest?.P, penunjangList])
+
+  /* CRUD Item Terapi & Batch Editing */
+  const [batchModalOpen, setBatchModalOpen] = useState(false)
+  const [isSelectionMode, setIsSelectionMode] = useState(false)
+  const [selectedTerapiIndices, setSelectedTerapiIndices] = useState<number[]>([])
+
+  const handleToggleSelectTerapi = (index: number) => {
+    setSelectedTerapiIndices((prev) =>
+      prev.includes(index) ? prev.filter((i) => i !== index) : [...prev, index]
+    )
+  }
+
+  const handleSelectAllTerapi = () => {
+    if (!latest?.P) return
+    setSelectedTerapiIndices(latest.P.map((_, i) => i))
+  }
+
+  const handleDeselectAllTerapi = () => {
+    setSelectedTerapiIndices([])
+  }
+
+  const handleBatchStopTerapi = async () => {
+    if (!latest?.id || !selectedTerapiIndices.length) return
+    const newP = [...latest.P]
+    const today = getLocalDateString()
+    let count = 0
+    selectedTerapiIndices.forEach((idx) => {
+      if (newP[idx] && newP[idx].status === 'aktif') {
+        newP[idx] = {
+          ...newP[idx],
+          status: 'stop',
+          tgl_stop: today,
+        }
+        count++
+      }
+    })
+    await db.progressNotes.update(latest.id, { P: newP })
+    notify(`${count} terapi dihentikan (stop) ✓`)
+    setSelectedTerapiIndices([])
+    setIsSelectionMode(false)
+  }
+
+  const handleBatchActiveTerapi = async () => {
+    if (!latest?.id || !selectedTerapiIndices.length) return
+    const newP = [...latest.P]
+    let count = 0
+    selectedTerapiIndices.forEach((idx) => {
+      if (newP[idx] && newP[idx].status === 'stop') {
+        newP[idx] = {
+          ...newP[idx],
+          status: 'aktif',
+          tgl_stop: null,
+        }
+        count++
+      }
+    })
+    await db.progressNotes.update(latest.id, { P: newP })
+    notify(`${count} terapi diaktifkan kembali ✓`)
+    setSelectedTerapiIndices([])
+    setIsSelectionMode(false)
+  }
+
+  const handleBatchDeleteTerapi = async () => {
+    if (!latest?.id || !selectedTerapiIndices.length) return
+    if (!confirm(`Hapus ${selectedTerapiIndices.length} item terapi terpilih?`)) return
+    const newP = latest.P.filter((_, idx) => !selectedTerapiIndices.includes(idx))
+    await db.progressNotes.update(latest.id, { P: newP })
+    notify(`${selectedTerapiIndices.length} item terapi dihapus ✓`)
+    setSelectedTerapiIndices([])
+    setIsSelectionMode(false)
+  }
+
+  const handleBatchSaveFromModal = async (newItems: TerapiItem[]) => {
+    if (!latest?.id) return
+    await db.progressNotes.update(latest.id, { P: newItems })
+    notify(`Planning & terapi diperbarui (${newItems.length} item) ✓`)
+  }
+
   const [editingTerapi, setEditingTerapi] = useState<{
     noteId: number
     index: number
@@ -1047,7 +1213,7 @@ export default function PatientProfile() {
     detail_krs: '',
     tgl_krs: getLocalDateString(),
   })
-  useBodyScrollLock(Boolean(chatOpen || showEditPatientModal || editingTerapi || addingTerapiNoteId || editingNote || showKrsModal || showAlihLeaderModal))
+  useBodyScrollLock(Boolean(chatOpen || showEditPatientModal || editingTerapi || addingTerapiNoteId || editingNote || showKrsModal || showAlihLeaderModal || batchModalOpen))
 
   const openAlihLeaderModal = () => {
     setNewLeader(patient?.dpjp_utama || 'Neuro')
@@ -1101,56 +1267,6 @@ export default function PatientProfile() {
       </main>
     )
   }
-
-  const latest = notes[notes.length - 1]
-  
-  // Bersihkan item non-terapi (seperti "Jawaban / Advis Dokter:*", "Raseno", dll.)
-  const cleanP = useMemo(() => {
-    return (latest?.P ?? []).filter((p) => !isNonTherapyText(p.nama_item))
-  }, [latest?.P])
-
-  const farmako = useMemo(() => cleanP.filter((p) => p.kategori === 'Farmakologi'), [cleanP])
-  const nonFarmako = useMemo(() => cleanP.filter((p) => p.kategori === 'Non-Farmakologi'), [cleanP])
-  const diagnostik = useMemo(() => cleanP.filter((p) => p.kategori === 'Diagnostik'), [cleanP])
-  const monitoring = useMemo(() => cleanP.filter((p) => p.kategori === 'Monitoring'), [cleanP])
-  const edukasi = useMemo(() => cleanP.filter((p) => p.kategori === 'Edukasi'), [cleanP])
-
-  // Auto-sanitasi: bersihkan item non-terapi dan auto-centang PDx yang sudah ada hasilnya
-  useEffect(() => {
-    if (!latest?.id || !latest.P?.length) return
-    let changed = false
-    
-    // 1. Buang sampah non-terapi (seperti "Jawaban / Advis Dokter:*", "Raseno", dsb.)
-    const filtered = latest.P.filter((p) => {
-      if (isNonTherapyText(p.nama_item)) {
-        changed = true
-        return false
-      }
-      return true
-    })
-
-    // 2. Auto-centang PDx jika pemeriksaan penunjang sudah ada hasilnya
-    const updated = filtered.map((p) => {
-      if (p.kategori === 'Diagnostik' && p.status === 'aktif') {
-        const match = findMatchingPenunjang(p.nama_item, penunjangList)
-        if (match && (match.status === 'selesai' || match.hasil?.trim() || match.attachments?.length)) {
-          changed = true
-          return {
-            ...p,
-            status: 'stop' as const,
-            tgl_stop: p.tgl_mulai || getLocalDateString(),
-          }
-        }
-      }
-      return p
-    })
-
-    if (changed) {
-      db.progressNotes.update(latest.id, { P: updated }).catch((err) => {
-        console.warn('Gagal auto-update sanitasi note:', err)
-      })
-    }
-  }, [latest?.id, latest?.P, penunjangList])
 
   const cleanUsia = (patient.usia || '').replace(/\s*(th|tahun)\b/gi, '').trim()
 
@@ -1246,7 +1362,7 @@ export default function PatientProfile() {
 
   const buildKonteks = () => {
     const riwayatRawatKonteks = patient.riwayat_rawat && patient.riwayat_rawat.length > 0
-      ? `\n\n[RIWAYAT RAWAT INAP TERDAHULU (REKAM MEDIS)]\n` +
+      ? `\n\n[RIWAYAT RAWAT INAP TERDAHULU (BUKU LOG PASIEN)]\n` +
         patient.riwayat_rawat.map((r, i) => {
           const outcomeLabel = r.keterangan_krs === 'Meninggal' ? 'MD' : r.keterangan_krs === 'APS' ? 'APS' : r.keterangan_krs === 'Alih Rawat' ? 'Alih Rawat' : r.keterangan_krs === 'Rujuk' ? 'Rujuk' : r.keterangan_krs === 'Lepas Rawat' ? 'Lepas Rawat' : 'KRS'
           return `- Rawat Ke-${i + 1}: MRS ${formatDate(r.tgl_mrs)}${r.tgl_krs ? ` s/d ${outcomeLabel} ${formatDate(r.tgl_krs)}` : ''}${r.keterangan_krs && r.keterangan_krs !== 'Izin Dokter' ? ` (${r.keterangan_krs}${r.detail_krs ? `: ${r.detail_krs}` : ''})` : ''} | Dx: ${r.diagnosis_utama}${r.catatan_krs ? ` | Terapi: ${r.catatan_krs}` : ''}`
@@ -1295,8 +1411,7 @@ export default function PatientProfile() {
     .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
 
   const hospitalOptions: SelectOption[] = (allHospitals ?? [])
-    .slice()
-    .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+    .toSorted((a, b) => (a.order ?? 0) - (b.order ?? 0))
     .map((h) => ({
       value: String(h.id),
       label: h.nama,
@@ -1311,7 +1426,7 @@ export default function PatientProfile() {
     : [{ value: '0', label: 'Belum ada ruangan' }]
 
   return (
-    <main className="space-y-5 p-5">
+    <main className="space-y-5 p-5 pb-32">
       {/* Header Pasien Hero */}
       <div className="glass-blue-hero rounded-3xl p-6 text-white shadow-xl">
         <div className="mb-4 flex items-center justify-between gap-2">
@@ -1368,7 +1483,7 @@ export default function PatientProfile() {
         <div className="mt-4 pt-3 border-t border-white/15 flex items-start justify-between gap-2">
           <div className="min-w-0 flex-1">
             <p className="caption font-semibold text-white/75 uppercase tracking-wider">Diagnosis Utama</p>
-            <p className="text-sm font-bold text-white mt-0.5">{patient.diagnosis_utama}</p>
+            <p className="text-sm font-bold text-white mt-0.5 leading-snug">{patient.diagnosis_utama}</p>
           </div>
           <button
             type="button"
@@ -1381,82 +1496,9 @@ export default function PatientProfile() {
         </div>
 
         <div className="mt-3 flex flex-wrap gap-1.5 items-center">
-          <span className="rounded-full bg-white/20 px-3 py-1 text-xs font-bold text-white">
-            {patient.jaminan}
-          </span>
-          <span className="rounded-full bg-white/20 px-3 py-1 text-xs font-bold text-white">
-            {hospital?.nama} · {ward?.nama}
-          </span>
-
-          {/* Peran & Leader */}
-          {patient.status_rawat === 'aktif' && (
-            patient.peran_rawat === 'Raber' || (patient.dpjp_utama && patient.dpjp_utama !== 'Neuro' && patient.peran_rawat !== 'Konsul') ? (
-              <div className="flex items-center gap-1">
-                <span className="rounded-full bg-indigo-500/80 text-white border border-indigo-400/50 px-3 py-1 text-xs font-bold">
-                  Raber · {patient.dpjp_utama}
-                </span>
-                <button
-                  type="button"
-                  onClick={openAlihLeaderModal}
-                  className="flex items-center gap-1 text-[11px] font-bold text-white/90 bg-white/20 hover:bg-white/30 px-2 py-0.5 rounded-full transition-all cursor-pointer"
-                  title="Alih DPJP Utama"
-                >
-                  <ArrowLeftRight size={12} /> Alih Leader
-                </button>
-              </div>
-            ) : patient.peran_rawat === 'Konsul' ? (
-              <div className="flex items-center gap-1">
-                <span className="rounded-full bg-sky-500/80 text-white border border-sky-400/50 px-3 py-1 text-xs font-bold">
-                  {patient.dpjp_utama && patient.dpjp_utama !== 'Neuro' ? `${patient.dpjp_utama} (Konsul)` : 'Konsul'}
-                </span>
-                <button
-                  type="button"
-                  onClick={openAlihLeaderModal}
-                  className="flex items-center gap-1 text-[11px] font-bold text-white/90 bg-white/20 hover:bg-white/30 px-2 py-0.5 rounded-full transition-all cursor-pointer"
-                  title="Alih DPJP Utama"
-                >
-                  <ArrowLeftRight size={12} /> Alih Leader
-                </button>
-              </div>
-            ) : (
-              <div className="flex items-center gap-1">
-                <span className="rounded-full bg-white/20 px-3 py-1 text-xs font-bold text-white">
-                  Leader (Neuro)
-                </span>
-                {patient.tim_raber && patient.tim_raber.length > 0 && (
-                  <span className="rounded-full bg-white/15 px-2.5 py-0.5 text-xs font-semibold text-white/90">
-                    Raber: {patient.tim_raber.join(', ')}
-                  </span>
-                )}
-                <button
-                  type="button"
-                  onClick={openAlihLeaderModal}
-                  className="flex items-center gap-1 text-[11px] font-bold text-white/90 bg-white/20 hover:bg-white/30 px-2 py-0.5 rounded-full transition-all cursor-pointer"
-                  title="Alih DPJP Utama"
-                >
-                  <ArrowLeftRight size={12} /> Alih Leader
-                </button>
-              </div>
-            )
-          )}
-
-          {patient.tgl_onset && (
-            <span className="rounded-full bg-white/20 px-3 py-1 text-xs font-bold text-white">
-              Onset OH-{hariKe(patient.tgl_onset)} ({formatDate(patient.tgl_onset)})
-            </span>
-          )}
+          {/* Status Rawat Inap */}
           {patient.status_rawat === 'aktif' ? (
-            <span className="rounded-full bg-amber-400/30 text-amber-200 border border-amber-300/40 px-3 py-1 text-xs font-bold">
-              Perawatan P-{hariKe(patient.tgl_mrs)} ({formatDate(patient.tgl_mrs)})
-            </span>
-          ) : (
-            <span className="rounded-full bg-slate-700/60 text-slate-200 border border-slate-600/60 px-3 py-1 text-xs font-bold">
-              {patient.tgl_krs ? `${patient.keterangan_krs === 'Meninggal' ? 'MD' : patient.keterangan_krs === 'APS' ? 'APS' : patient.keterangan_krs === 'Alih Rawat' ? 'Alih Rawat' : patient.keterangan_krs === 'Rujuk' ? 'Rujuk' : patient.keterangan_krs === 'Lepas Rawat' ? 'Lepas Rawat' : 'KRS'} ${formatDate(patient.tgl_krs)}` : 'Sudah Keluar'}
-              {patient.tgl_krs && patient.tgl_mrs ? ` · ${Math.max(1, Math.floor((new Date(patient.tgl_krs).getTime() - new Date(patient.tgl_mrs).getTime()) / 86400000) + 1)} hari rawat` : ''}
-            </span>
-          )}
-          {patient.status_rawat === 'aktif' ? (
-            <span className="rounded-full px-3 py-1 text-xs font-bold bg-emerald-400/30 text-emerald-100 border border-emerald-300/40">
+            <span className="rounded-full px-3 py-1 text-xs font-bold bg-emerald-500/25 text-emerald-100 border border-emerald-400/30 shadow-2xs backdrop-blur-xs">
               Rawat Inap
             </span>
           ) : patient.keterangan_krs === 'Meninggal' ? (
@@ -1480,15 +1522,95 @@ export default function PatientProfile() {
               Lepas Rawat
             </span>
           ) : (
-            <span className="rounded-full px-3 py-1 text-xs font-bold bg-white/30 text-white">
+            <span className="rounded-full px-3 py-1 text-xs font-bold bg-white/20 text-white border border-white/25">
               KRS
+            </span>
+          )}
+
+          {/* Hari Perawatan */}
+          {patient.status_rawat === 'aktif' ? (
+            <span className="rounded-full bg-white/15 text-white/95 border border-white/20 px-3 py-1 text-xs font-bold backdrop-blur-xs">
+              Perawatan P-{hariKe(patient.tgl_mrs)} ({formatDate(patient.tgl_mrs)})
+            </span>
+          ) : (
+            <span className="rounded-full bg-white/15 text-slate-200 border border-white/20 px-3 py-1 text-xs font-semibold">
+              {patient.tgl_krs ? `${patient.keterangan_krs === 'Meninggal' ? 'MD' : patient.keterangan_krs === 'APS' ? 'APS' : patient.keterangan_krs === 'Alih Rawat' ? 'Alih Rawat' : patient.keterangan_krs === 'Rujuk' ? 'Rujuk' : patient.keterangan_krs === 'Lepas Rawat' ? 'Lepas Rawat' : 'KRS'} ${formatDate(patient.tgl_krs)}` : 'Sudah Keluar'}
+              {patient.tgl_krs && patient.tgl_mrs ? ` · ${Math.max(1, Math.floor((new Date(patient.tgl_krs).getTime() - new Date(patient.tgl_mrs).getTime()) / 86400000) + 1)} hari rawat` : ''}
+            </span>
+          )}
+
+          {/* Jaminan */}
+          <span className="rounded-full bg-white/15 text-white/95 border border-white/20 px-3 py-1 text-xs font-semibold backdrop-blur-xs">
+            {patient.jaminan}
+          </span>
+
+          {/* Rumah Sakit & Ruangan */}
+          <span className="rounded-full bg-white/15 text-white/95 border border-white/20 px-3 py-1 text-xs font-semibold backdrop-blur-xs">
+            {hospital?.nama} · {ward?.nama}
+          </span>
+
+          {/* Peran & Leader */}
+          {patient.status_rawat === 'aktif' && (
+            patient.peran_rawat === 'Raber' || (patient.dpjp_utama && patient.dpjp_utama !== 'Neuro' && patient.peran_rawat !== 'Konsul') ? (
+              <div className="flex items-center gap-1">
+                <span className="rounded-full bg-indigo-500/40 text-white border border-indigo-400/40 px-3 py-1 text-xs font-bold backdrop-blur-xs">
+                  Raber · {patient.dpjp_utama}
+                </span>
+                <button
+                  type="button"
+                  onClick={openAlihLeaderModal}
+                  className="flex items-center gap-1 text-[11px] font-bold text-white/90 bg-white/20 hover:bg-white/30 border border-white/20 px-2 py-0.5 rounded-full transition-all cursor-pointer"
+                  title="Alih DPJP Utama"
+                >
+                  <ArrowLeftRight size={12} /> Alih Leader
+                </button>
+              </div>
+            ) : patient.peran_rawat === 'Konsul' ? (
+              <div className="flex items-center gap-1">
+                <span className="rounded-full bg-sky-500/40 text-white border border-sky-400/40 px-3 py-1 text-xs font-bold backdrop-blur-xs">
+                  {patient.dpjp_utama && patient.dpjp_utama !== 'Neuro' ? `${patient.dpjp_utama} (Konsul)` : 'Konsul'}
+                </span>
+                <button
+                  type="button"
+                  onClick={openAlihLeaderModal}
+                  className="flex items-center gap-1 text-[11px] font-bold text-white/90 bg-white/20 hover:bg-white/30 border border-white/20 px-2 py-0.5 rounded-full transition-all cursor-pointer"
+                  title="Alih DPJP Utama"
+                >
+                  <ArrowLeftRight size={12} /> Alih Leader
+                </button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-1">
+                <span className="rounded-full bg-white/15 text-white/95 border border-white/20 px-3 py-1 text-xs font-bold backdrop-blur-xs">
+                  Leader (Neuro)
+                </span>
+                {patient.tim_raber && patient.tim_raber.length > 0 && (
+                  <span className="rounded-full bg-white/15 border border-white/20 px-2.5 py-0.5 text-xs font-semibold text-white/90">
+                    Raber: {patient.tim_raber.join(', ')}
+                  </span>
+                )}
+                <button
+                  type="button"
+                  onClick={openAlihLeaderModal}
+                  className="flex items-center gap-1 text-[11px] font-bold text-white/90 bg-white/20 hover:bg-white/30 border border-white/20 px-2 py-0.5 rounded-full transition-all cursor-pointer"
+                  title="Alih DPJP Utama"
+                >
+                  <ArrowLeftRight size={12} /> Alih Leader
+                </button>
+              </div>
+            )
+          )}
+
+          {patient.tgl_onset && (
+            <span className="rounded-full bg-white/15 text-white/95 border border-white/20 px-3 py-1 text-xs font-semibold backdrop-blur-xs">
+              Onset OH-{hariKe(patient.tgl_onset)} ({formatDate(patient.tgl_onset)})
             </span>
           )}
         </div>
       </div>
 
       {/* Tab Switcher Profil Pasien */}
-      <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none text-xs">
+      <div className="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar text-xs">
         <button
           type="button"
           onClick={() => setActiveProfileTab('semua')}
@@ -1548,31 +1670,39 @@ export default function PatientProfile() {
 
       {/* Terapi & Planning Berjalan */}
       {(activeProfileTab === 'semua' || activeProfileTab === 'terapi') && (
-      <div className="glass-card rounded-3xl p-5 shadow-sm space-y-3.5">
-        <div className="flex items-center justify-between">
-          <p className="h2 text-sm font-bold text-ink">Planning & Terapi Berjalan</p>
+      <div className="glass-card rounded-3xl p-5 shadow-sm space-y-4">
+        {/* Header Bar */}
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <h2 className="text-sm font-bold text-ink">Planning & Terapi Berjalan</h2>
+            {cleanP.length > 0 && (
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20">
+                {cleanP.filter((p) => p.status === 'aktif').length} aktif
+              </span>
+            )}
+          </div>
           {latest && (
-            <span className="caption text-xs font-semibold text-ink-muted">
+            <span className="text-[11px] font-semibold text-ink-muted">
               CPPT: {formatDate(latest.tanggal)}
             </span>
           )}
         </div>
 
         {/* Bilah Instruksi Cepat / Micro-Update Terapi */}
-        <div className="flex items-center gap-1.5 rounded-2xl bg-surface/70 border border-slate-200/80 py-1 pl-3.5 pr-1 focus-within:bg-white focus-within:border-primary/50 focus-within:ring-2 focus-within:ring-primary/20 transition-all">
+        <div className="flex items-center gap-1.5 rounded-2xl bg-slate-50/80 border border-slate-200/80 py-1 pl-3.5 pr-1 focus-within:bg-white focus-within:border-primary/50 focus-within:ring-2 focus-within:ring-primary/20 transition-all">
           <input
             value={pendingEdit}
             onChange={(e) => setPendingEdit(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && terapkanEdit()}
             placeholder='Instruksi: mis. "stop ceftriaxone, + valsartan 1x80"'
-            className="h-8 w-full min-w-0 flex-1 bg-transparent text-xs outline-none placeholder:text-ink-muted/50 font-medium"
+            className="h-8 w-full min-w-0 flex-1 bg-transparent text-xs outline-none placeholder:text-slate-400 font-medium"
           />
           <button
             onClick={dikte}
             type="button"
             aria-label="Dikte suara"
             className={`flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-xl transition-colors ${
-              listening ? 'bg-rose-100 text-rose-600' : 'text-ink-muted hover:text-ink hover:bg-white/80'
+              listening ? 'bg-rose-100 text-rose-600' : 'text-ink-muted hover:text-ink hover:bg-white'
             }`}
           >
             <Mic size={15} className={listening ? 'animate-pulse' : ''} />
@@ -1588,22 +1718,121 @@ export default function PatientProfile() {
           </button>
         </div>
 
-        {/* Tombol Tambah Item Terapi Manual */}
-        <div className="flex items-center justify-between">
+        {/* Toolbar Tombol Aksi: Tambah Manual, Batch Edit, & Mode Pilih */}
+        <div className="flex items-center justify-between gap-2 flex-wrap pt-0.5">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <button
+              type="button"
+              onClick={() => {
+                if (latest?.id) {
+                  setAddingTerapiNoteId(latest.id)
+                } else {
+                  notify('Belum ada catatan CPPT aktif. Silakan gunakan instruksi di atas untuk membuat catatan hari ini.')
+                }
+              }}
+              className="inline-flex items-center gap-1.5 rounded-xl bg-slate-100/80 border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-200/70 hover:text-ink active:scale-95 transition-all cursor-pointer"
+            >
+              <Plus size={13} className="text-primary" /> Tambah Manual
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                if (latest?.id) {
+                  setBatchModalOpen(true)
+                } else {
+                  notify('Belum ada catatan CPPT aktif untuk diedit.')
+                }
+              }}
+              className="inline-flex items-center gap-1.5 rounded-xl bg-primary/10 border border-primary/20 px-3 py-1.5 text-xs font-bold text-primary hover:bg-primary/20 active:scale-95 transition-all cursor-pointer shadow-2xs"
+            >
+              <FileText size={13} /> Batch Edit
+            </button>
+          </div>
+
           <button
             type="button"
             onClick={() => {
-              if (latest?.id) {
-                setAddingTerapiNoteId(latest.id)
-              } else {
-                notify('Belum ada catatan CPPT aktif. Silakan gunakan instruksi di atas untuk membuat catatan hari ini.')
-              }
+              setIsSelectionMode(!isSelectionMode)
+              setSelectedTerapiIndices([])
             }}
-            className="inline-flex items-center gap-1.5 rounded-xl bg-primary/10 border border-primary/20 px-3 py-1.5 text-xs font-bold text-primary hover:bg-primary/20 active:scale-95 transition-all cursor-pointer"
+            className={`inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-bold transition-all cursor-pointer ${
+              isSelectionMode
+                ? 'bg-ink text-white'
+                : 'text-ink-muted hover:text-ink hover:bg-slate-100 border border-slate-200/80'
+            }`}
           >
-            <Plus size={14} /> Tambah Terapi / Plan Manual
+            <ListChecks size={13} /> {isSelectionMode ? 'Selesai Pilih' : 'Pilih Banyak'}
           </button>
         </div>
+
+        {/* Baris Kontrol Seleksi saat Mode Pilih Aktif */}
+        {isSelectionMode && (
+          <div className="flex items-center justify-between p-2.5 rounded-2xl bg-slate-100/80 border border-slate-200 text-xs animate-in fade-in">
+            <div className="flex items-center gap-2">
+              <span className="font-bold text-ink">
+                {selectedTerapiIndices.length} item dipilih
+              </span>
+              <button
+                type="button"
+                onClick={
+                  selectedTerapiIndices.length === (latest?.P.length ?? 0)
+                    ? handleDeselectAllTerapi
+                    : handleSelectAllTerapi
+                }
+                className="text-primary font-bold hover:underline cursor-pointer ml-1"
+              >
+                {selectedTerapiIndices.length === (latest?.P.length ?? 0)
+                  ? 'Batal Pilih Semua'
+                  : 'Pilih Semua'}
+              </button>
+            </div>
+            {selectedTerapiIndices.length > 0 && (
+              <button
+                type="button"
+                onClick={handleDeselectAllTerapi}
+                className="text-slate-400 hover:text-slate-600 text-[11px] cursor-pointer"
+              >
+                Reset
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* Floating Batch Action Dock saat ada item dipilih */}
+        {isSelectionMode && selectedTerapiIndices.length > 0 && (
+          <div className="fixed inset-x-4 bottom-24 z-40 max-w-sm mx-auto p-2 rounded-2xl bg-ink/95 text-white backdrop-blur-md shadow-2xl flex items-center justify-between gap-1.5 border border-white/10 animate-in slide-in-from-bottom-2 fade-in">
+            <span className="text-xs font-bold pl-2 truncate">
+              {selectedTerapiIndices.length} dipilih
+            </span>
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={handleBatchStopTerapi}
+                className="px-2.5 py-1.5 rounded-xl bg-rose-500/90 hover:bg-rose-600 text-white text-[11px] font-bold cursor-pointer transition-colors"
+                title="Hentikan semua item terpilih"
+              >
+                Stop ({selectedTerapiIndices.length})
+              </button>
+              <button
+                type="button"
+                onClick={handleBatchActiveTerapi}
+                className="px-2.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold cursor-pointer transition-colors"
+                title="Aktifkan semua item terpilih"
+              >
+                Aktifkan
+              </button>
+              <button
+                type="button"
+                onClick={handleBatchDeleteTerapi}
+                className="p-1.5 rounded-xl text-rose-300 hover:bg-white/10 cursor-pointer transition-colors"
+                title="Hapus semua item terpilih"
+              >
+                <Trash2 size={15} />
+              </button>
+            </div>
+          </div>
+        )}
 
         {!latest?.P.length && <p className="caption text-xs text-ink-muted">Belum ada terapi aktif tercatat.</p>}
         
@@ -1613,20 +1842,24 @@ export default function PatientProfile() {
             <p className="h3 flex items-center gap-1.5 text-xs font-bold text-sky-600">
               <Stethoscope size={14} /> Plan Diagnostik & Prosedur (PDX)
             </p>
-            <div className="space-y-1 pl-1 divide-y divide-surface">
+            <div className="space-y-0.5 divide-y divide-slate-100">
               {diagnostik.map((it, i) => {
                 const match = findMatchingPenunjang(it.nama_item, penunjangList)
+                const realIdx = latest!.P.indexOf(it)
                 return (
                   <TerapiRow
                     key={i}
                     item={it}
-                    index={latest!.P.indexOf(it)}
+                    index={realIdx}
                     noteId={latest!.id!}
                     noteDate={latest!.tanggal}
                     penunjangMatch={match}
                     onEdit={openEditTerapi}
                     onDelete={handleDeleteTerapi}
                     onToggleStatus={handleToggleTerapiStatus}
+                    isSelectionMode={isSelectionMode}
+                    isSelected={selectedTerapiIndices.includes(realIdx)}
+                    onSelectToggle={handleToggleSelectTerapi}
                   />
                 )
               })}
@@ -1636,92 +1869,116 @@ export default function PatientProfile() {
 
         {/* PTX Farmakologi */}
         {farmako.length > 0 && (
-          <div className="space-y-1.5 pt-2 border-t border-surface">
+          <div className="space-y-1.5 pt-2 border-t border-slate-100">
             <p className="h3 flex items-center gap-1.5 text-xs font-bold text-primary">
               <Pill size={14} /> Terapi Farmakologi (PTX)
             </p>
-            <div className="space-y-1 pl-1 divide-y divide-surface">
-              {farmako.map((it, i) => (
-                <TerapiRow
-                  key={i}
-                  item={it}
-                  index={latest!.P.indexOf(it)}
-                  noteId={latest!.id!}
-                  noteDate={latest!.tanggal}
-                  onEdit={openEditTerapi}
-                  onDelete={handleDeleteTerapi}
-                  onToggleStatus={handleToggleTerapiStatus}
-                />
-              ))}
+            <div className="space-y-0.5 divide-y divide-slate-100">
+              {farmako.map((it, i) => {
+                const realIdx = latest!.P.indexOf(it)
+                return (
+                  <TerapiRow
+                    key={i}
+                    item={it}
+                    index={realIdx}
+                    noteId={latest!.id!}
+                    noteDate={latest!.tanggal}
+                    onEdit={openEditTerapi}
+                    onDelete={handleDeleteTerapi}
+                    onToggleStatus={handleToggleTerapiStatus}
+                    isSelectionMode={isSelectionMode}
+                    isSelected={selectedTerapiIndices.includes(realIdx)}
+                    onSelectToggle={handleToggleSelectTerapi}
+                  />
+                )
+              })}
             </div>
           </div>
         )}
 
         {/* PTX Non-Farmakologi */}
         {nonFarmako.length > 0 && (
-          <div className="space-y-1.5 pt-2 border-t border-surface">
+          <div className="space-y-1.5 pt-2 border-t border-slate-100">
             <p className="h3 flex items-center gap-1.5 text-xs font-bold text-emerald-600">
               <HeartPulse size={14} /> Terapi Non-Farmakologi
             </p>
-            <div className="space-y-1 pl-1 divide-y divide-surface">
-              {nonFarmako.map((it, i) => (
-                <TerapiRow
-                  key={i}
-                  item={it}
-                  index={latest!.P.indexOf(it)}
-                  noteId={latest!.id!}
-                  noteDate={latest!.tanggal}
-                  onEdit={openEditTerapi}
-                  onDelete={handleDeleteTerapi}
-                  onToggleStatus={handleToggleTerapiStatus}
-                />
-              ))}
+            <div className="space-y-0.5 divide-y divide-slate-100">
+              {nonFarmako.map((it, i) => {
+                const realIdx = latest!.P.indexOf(it)
+                return (
+                  <TerapiRow
+                    key={i}
+                    item={it}
+                    index={realIdx}
+                    noteId={latest!.id!}
+                    noteDate={latest!.tanggal}
+                    onEdit={openEditTerapi}
+                    onDelete={handleDeleteTerapi}
+                    onToggleStatus={handleToggleTerapiStatus}
+                    isSelectionMode={isSelectionMode}
+                    isSelected={selectedTerapiIndices.includes(realIdx)}
+                    onSelectToggle={handleToggleSelectTerapi}
+                  />
+                )
+              })}
             </div>
           </div>
         )}
 
         {/* PMX Monitoring */}
         {monitoring.length > 0 && (
-          <div className="space-y-1.5 pt-2 border-t border-surface">
+          <div className="space-y-1.5 pt-2 border-t border-slate-100">
             <p className="h3 flex items-center gap-1.5 text-xs font-bold text-amber-600">
               <Activity size={14} /> Monitoring (PMX)
             </p>
-            <div className="space-y-1 pl-1 divide-y divide-surface">
-              {monitoring.map((it, i) => (
-                <TerapiRow
-                  key={i}
-                  item={it}
-                  index={latest!.P.indexOf(it)}
-                  noteId={latest!.id!}
-                  noteDate={latest!.tanggal}
-                  onEdit={openEditTerapi}
-                  onDelete={handleDeleteTerapi}
-                  onToggleStatus={handleToggleTerapiStatus}
-                />
-              ))}
+            <div className="space-y-0.5 divide-y divide-slate-100">
+              {monitoring.map((it, i) => {
+                const realIdx = latest!.P.indexOf(it)
+                return (
+                  <TerapiRow
+                    key={i}
+                    item={it}
+                    index={realIdx}
+                    noteId={latest!.id!}
+                    noteDate={latest!.tanggal}
+                    onEdit={openEditTerapi}
+                    onDelete={handleDeleteTerapi}
+                    onToggleStatus={handleToggleTerapiStatus}
+                    isSelectionMode={isSelectionMode}
+                    isSelected={selectedTerapiIndices.includes(realIdx)}
+                    onSelectToggle={handleToggleSelectTerapi}
+                  />
+                )
+              })}
             </div>
           </div>
         )}
 
         {/* PEX Edukasi */}
         {edukasi.length > 0 && (
-          <div className="space-y-1.5 pt-2 border-t border-surface">
+          <div className="space-y-1.5 pt-2 border-t border-slate-100">
             <p className="h3 flex items-center gap-1.5 text-xs font-bold text-violet-600">
               <ShieldCheck size={14} /> Edukasi Pasien & Keluarga (PEX)
             </p>
-            <div className="space-y-1 pl-1 divide-y divide-surface">
-              {edukasi.map((it, i) => (
-                <TerapiRow
-                  key={i}
-                  item={it}
-                  index={latest!.P.indexOf(it)}
-                  noteId={latest!.id!}
-                  noteDate={latest!.tanggal}
-                  onEdit={openEditTerapi}
-                  onDelete={handleDeleteTerapi}
-                  onToggleStatus={handleToggleTerapiStatus}
-                />
-              ))}
+            <div className="space-y-0.5 divide-y divide-slate-100">
+              {edukasi.map((it, i) => {
+                const realIdx = latest!.P.indexOf(it)
+                return (
+                  <TerapiRow
+                    key={i}
+                    item={it}
+                    index={realIdx}
+                    noteId={latest!.id!}
+                    noteDate={latest!.tanggal}
+                    onEdit={openEditTerapi}
+                    onDelete={handleDeleteTerapi}
+                    onToggleStatus={handleToggleTerapiStatus}
+                    isSelectionMode={isSelectionMode}
+                    isSelected={selectedTerapiIndices.includes(realIdx)}
+                    onSelectToggle={handleToggleSelectTerapi}
+                  />
+                )
+              })}
             </div>
           </div>
         )}
@@ -2065,7 +2322,7 @@ export default function PatientProfile() {
             Riwayat Rawat Terdahulu ({patient.riwayat_rawat.length}x)
           </p>
           <div className="space-y-2.5">
-            {[...patient.riwayat_rawat].reverse().map((ep, i) => {
+            {patient.riwayat_rawat.toReversed().map((ep, i) => {
               const h = allHospitals?.find((x) => x.id === ep.hospital_id)
               const w = allWards?.find((x) => x.id === ep.ward_id)
               const episodeIndex = patient.riwayat_rawat!.length - i
@@ -2108,7 +2365,7 @@ export default function PatientProfile() {
             <span>+ Visite Hari Ini</span>
           </button>
         </div>
-        {[...notes].reverse().map((n) => {
+        {notes.toReversed().map((n) => {
           const isKajianAwal = n.tipe_note === 'kajian_awal' || (n.tanggal === patient?.tgl_mrs && notes[0]?.id === n.id)
           const isVisite = n.tipe_note === 'visite'
           return (
@@ -2154,9 +2411,16 @@ export default function PatientProfile() {
             </div>
             {(['S', 'O_pemfis', 'O_penunjang'] as const).map((k) =>
               n[k] ? (
-                <p key={k} className="body-md text-xs leading-relaxed">
-                  <b className="text-ink-muted font-bold">{k === 'S' ? 'S' : k === 'O_pemfis' ? 'O - Fisik' : 'O - Penunjang'}:</b> {n[k]}
-                </p>
+                k === 'O_penunjang' ? (
+                  <div key={k} className="body-md text-xs leading-relaxed">
+                    <b className="text-ink-muted font-bold">O - Penunjang:</b>
+                    <FormattedPenunjang text={n[k]} className="mt-0.5" />
+                  </div>
+                ) : (
+                  <p key={k} className="body-md text-xs leading-relaxed">
+                    <b className="text-ink-muted font-bold">{k === 'S' ? 'S' : 'O - Fisik'}:</b> {k === 'O_pemfis' ? cleanDuplicateMedicalPrefixes(n[k]) : n[k]}
+                  </p>
+                )
               ) : null,
             )}
             {n.A && (
@@ -2653,6 +2917,17 @@ export default function PatientProfile() {
         </div>
       )}
 
+      {/* Modal Batch Edit Planning & Terapi */}
+      {batchModalOpen && latest && (
+        <BatchTerapiModal
+          isOpen={batchModalOpen}
+          onClose={() => setBatchModalOpen(false)}
+          items={latest.P || []}
+          noteDate={latest.tanggal}
+          onSave={handleBatchSaveFromModal}
+        />
+      )}
+
       {/* Modal Edit Item Terapi */}
       {editingTerapi && (
         <div
@@ -2801,7 +3076,7 @@ export default function PatientProfile() {
                     }}
                     className="size-4 rounded text-primary focus:ring-primary/20"
                   />
-                  <span>⚡ Lacak Obat (Tapering / Target Durasi)</span>
+                  <span>Lacak Obat (Tapering / Target Durasi)</span>
                 </label>
 
                 {editingTerapi.item.tracking && (
@@ -3039,7 +3314,7 @@ export default function PatientProfile() {
                     }}
                     className="size-4 rounded text-primary focus:ring-primary/20"
                   />
-                  <span>⚡ Lacak Obat (Tapering / Target Durasi)</span>
+                  <span>Lacak Obat (Tapering / Target Durasi)</span>
                 </label>
 
                 {newTerapiForm.tracking && (

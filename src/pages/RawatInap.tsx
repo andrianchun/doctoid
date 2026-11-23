@@ -26,6 +26,8 @@ import { useBodyScrollLock } from '../utils/useBodyScrollLock'
 import { appCache, cacheHospitals, cacheWards, cachePatients, cacheNotes } from '../utils/dataCache'
 import { cleanNamaDepan } from '../utils/patientName'
 import { triggerCloudSync } from '../sync'
+import { cleanDuplicateMedicalPrefixes } from '../utils/visitePemfis'
+import { FormattedPenunjang, cleanPenunjangText } from '../components/FormattedPenunjang'
 
 function cleanSubjective(raw?: string): string {
   if (!raw) return ''
@@ -222,6 +224,7 @@ function PatientCardContent({
   }
 
   const oPemfis = currentNote?.O_pemfis?.trim() || ''
+  const cleanedPemfis = useMemo(() => cleanDuplicateMedicalPrefixes(oPemfis), [oPemfis])
   const rawOPenunjang = currentNote?.O_penunjang?.trim() || ''
   const oPenunjang = useMemo(() => {
     if (!rawOPenunjang) return ''
@@ -232,17 +235,19 @@ function PatientCardContent({
       .trim()
   }, [rawOPenunjang])
 
-  const pemfisHighlights = useMemo(() => extractObjectivePositives(oPemfis, ''), [oPemfis])
-  const penunjangHighlights = useMemo(() => extractObjectivePositives('', oPenunjang), [oPenunjang])
+  const cleanedPenunjangText = useMemo(() => cleanPenunjangText(oPenunjang), [oPenunjang])
 
-  const oFisikSummary = pemfisHighlights.length > 0 ? pemfisHighlights.join(' · ') : oPemfis
-  const oPenunjangSummary = penunjangHighlights.length > 0 ? penunjangHighlights.join(' · ') : oPenunjang
+  const pemfisHighlights = useMemo(() => extractObjectivePositives(cleanedPemfis, ''), [cleanedPemfis])
+  const penunjangHighlights = useMemo(() => extractObjectivePositives('', cleanedPenunjangText), [cleanedPenunjangText])
 
-  const hasOFisik = !!(oFisikSummary || oPemfis)
+  const oFisikSummary = pemfisHighlights.length > 0 ? pemfisHighlights.join(' · ') : cleanedPemfis
+  const oPenunjangSummary = penunjangHighlights.length > 0 ? penunjangHighlights.join(' · ') : cleanedPenunjangText
+
+  const hasOFisik = !!(oFisikSummary || cleanedPemfis)
   const hasOPenunjang = !!(oPenunjangSummary || oPenunjang)
 
-  const canExpandOFisik = !!(oPemfis && (oPemfis !== oFisikSummary || oPemfis.length > 50))
-  const canExpandOPenunjang = !!(oPenunjang && (oPenunjang !== oPenunjangSummary || oPenunjang.length > 50))
+  const canExpandOFisik = !!(cleanedPemfis && (cleanedPemfis !== oFisikSummary || cleanedPemfis.length > 50))
+  const canExpandOPenunjang = !!(oPenunjang && (cleanedPenunjangText !== oPenunjangSummary || cleanedPenunjangText.length > 50))
 
   // A: Assessment
   const aSummary = diagnoses.join(' · ')
@@ -492,7 +497,7 @@ function PatientCardContent({
           </div>
         ) : (
           <div className="group mt-1.5 flex items-center justify-between gap-1 text-xs font-bold text-primary py-0.5">
-            <span className="truncate">Lihat Rekam Medis</span>
+            <span className="truncate">Lihat Buku Log Pasien</span>
             <ChevronRight size={14} className="shrink-0 text-primary/70 group-hover:translate-x-0.5 transition-transform" />
           </div>
         )
@@ -516,52 +521,69 @@ function PatientCardContent({
             </div>
           )}
 
-          {/* O: Objektif (Fisik + Penunjang sebagai sub-baris) */}
+          {/* O: Objektif (Fisik + Penunjang dengan hirarki tegas & master toggle) */}
           {(hasOFisik || hasOPenunjang) && (
             <div className="py-1.5 -mx-1 px-1">
               <div className="flex items-start gap-1.5">
-                <span className="font-bold text-primary text-xs shrink-0 mt-0.5">O:</span>
-                <div className="min-w-0 flex-1 space-y-0.5">
+                {/* Master Klik O: Toggle seluruh bagian Objektif */}
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    const isAnyOpen = !!(expandedSections['OFisik'] || expandedSections['OPenunjang'])
+                    setExpandedSections((prev) => ({
+                      ...prev,
+                      OFisik: !isAnyOpen,
+                      OPenunjang: !isAnyOpen,
+                    }))
+                  }}
+                  title="Klik O: untuk membuka/menutup seluruh temuan Objektif"
+                  className="font-bold text-primary text-xs shrink-0 mt-0.5 hover:underline cursor-pointer active:scale-95 transition-transform"
+                >
+                  O:
+                </button>
+
+                <div className="min-w-0 flex-1">
                   {/* Sub-baris 1: Fisik */}
                   {hasOFisik && (
                     <div
                       onClick={(e) => { if (canExpandOFisik) toggleSection('OFisik', e) }}
-                      className={`flex items-start justify-between gap-1.5 rounded-lg -mx-0.5 px-0.5 ${
-                        canExpandOFisik ? 'cursor-pointer hover:bg-slate-50/70 active:bg-slate-100/70' : ''
+                      className={`rounded-md -mx-1 px-1 py-0.5 transition-colors ${
+                        canExpandOFisik ? 'cursor-pointer hover:bg-slate-200/40 active:bg-slate-200/60' : ''
                       }`}
                     >
-                      <div className="min-w-0 flex-1">
-                        {!expandedSections['OFisik'] ? (
-                          <span className="text-ink font-medium break-words text-xs line-clamp-2 leading-relaxed">
-                            {oFisikSummary}
-                          </span>
-                        ) : (
-                          <p className="text-ink font-medium break-words leading-relaxed whitespace-pre-line text-xs">
-                            {oPemfis}
-                          </p>
-                        )}
-                      </div>
+                      {!expandedSections['OFisik'] ? (
+                        <span className="text-ink font-medium break-words text-xs line-clamp-2 leading-relaxed">
+                          {oFisikSummary}
+                        </span>
+                      ) : (
+                        <p className="text-ink font-medium break-words leading-relaxed whitespace-pre-line text-xs">
+                          {cleanedPemfis}
+                        </p>
+                      )}
                     </div>
                   )}
+
+                  {/* Separator halus antara Fisik & Penunjang */}
+                  {hasOFisik && hasOPenunjang && (
+                    <div className="my-1.5 border-t border-dashed border-slate-300/75" />
+                  )}
+
                   {/* Sub-baris 2: Penunjang */}
                   {hasOPenunjang && (
                     <div
                       onClick={(e) => { if (canExpandOPenunjang) toggleSection('OPenunjang', e) }}
-                      className={`flex items-start justify-between gap-1.5 rounded-lg -mx-0.5 px-0.5 ${
-                        canExpandOPenunjang ? 'cursor-pointer hover:bg-slate-50/70 active:bg-slate-100/70' : ''
+                      className={`rounded-md -mx-1 px-1 py-0.5 transition-colors ${
+                        canExpandOPenunjang ? 'cursor-pointer hover:bg-slate-200/40 active:bg-slate-200/60' : ''
                       }`}
                     >
-                      <div className="min-w-0 flex-1">
-                        {!expandedSections['OPenunjang'] ? (
-                          <span className="text-ink font-medium break-words text-xs line-clamp-2 leading-relaxed">
-                            {oPenunjangSummary}
-                          </span>
-                        ) : (
-                          <p className="text-ink font-medium break-words leading-relaxed whitespace-pre-line text-xs">
-                            {oPenunjang}
-                          </p>
-                        )}
-                      </div>
+                      {!expandedSections['OPenunjang'] ? (
+                        <span className="text-ink font-medium break-words text-xs line-clamp-2 leading-relaxed">
+                          {oPenunjangSummary}
+                        </span>
+                      ) : (
+                        <FormattedPenunjang text={oPenunjang} />
+                      )}
                     </div>
                   )}
                 </div>
@@ -607,64 +629,79 @@ function PatientCardContent({
           {(hasPdx || hasPtx) && (
             <div className="py-1.5 -mx-1 px-1">
               <div className="flex items-start gap-1.5">
-                <span className="font-bold text-primary text-xs shrink-0 mt-0.5">P:</span>
-                <div className="min-w-0 flex-1 space-y-2">
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    const isAnyOpen = !!(expandedSections['PDx'] || expandedSections['PTx'])
+                    setExpandedSections((prev) => ({
+                      ...prev,
+                      PDx: !isAnyOpen,
+                      PTx: !isAnyOpen,
+                    }))
+                  }}
+                  title="Klik P: untuk membuka/menutup seluruh rencana (PDx & PTx)"
+                  className="font-bold text-primary text-xs shrink-0 mt-0.5 hover:underline cursor-pointer active:scale-95 transition-transform"
+                >
+                  P:
+                </button>
+                <div className="min-w-0 flex-1">
                   {/* Sub-baris 1: PDx */}
                   {hasPdx && (
                     <div
                       onClick={(e) => { if (canExpandPdx) toggleSection('PDx', e) }}
-                      className={`flex items-start justify-between gap-1.5 rounded-lg -mx-0.5 px-0.5 ${
-                        canExpandPdx ? 'cursor-pointer hover:bg-slate-50/70 active:bg-slate-100/70' : ''
+                      className={`rounded-md -mx-1 px-1 py-0.5 transition-colors ${
+                        canExpandPdx ? 'cursor-pointer hover:bg-slate-200/40 active:bg-slate-200/60' : ''
                       }`}
                     >
-                      <div className="min-w-0 flex-1">
-                        {!expandedSections['PDx'] ? (
-                          <span className="text-ink font-medium break-words text-xs line-clamp-2">
-                            {pdxSummary}
-                          </span>
-                        ) : (
-                          <div className="space-y-1 text-xs">
-                            {diagnosticItems.map((item, idx) => (
-                              <div key={idx} className="flex items-start gap-1.5 text-ink font-medium">
-                                <span className="text-primary font-bold shrink-0 mt-0.5">•</span>
-                                <span className="break-words">
-                                   <b>{item.nama}</b>{item.hasil ? ` (${item.hasil})` : ''}
-                                </span>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
+                      {!expandedSections['PDx'] ? (
+                        <span className="text-ink font-medium break-words text-xs line-clamp-2 leading-relaxed">
+                          {pdxSummary}
+                        </span>
+                      ) : (
+                        <div className="space-y-1 text-xs">
+                          {diagnosticItems.map((item, idx) => (
+                            <div key={idx} className="flex items-start gap-1.5 text-ink font-medium">
+                              <span className="text-primary font-bold shrink-0 mt-0.5">•</span>
+                              <span className="break-words">
+                                <b>{item.nama}</b>{item.hasil ? ` (${item.hasil})` : ''}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   )}
+
+                  {/* Separator halus antara PDx & PTx */}
+                  {hasPdx && hasPtx && (
+                    <div className="my-1.5 border-t border-dashed border-slate-300/75" />
+                  )}
+
                   {/* Sub-baris 2: PTx */}
                   {hasPtx && (
                     <div
                       onClick={(e) => { if (canExpandPtx) toggleSection('PTx', e) }}
-                      className={`flex items-start justify-between gap-1.5 rounded-lg -mx-0.5 px-0.5 ${
-                        hasPdx ? 'pt-2 border-t border-slate-100/90' : ''
-                      } ${
-                        canExpandPtx ? 'cursor-pointer hover:bg-slate-50/70 active:bg-slate-100/70' : ''
+                      className={`rounded-md -mx-1 px-1 py-0.5 transition-colors ${
+                        canExpandPtx ? 'cursor-pointer hover:bg-slate-200/40 active:bg-slate-200/60' : ''
                       }`}
                     >
-                      <div className="min-w-0 flex-1">
-                        {!expandedSections['PTx'] ? (
-                          <span className="text-ink font-medium break-words text-xs line-clamp-5 leading-relaxed">
-                            {ptxSummary}
-                          </span>
-                        ) : (
-                          <div className="space-y-1 text-xs">
-                            {ptxItems.map((item, idx) => (
-                              <div key={idx} className="flex items-start gap-1.5 text-ink font-medium">
-                                <span className="text-primary font-bold shrink-0 mt-0.5">•</span>
-                                <span className="break-words">
-                                  <b>{item.nama_item}</b> {item.dosis_keterangan}
-                                </span>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
+                      {!expandedSections['PTx'] ? (
+                        <span className="text-ink font-medium break-words text-xs line-clamp-5 leading-relaxed">
+                          {ptxSummary}
+                        </span>
+                      ) : (
+                        <div className="space-y-1 text-xs">
+                          {ptxItems.map((item, idx) => (
+                            <div key={idx} className="flex items-start gap-1.5 text-ink font-medium">
+                              <span className="text-primary font-bold shrink-0 mt-0.5">•</span>
+                              <span className="break-words">
+                                <b>{item.nama_item}</b> {item.dosis_keterangan}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -689,20 +726,19 @@ function PatientCardContent({
       {/* Badges & Tombol Visite di Kanan Bawah */}
       <div className="mt-2.5 space-y-1.5">
         {trackedMeds.length > 0 && (
-          <div className="flex flex-wrap items-center gap-1 pt-1 border-t border-slate-100">
+          <div className="flex flex-wrap items-center gap-1.5 pt-1 border-t border-slate-100">
             {trackedMeds.map((m, idx) => (
               <span
                 key={idx}
-                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-bold ${
+                className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-bold ${
                   m.isTaper
-                    ? 'bg-amber-100/90 text-amber-900 border border-amber-300'
-                    : 'bg-indigo-50 text-indigo-800 border border-indigo-200'
+                    ? 'bg-amber-50 text-amber-800 border border-amber-200/80'
+                    : 'bg-indigo-50 text-indigo-800 border border-indigo-200/80'
                 }`}
                 title={`${m.name} ${m.dosis} (Hari ke-${m.hari}${m.target ? ` dari ${m.target}` : ''})`}
               >
-                <span>{m.isTaper ? '⚡' : '⏱'}</span>
-                <span className="truncate max-w-[120px] font-extrabold">{m.name}</span>
-                <span className="opacity-80">H-{m.hari}{m.target ? `/${m.target}` : ''}</span>
+                <span className="truncate max-w-[140px]">{m.name}</span>
+                <span className="opacity-75">H-{m.hari}{m.target ? `/${m.target}` : ''}</span>
               </span>
             ))}
           </div>
@@ -1393,7 +1429,7 @@ export default function RawatInap() {
     const withSMap = new Map<number, ProgressNote>()
     if (!allNotes) return { latestNoteMap: latestMap, latestNoteWithSMap: withSMap }
 
-    const sorted = [...allNotes].sort((a, b) => {
+    const sorted = allNotes.toSorted((a, b) => {
       const tA = a.tanggal ? new Date(a.tanggal).getTime() : 0
       const tB = b.tanggal ? new Date(b.tanggal).getTime() : 0
       if (tA !== tB) return tA - tB

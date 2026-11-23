@@ -7,7 +7,7 @@ const TABS = [
   { to: '/brainstorm', label: 'Catat Pasien', Icon: PenLine },
   { to: '/rawatinap', label: 'Rawat Inap', Icon: BedDouble },
   { to: '/rawatjalan', label: 'Rawat Jalan', Icon: Stethoscope },
-  { to: '/rekammedis', label: 'Rekam Medis', Icon: FolderOpen },
+  { to: '/rekammedis', label: 'Buku Log', Icon: FolderOpen },
 ]
 
 export default function Layout() {

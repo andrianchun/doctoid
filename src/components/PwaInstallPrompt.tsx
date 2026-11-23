@@ -15,7 +15,7 @@ export default function PwaInstallPrompt({
   appName = 'Doctoid',
   appLogo = '/icon.svg',
   fallbackLogo = '/favicon.svg',
-  description = 'Install aplikasi Doctoid di perangkatmu untuk akses rekam medis offline cepat, praktis, dan aman.',
+  description = 'Install aplikasi Doctoid di perangkatmu untuk akses buku log pasien offline cepat, praktis, dan aman.',
   storageKey = '__DOCTOID_PWA_PROMPT_DISMISSED',
   accentColor = 'bg-blue-600 hover:bg-blue-500 text-white',
 }: PwaInstallPromptProps) {

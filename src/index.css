@@ -294,3 +294,28 @@ body.scroll-locked {
   overscroll-behavior: none !important;
 }
 
+/* ==========================================================================
+   ANTI-DOWNLOAD MANAGER / IDM EXTENSION SUPPRESSION
+   Mencegah ekstensi IDM menginjeksi bilah melayang "Download video from this page"
+   ========================================================================== */
+#idm_floating_bar,
+div[id*="idm"],
+div[class*="idm"],
+embed[type*="application/x-idm"],
+.idm_panel,
+.idm-extension-bar {
+  display: none !important;
+  opacity: 0 !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+  position: absolute !important;
+  top: -9999px !important;
+  left: -9999px !important;
+  width: 0 !important;
+  height: 0 !important;
+  max-width: 0 !important;
+  max-height: 0 !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+}
+

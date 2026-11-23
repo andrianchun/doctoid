@@ -926,7 +926,7 @@ async function syncInboxToFirestore(inboxList) {
     let pendingItems = inboxList
       .filter((i) => i.status === 'pending')
       .slice(0, 15)
-      .map((it) => JSON.parse(JSON.stringify(it)))
+      .map((it) => structuredClone(it))
 
     function buildPayload(items) {
       return {

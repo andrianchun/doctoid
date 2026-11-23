@@ -181,15 +181,12 @@ export async function registerFcmTokenToServer(token: string) {
   // 1. Kirim langsung ke Gateway VM Port 3001
   try {
     const gatewayUrl = localStorage.getItem('doctoid_wa_gateway_url') || 'http://35.255.95.161:3001'
-    const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), 4000)
     await fetch(`${gatewayUrl}/api/register-fcm-token`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ token, registered_at: new Date().toISOString() }),
-      signal: controller.signal,
+      signal: AbortSignal.timeout(4000),
     })
-    clearTimeout(timer)
   } catch {}
 
   // 2. Simpan juga ke Cloud Firestore doctoid/fcm_tokens (Port 443 HTTPS, selalu tembus seluler)

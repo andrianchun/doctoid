@@ -1,4 +1,6 @@
 import { db, type TerapiItem } from '../db'
+import { normalizePenunjangText, resolvePenunjangModalityName } from './penunjangNormalizer'
+import { cleanDuplicateMedicalPrefixes } from './visitePemfis'
 
 /**
  * Utility untuk membersihkan data rekam medis yang sudah tersimpan di database lokal Dexie.
@@ -158,15 +160,7 @@ export async function sanitizeMedicalRecordsInDb(): Promise<{ penunjangCleaned: 
         const master = group[0]
         if (!master.id) continue
 
-        let namaBaku = 'Pemeriksaan Penunjang'
-        const lowerHasil = (master.hasil || '').toLowerCase()
-        if (katKey === 'Radiologi') {
-          namaBaku = /ct[\s-]?scan|msct/i.test(lowerHasil) ? 'CT Scan Kepala' : 'Pemeriksaan Radiologi'
-        } else if (katKey === 'Laboratorium') {
-          namaBaku = 'Pemeriksaan Laboratorium'
-        } else if (/ekg/i.test(lowerHasil)) {
-          namaBaku = 'EKG 12-Lead'
-        }
+        const namaBaku = resolvePenunjangModalityName(katKey as 'Radiologi' | 'Laboratorium' | 'Lainnya', master.hasil || '')
 
         // Kumpulkan seluruh lampiran dari seluruh file teknis dalam kelompok
         const allAtts = group.flatMap((g) => g.attachments || [])
@@ -180,6 +174,7 @@ export async function sanitizeMedicalRecordsInDb(): Promise<{ penunjangCleaned: 
         // Update master record
         await db.penunjang.update(master.id, {
           nama_pemeriksaan: namaBaku,
+          hasil: master.hasil ? normalizePenunjangText(master.hasil) : master.hasil,
           attachments: uniqueAtts,
         })
         penunjangCleaned++
@@ -192,6 +187,40 @@ export async function sanitizeMedicalRecordsInDb(): Promise<{ penunjangCleaned: 
             penunjangCleaned++
           }
         }
+      }
+    }
+
+    // 2b. Standarisasi seluruh data db.penunjang yang tersimpan
+    const remainingPenunjang = await db.penunjang.toArray()
+    for (const pen of remainingPenunjang) {
+      if (!pen.id) continue
+      let penChanged = false
+      let nextNama = pen.nama_pemeriksaan || ''
+      if (/^Pemeriksaan\s+Laboratorium$/i.test(nextNama.trim())) {
+        nextNama = 'Lab'
+        penChanged = true
+      } else if (/^Pemeriksaan\s+Radiologi$/i.test(nextNama.trim())) {
+        nextNama = 'Radiologi'
+        penChanged = true
+      } else if (/^(?:Foto\s+)?(?:Rontgen|Ro\.?)\s+Thorax$/i.test(nextNama.trim())) {
+        nextNama = 'Xray Thorax'
+        penChanged = true
+      } else if (/^EKG\s+12[-\s]?Lead$/i.test(nextNama.trim())) {
+        nextNama = 'EKG'
+        penChanged = true
+      }
+
+      const normHasil = pen.hasil ? normalizePenunjangText(pen.hasil) : ''
+      if (pen.hasil && normHasil !== pen.hasil) {
+        penChanged = true
+      }
+
+      if (penChanged) {
+        await db.penunjang.update(pen.id, {
+          nama_pemeriksaan: nextNama,
+          hasil: pen.hasil ? normHasil : pen.hasil,
+        })
+        penunjangCleaned++
       }
     }
 
@@ -294,11 +323,23 @@ export async function sanitizeMedicalRecordsInDb(): Promise<{ penunjangCleaned: 
         }
       }
 
-      // Bersihkan O_penunjang jika ada nama file teknis
+      // Bersihkan O_pemfis dari duplikasi prefix medis
+      let cleanedOPemfis = note.O_pemfis || ''
+      if (note.O_pemfis) {
+        const nextPemfis = cleanDuplicateMedicalPrefixes(note.O_pemfis)
+        if (nextPemfis !== note.O_pemfis) {
+          cleanedOPemfis = nextPemfis
+          hasChanges = true
+        }
+      }
+
+      // Bersihkan & seragamkan O_penunjang (nama file teknis, [Laboratorium]: -> Lab:, radiologi ringkas)
       let cleanedOPenunjang = note.O_penunjang || ''
-      if (cleanedOPenunjang && isTechnicalFilename(cleanedOPenunjang)) {
-        const lines = cleanedOPenunjang.split('\n').filter((l) => !isTechnicalFilename(l))
-        cleanedOPenunjang = lines.join('\n').trim()
+      if (cleanedOPenunjang) {
+        if (isTechnicalFilename(cleanedOPenunjang)) {
+          cleanedOPenunjang = cleanedOPenunjang.split('\n').filter((l) => !isTechnicalFilename(l)).join('\n').trim()
+        }
+        cleanedOPenunjang = normalizePenunjangText(cleanedOPenunjang)
         if (cleanedOPenunjang !== note.O_penunjang) {
           hasChanges = true
         }
@@ -308,13 +349,14 @@ export async function sanitizeMedicalRecordsInDb(): Promise<{ penunjangCleaned: 
         await db.progressNotes.update(note.id, {
           A: cleanedA,
           P: cleanedP,
+          O_pemfis: cleanedOPemfis,
           O_penunjang: cleanedOPenunjang,
         })
         notesCleaned++
       }
     }
 
-    // 4. Sanitasi tabel db.inboxQueue (konsul WhatsApp Sukani & Suroso)
+    // 4. Sanitasi tabel db.inboxQueue (konsul WhatsApp Sukani & Suroso + format O_pemfis/O_penunjang)
     const allInbox = await db.inboxQueue.toArray()
     for (const item of allInbox) {
       if (!item.id) continue
@@ -350,6 +392,21 @@ export async function sanitizeMedicalRecordsInDb(): Promise<{ penunjangCleaned: 
           jaminan: 'BPJS',
         }
         itemChanged = true
+      }
+
+      if (item.parsed_data?.O_pemfis) {
+        const nextPemfis = cleanDuplicateMedicalPrefixes(item.parsed_data.O_pemfis)
+        if (nextPemfis !== item.parsed_data.O_pemfis) {
+          item.parsed_data = { ...item.parsed_data, O_pemfis: nextPemfis }
+          itemChanged = true
+        }
+      }
+      if (item.parsed_data?.O_penunjang) {
+        const nextPenunjang = normalizePenunjangText(item.parsed_data.O_penunjang)
+        if (nextPenunjang !== item.parsed_data.O_penunjang) {
+          item.parsed_data = { ...item.parsed_data, O_penunjang: nextPenunjang }
+          itemChanged = true
+        }
       }
 
       if (itemChanged) {

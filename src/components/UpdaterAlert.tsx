@@ -86,23 +86,17 @@ export default function UpdaterAlert() {
       let res: Response | null = null
 
       try {
-        const controller = new AbortController()
-        const timeoutId = setTimeout(() => controller.abort(), 8000)
         res = await fetch(`${primaryUrl}?t=${Date.now()}`, {
           cache: 'no-store',
-          signal: controller.signal,
+          signal: AbortSignal.timeout(8000),
         })
-        clearTimeout(timeoutId)
       } catch {
         if (!isNative) {
           try {
-            const controller2 = new AbortController()
-            const timeoutId2 = setTimeout(() => controller2.abort(), 8000)
             res = await fetch(`https://docto-id.web.app/ota/version.json?t=${Date.now()}`, {
               cache: 'no-store',
-              signal: controller2.signal,
+              signal: AbortSignal.timeout(8000),
             })
-            clearTimeout(timeoutId2)
           } catch {
             return
           }
@@ -292,7 +286,7 @@ export default function UpdaterAlert() {
             <DoctoidBrandIcon className="size-20" />
             <h2 className="text-xl font-black text-ink tracking-tight mt-1">Pembaruan Wajib!</h2>
             <p className="caption text-xs text-ink-muted px-2">
-              Versi terbaru Doctoid telah tersedia. Dokter perlu memperbarui aplikasi untuk melanjutkan akses rekam medis.
+              Versi terbaru Doctoid telah tersedia. Dokter perlu memperbarui aplikasi untuk melanjutkan akses buku log pasien.
             </p>
             <p className="text-xs font-bold text-primary tabular-nums mt-1">{versionLine}</p>
           </div>

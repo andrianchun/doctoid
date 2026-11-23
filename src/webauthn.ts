@@ -22,7 +22,7 @@ export async function verifyBiometric(): Promise<boolean> {
       const info = await BiometricAuth.checkBiometry()
       if (info.isAvailable && info.biometryType !== BiometryType.none) {
         await BiometricAuth.authenticate({
-          reason: 'Verifikasi identitas dokter untuk membuka data rekam medis',
+          reason: 'Verifikasi identitas dokter untuk membuka buku log pasien',
           cancelTitle: 'Batal',
           allowDeviceCredential: true,
         })

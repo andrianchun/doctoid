@@ -133,7 +133,7 @@ export default function RekamMedis() {
     <main className="space-y-5 p-5">
       {/* Banner — 1 Baris */}
       <div className="glass-blue-hero rounded-3xl px-5 py-4 text-white shadow-xl flex items-center justify-between">
-        <h1 className="h1 text-2xl font-black text-white">Rekam Medis</h1>
+        <h1 className="h1 text-2xl font-black text-white">Buku Log Pasien</h1>
         <span className="text-xs font-bold text-white/90">Total {patients?.length ?? 0} Pasien</span>
       </div>
 

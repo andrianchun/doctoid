@@ -132,7 +132,75 @@ export function formatKlString(
   return base
 }
 
-export function parsePemfisFromString(raw: string): VisitePemfisState {
+/**
+ * Membersihkan duplikasi prefix medis berulang yang tidak sengaja terakumulasi
+ * (mis. "R. Fisio: R. Fisio: ... Refleks Fisiologis: dbn" -> "R. Fisio: dbn",
+ * "Thorax: dbn Abdomen: dbn Ekstremitas: dbn" -> pemisahan baris yang benar).
+ */
+export function cleanDuplicateMedicalPrefixes(text?: string): string {
+  if (!text || !text.trim()) return ''
+
+  let cleaned = text
+
+  // 1. Bersihkan Thorax yang menelan Abdomen / Ekstremitas di baris yang sama
+  cleaned = cleaned.replace(/(Thorax\s*:[^\n]*?)\s+(?:Abdomen|Abd)\s*:[^\n]*/gi, '$1')
+
+  // 2. Bersihkan Abdomen yang menelan Ekstremitas di baris yang sama
+  cleaned = cleaned.replace(/(Abdomen\s*:[^\n]*?)\s+(?:Ekstremitas|Ext)\s*:[^\n]*/gi, '$1')
+
+  // 3. Bersihkan duplikasi prefix berulang pada awal baris
+  const prefixPatterns: { regex: RegExp; canonical: string }[] = [
+    { regex: /^(?:(?:N(?:ervus)?\.?\s*(?:Cranialis|[0-9]+|[IVX]+)|N\.?\s*Cranialis)\s*[:-]?\s*)+/gi, canonical: 'N Cranialis: ' },
+    { regex: /^(?:(?:R\.?\s*Fisio(?:logis)?|Refleks\s*Fisiologis|RF)\s*[:-]?\s*)+/gi, canonical: 'R. Fisio: ' },
+    { regex: /^(?:(?:R\.?\s*Pato(?:logis)?|Refleks\s*Patologis|RP)\s*[:-]?\s*)+/gi, canonical: 'R. Pato: ' },
+    { regex: /^(?:(?:Sensorik|Sensibilitas)\s*[:-]?\s*)+/gi, canonical: 'Sensorik: ' },
+    { regex: /^(?:(?:Tonus(?:\s*Otot)?)\s*[:-]?\s*)+/gi, canonical: 'Tonus: ' },
+    { regex: /^(?:(?:Autonom|Otonom|Vegetatif)\s*[:-]?\s*)+/gi, canonical: 'Autonom: ' },
+    { regex: /^(?:(?:MS|TRM|Meningeal(?:\s*Sign)?)\s*[:-]?\s*)+/gi, canonical: 'MS: ' },
+    { regex: /^(?:(?:Cor|Jantung)\s*[:-]?\s*)+/gi, canonical: 'Cor: ' },
+    { regex: /^(?:(?:Thorax|Pulmo|Tho)\s*[:-]?\s*)+/gi, canonical: 'Thorax: ' },
+    { regex: /^(?:(?:Abdomen|Abd)\s*[:-]?\s*)+/gi, canonical: 'Abdomen: ' },
+    { regex: /^(?:(?:Ekstremitas|Ext)\s*[:-]?\s*)+/gi, canonical: 'Ekstremitas: ' },
+    { regex: /^(?:(?:MMT|Motorik|Kekuatan(?:\s*Otot)?)\s*[:-]?\s*)+/gi, canonical: 'MMT: ' },
+  ]
+
+  let lines = cleaned.split('\n')
+  lines = lines.map((line) => {
+    let l = line.trim()
+    if (!l) return ''
+
+    // Bersihkan kasus MMT yang kemasukan R. Fisio / Refleks
+    if (/^MMT\s*:/i.test(l) && /(?:R\.?\s*Fisio|Refleks\s*Fisiologis)/i.test(l)) {
+      l = l.replace(/(?:R\.?\s*Fisio(?:logis)?|Refleks\s*Fisiologis|RF)\s*[:-]?\s*[^\n,;]+(?:,\s*)?/gi, '')
+      l = l.replace(/^MMT\s*:\s*,\s*/i, 'MMT: ')
+    }
+
+    // Bersihkan prefix berulang pada awal baris
+    for (const { regex, canonical } of prefixPatterns) {
+      regex.lastIndex = 0
+      if (regex.test(l)) {
+        const rest = l.replace(regex, '').trim()
+        l = canonical + rest
+      }
+    }
+
+    // Khusus N Cranialis: bersihkan juga jika ada "N. Cranialis:" di tengah baris (mis. "Pupil/TR: Isokor / +; N. Cranialis: Afasia motorik")
+    if (/^N Cranialis:/i.test(l)) {
+      l = l.replace(/;\s*N(?:ervus)?\.?\s*Cranialis\s*[:-]?\s*/gi, '; ')
+    }
+
+    return l
+  })
+
+  // Bersihkan baris kosong berturut-turut
+  return lines.filter((line, idx, arr) => {
+    if (!line && !arr[idx - 1]) return false
+    return true
+  }).join('\n')
+}
+
+export function parsePemfisFromString(rawInput: string): VisitePemfisState {
+  const raw = cleanDuplicateMedicalPrefixes(rawInput)
   const state: VisitePemfisState = {
     ku: 'cukup',
     gcs_e: '4',
@@ -313,7 +381,10 @@ export function parsePemfisFromString(raw: string): VisitePemfisState {
   // 9. Cor
   const corMatch = raw.match(/\b(?:Cor|Jantung|Kardio)\s*[:-]?\s*([^\n;]+)/i)
   if (corMatch) {
-    state.cor = corMatch[1].trim()
+    let val = corMatch[1].trim()
+    val = val.replace(/\s+(?:Thorax|Pulmo|Tho|Abdomen|Abd|Ekstremitas|Ext)\s*:[^\n]*/gi, '')
+    val = val.replace(/^(?:Cor|Jantung|Kardio)\s*[:-]?\s*/gi, '')
+    state.cor = val.trim()
     if (!state.activeKeys.includes('cor')) state.activeKeys.push('cor')
   } else if (/S1\s*S2/i.test(raw)) {
     state.cor = 'S1 S2 tunggal reguler, murmur (-), gallop (-)'
@@ -328,7 +399,10 @@ export function parsePemfisFromString(raw: string): VisitePemfisState {
   if (thoraxMatch || hasVesPattern || hasRhPattern || hasWhPattern) {
     if (!state.activeKeys.includes('thorax')) state.activeKeys.push('thorax')
     if (thoraxMatch) {
-      state.thorax_custom = thoraxMatch[1].trim()
+      let val = thoraxMatch[1].trim()
+      val = val.replace(/\s+(?:Abdomen|Abd|Ekstremitas|Ext|Cor)\s*:[^\n]*/gi, '')
+      val = val.replace(/^(?:Thorax|Tho|Pulmo|Paru)\s*[:-]?\s*/gi, '')
+      state.thorax_custom = val.trim()
     } else {
       state.thorax_custom = 'Pulmo: vesikuler (+/+), Rh (-/-), Wh (-/-)'
     }
@@ -340,7 +414,10 @@ export function parsePemfisFromString(raw: string): VisitePemfisState {
   if (abdMatch || hasAbdPattern) {
     if (!state.activeKeys.includes('abdomen')) state.activeKeys.push('abdomen')
     if (abdMatch) {
-      state.abdomen_custom = abdMatch[1].trim()
+      let val = abdMatch[1].trim()
+      val = val.replace(/\s+(?:Ekstremitas|Ext|Thorax|Cor)\s*:[^\n]*/gi, '')
+      val = val.replace(/^(?:Abdomen|Abd|Perut)\s*[:-]?\s*/gi, '')
+      state.abdomen_custom = val.trim()
     } else {
       state.abdomen_custom = 'Supel, BU (+) normal, NT (-)'
     }
@@ -352,7 +429,10 @@ export function parsePemfisFromString(raw: string): VisitePemfisState {
   if (extMatch || hasExtPattern) {
     if (!state.activeKeys.includes('ekstremitas')) state.activeKeys.push('ekstremitas')
     if (extMatch) {
-      state.ekstremitas_custom = extMatch[1].trim()
+      let val = extMatch[1].trim()
+      val = val.replace(/\s+(?:Status|Neurologis|GCS|Thorax|Abdomen)\s*:[^\n]*/gi, '')
+      val = val.replace(/^(?:Ekstremitas|Ext|Ekstr)\s*[:-]?\s*/gi, '')
+      state.ekstremitas_custom = val.trim()
     } else {
       state.ekstremitas_custom = 'Akral hangat, CRT < 2s, Edema (-/-)'
     }
@@ -361,7 +441,9 @@ export function parsePemfisFromString(raw: string): VisitePemfisState {
   // 13. MS (Meningeal Sign / TRM)
   const msMatch = raw.match(/\b(?:MS|TRM|Meningeal(?:\s*Sign)?|Kaku\s*kuduk|Kaku\s*leher|Kernig|Brudzinski)\s*[:-]?\s*([^\n;]+)/i)
   if (msMatch) {
-    state.ms = msMatch[1].trim()
+    let val = msMatch[1].trim()
+    val = val.replace(/^(?:(?:MS|TRM|Meningeal(?:\s*Sign)?|Kaku\s*kuduk|Kaku\s*leher)\s*[:-]?\s*)+/gi, '')
+    state.ms = val.trim()
     state.meningeal = state.ms
     if (!state.activeKeys.includes('ms')) state.activeKeys.push('ms')
   }
@@ -371,8 +453,10 @@ export function parsePemfisFromString(raw: string): VisitePemfisState {
   const ncRegex = /(?:^|\n)\s*(?:N(?:ervus)?\.?\s*(?:[IVX]+(?:\s*-\s*[IVX]+)?|[0-9]+(?:\s*-\s*[0-9]+)?|Cranialis)|Pupil(?:s)?|PBI)\s*[:-]?\s*([^\n]+)/gi
   let ncMatch: RegExpExecArray | null
   while ((ncMatch = ncRegex.exec(raw)) !== null) {
-    const fullMatched = ncMatch[0].trim()
-    ncLines.push(fullMatched)
+    let val = (ncMatch[1] || ncMatch[0]).trim()
+    val = val.replace(/^(?:(?:N(?:ervus)?\.?\s*(?:Cranialis|[0-9]+|[IVX]+)|N\.?\s*Cranialis)\s*[:-]?\s*)+/gi, '').trim()
+    val = val.replace(/;\s*N(?:ervus)?\.?\s*Cranialis\s*[:-]?\s*/gi, '; ')
+    if (val) ncLines.push(val)
   }
   if (ncLines.length === 0) {
     const pbiMatch = raw.match(/(?:^|\n)\s*(?:PBI|Pupil|Reflek\s*cahaya)\b[^\n]*/i)
@@ -391,7 +475,9 @@ export function parsePemfisFromString(raw: string): VisitePemfisState {
     raw.match(/\b(?:R\.?\s*Fisio(?:logis)?|Refleks\s*Fisiologis|RF)\s*[:-]?\s*([^\n;]+)/i) ||
     raw.match(/\b(?:BPR|TPR|KPR|APR)\s*[:-]?\s*([^\n;]+)/i)
   if (rfisioMatch) {
-    state.rfisio = rfisioMatch[1] ? (rfisioMatch[0].includes(':') ? rfisioMatch[0] : rfisioMatch[1]).trim() : rfisioMatch[0].trim()
+    let val = (rfisioMatch[1] || rfisioMatch[0]).trim()
+    val = val.replace(/^(?:(?:R\.?\s*Fisio(?:logis)?|Refleks\s*Fisiologis|RF)\s*[:-]?\s*)+/gi, '').trim()
+    state.rfisio = val
     if (!state.activeKeys.includes('rfisio')) state.activeKeys.push('rfisio')
   }
 
@@ -399,14 +485,18 @@ export function parsePemfisFromString(raw: string): VisitePemfisState {
   const rpatoMatch =
     raw.match(/\b(?:R\.?\s*Pato(?:logis)?|Refleks\s*Patologis|RP|Babinski|Chaddock|Hoffman|Tromner)\s*[:-]?\s*([^\n;]+)/i)
   if (rpatoMatch) {
-    state.rpato = rpatoMatch[1] ? (rpatoMatch[0].includes(':') ? rpatoMatch[0] : rpatoMatch[1]).trim() : rpatoMatch[0].trim()
+    let val = (rpatoMatch[1] || rpatoMatch[0]).trim()
+    val = val.replace(/^(?:(?:R\.?\s*Pato(?:logis)?|Refleks\s*Patologis|RP)\s*[:-]?\s*)+/gi, '').trim()
+    state.rpato = val
     if (!state.activeKeys.includes('rpato')) state.activeKeys.push('rpato')
   }
 
   // 17. Tonus Otot
   const tonusMatch = raw.match(/\b(?:Tonus(?:\s*Otot)?)\s*[:-]?\s*([^\n;]+)/i)
   if (tonusMatch) {
-    state.tonus = tonusMatch[1].trim()
+    let val = tonusMatch[1].trim()
+    val = val.replace(/^(?:(?:Tonus(?:\s*Otot)?)\s*[:-]?\s*)+/gi, '').trim()
+    state.tonus = val
     if (!state.activeKeys.includes('tonus')) state.activeKeys.push('tonus')
   }
 
@@ -427,14 +517,19 @@ export function parsePemfisFromString(raw: string): VisitePemfisState {
 
   let combinedMmt = ''
   if (mmtMatch && mmtMatch[1] && mmtMatch[1].trim() && !/^(?:Temuan|Hasil)/i.test(mmtMatch[1].trim())) {
-    combinedMmt = mmtMatch[1].trim()
+    let v = mmtMatch[1].trim()
+    v = v.replace(/(?:R\.?\s*Fisio(?:logis)?|Refleks\s*Fisiologis|RF)\s*[:-]?\s*[^\n,;]+(?:,\s*)?/gi, '')
+    v = v.replace(/^(?:MMT|Motorik|Kekuatan(?:\s*Otot)?)\s*[:-]?\s*/gi, '')
+    combinedMmt = v.trim()
   } else if (mmtFractions.length > 0) {
     combinedMmt = mmtFractions.join(' / ')
   }
 
   if (latMatch) {
     const latStr = latMatch[0].trim()
-    combinedMmt = combinedMmt ? `${combinedMmt}, ${latStr}` : latStr
+    if (!combinedMmt.toLowerCase().includes(latStr.toLowerCase())) {
+      combinedMmt = combinedMmt ? `${combinedMmt}, ${latStr}` : latStr
+    }
   }
 
   if (combinedMmt) {
@@ -446,14 +541,18 @@ export function parsePemfisFromString(raw: string): VisitePemfisState {
   // 19. Sensorik
   const sensorikMatch = raw.match(/\b(?:Sensorik|Sensibilitas|Hemihipestesi|Hemihipalgesia)\s*[:-]?\s*([^\n;]+)/i)
   if (sensorikMatch) {
-    state.sensorik = sensorikMatch[1] ? (sensorikMatch[0].includes(':') ? sensorikMatch[0] : sensorikMatch[1]).trim() : sensorikMatch[0].trim()
+    let val = (sensorikMatch[1] || sensorikMatch[0]).trim()
+    val = val.replace(/^(?:(?:Sensorik|Sensibilitas)\s*[:-]?\s*)+/gi, '').trim()
+    state.sensorik = val
     if (!state.activeKeys.includes('sensorik')) state.activeKeys.push('sensorik')
   }
 
   // 20. Autonom
   const autonomMatch = raw.match(/\b(?:Autonom|Otonom|Vegetatif)\s*[:-]?\s*([^\n;]+)/i)
   if (autonomMatch) {
-    state.autonom = autonomMatch[1].trim()
+    let val = autonomMatch[1].trim()
+    val = val.replace(/^(?:(?:Autonom|Otonom|Vegetatif)\s*[:-]?\s*)+/gi, '').trim()
+    state.autonom = val
     if (!state.activeKeys.includes('autonom')) state.activeKeys.push('autonom')
   }
 
@@ -571,19 +670,20 @@ export function formatPemfisToString(state: VisitePemfisState): string {
     internaLines.push(`Kep/Leher: ${state.kl.trim()}`)
   }
   if (state.activeKeys.includes('cor')) {
-    internaLines.push(`Cor: ${state.cor.trim() || 'S1 S2 tunggal reguler, murmur (-), gallop (-)'}`)
+    const rawCor = (state.cor.trim() || 'S1 S2 tunggal reguler, murmur (-), gallop (-)').replace(/^(?:Cor|Jantung)\s*[:-]?\s*/gi, '')
+    internaLines.push(`Cor: ${rawCor}`)
   }
   if (state.activeKeys.includes('thorax')) {
-    const val = state.thorax_custom.trim() || 'Pulmo: vesikuler (+/+), Rh (-/-), Wh (-/-)'
-    internaLines.push(val.toLowerCase().startsWith('thorax:') ? val : `Thorax: ${val}`)
+    let val = (state.thorax_custom.trim() || 'Pulmo: vesikuler (+/+), Rh (-/-), Wh (-/-)').replace(/^(?:Thorax|Pulmo|Tho)\s*[:-]?\s*/gi, '')
+    internaLines.push(`Thorax: ${val}`)
   }
   if (state.activeKeys.includes('abdomen')) {
-    const val = state.abdomen_custom.trim() || 'Supel, BU (+) normal, NT (-)'
-    internaLines.push(val.toLowerCase().startsWith('abdomen:') ? val : `Abdomen: ${val}`)
+    let val = (state.abdomen_custom.trim() || 'Supel, BU (+) normal, NT (-)').replace(/^(?:Abdomen|Abd)\s*[:-]?\s*/gi, '')
+    internaLines.push(`Abdomen: ${val}`)
   }
   if (state.activeKeys.includes('ekstremitas')) {
-    const val = state.ekstremitas_custom.trim() || 'Akral hangat, CRT < 2s, Edema (-/-)'
-    internaLines.push(val.toLowerCase().startsWith('ekstremitas:') ? val : `Ekstremitas: ${val}`)
+    let val = (state.ekstremitas_custom.trim() || 'Akral hangat, CRT < 2s, Edema (-/-)').replace(/^(?:Ekstremitas|Ext)\s*[:-]?\s*/gi, '')
+    internaLines.push(`Ekstremitas: ${val}`)
   }
 
   if (internaLines.length > 0) {
@@ -598,32 +698,37 @@ export function formatPemfisToString(state: VisitePemfisState): string {
     const m = parseInt(state.gcs_m, 10) || 6
     neuroLines.push(`GCS: E${e}V${v}M${m} (${e + v + m})`)
   }
-  const msVal = state.ms || state.meningeal || ''
-  if ((state.activeKeys.includes('ms') || state.activeKeys.includes('meningeal')) && msVal.trim()) {
-    neuroLines.push(`MS: ${msVal.trim()}`)
+  const msVal = (state.ms || state.meningeal || '').replace(/^(?:(?:MS|TRM|Meningeal(?:\s*Sign)?|Kaku\s*kuduk|Kaku\s*leher)\s*[:-]?\s*)+/gi, '').trim()
+  if ((state.activeKeys.includes('ms') || state.activeKeys.includes('meningeal')) && msVal) {
+    neuroLines.push(`MS: ${msVal}`)
   }
-  const ncVal = state.n_cranialis || state.pupil || ''
-  if ((state.activeKeys.includes('n_cranialis') || state.activeKeys.includes('pupil')) && ncVal.trim()) {
-    neuroLines.push(`N Cranialis: ${ncVal.trim()}`)
+  const ncVal = (state.n_cranialis || state.pupil || '').replace(/^(?:(?:N(?:ervus)?\.?\s*(?:Cranialis|[0-9]+|[IVX]+)|N\.?\s*Cranialis)\s*[:-]?\s*)+/gi, '').trim()
+  if ((state.activeKeys.includes('n_cranialis') || state.activeKeys.includes('pupil')) && ncVal) {
+    neuroLines.push(`N Cranialis: ${ncVal}`)
   }
   if (state.activeKeys.includes('rfisio') && state.rfisio.trim()) {
-    neuroLines.push(`R. Fisio: ${state.rfisio.trim()}`)
+    const clean = state.rfisio.replace(/^(?:(?:R\.?\s*Fisio(?:logis)?|Refleks\s*Fisiologis|RF)\s*[:-]?\s*)+/gi, '').trim()
+    neuroLines.push(`R. Fisio: ${clean}`)
   }
   if (state.activeKeys.includes('rpato') && state.rpato.trim()) {
-    neuroLines.push(`R. Pato: ${state.rpato.trim()}`)
+    const clean = state.rpato.replace(/^(?:(?:R\.?\s*Pato(?:logis)?|Refleks\s*Patologis|RP)\s*[:-]?\s*)+/gi, '').trim()
+    neuroLines.push(`R. Pato: ${clean}`)
   }
   if (state.activeKeys.includes('tonus') && state.tonus.trim()) {
-    neuroLines.push(`Tonus: ${state.tonus.trim()}`)
+    const clean = state.tonus.replace(/^(?:(?:Tonus(?:\s*Otot)?)\s*[:-]?\s*)+/gi, '').trim()
+    neuroLines.push(`Tonus: ${clean}`)
   }
-  const mmtVal = state.mmt || state.motorik || ''
-  if ((state.activeKeys.includes('mmt') || state.activeKeys.includes('motorik')) && mmtVal.trim()) {
-    neuroLines.push(`MMT: ${mmtVal.trim()}`)
+  const mmtVal = (state.mmt || state.motorik || '').replace(/^(?:(?:MMT|Motorik|Kekuatan(?:\s*Otot)?)\s*[:-]?\s*)+/gi, '').trim()
+  if ((state.activeKeys.includes('mmt') || state.activeKeys.includes('motorik')) && mmtVal) {
+    neuroLines.push(`MMT: ${mmtVal}`)
   }
   if (state.activeKeys.includes('sensorik') && state.sensorik.trim()) {
-    neuroLines.push(`Sensorik: ${state.sensorik.trim()}`)
+    const clean = state.sensorik.replace(/^(?:(?:Sensorik|Sensibilitas)\s*[:-]?\s*)+/gi, '').trim()
+    neuroLines.push(`Sensorik: ${clean}`)
   }
   if (state.activeKeys.includes('autonom') && state.autonom.trim()) {
-    neuroLines.push(`Autonom: ${state.autonom.trim()}`)
+    const clean = state.autonom.replace(/^(?:(?:Autonom|Otonom|Vegetatif)\s*[:-]?\s*)+/gi, '').trim()
+    neuroLines.push(`Autonom: ${clean}`)
   }
 
   if (neuroLines.length > 0) {
@@ -636,7 +741,7 @@ export function formatPemfisToString(state: VisitePemfisState): string {
     sections.push(`Status Lokalis:\n${customLines.join('\n')}`)
   }
 
-  return sections.join('\n\n')
+  return cleanDuplicateMedicalPrefixes(sections.join('\n\n'))
 }
 
 export interface VisitePenunjangItem {
@@ -680,11 +785,21 @@ export function parsePenunjangFromString(raw: string): VisitePenunjangItem[] {
   const lines = raw.split('\n').map((l) => l.trim()).filter(Boolean)
   const items: VisitePenunjangItem[] = []
 
-  for (const line of lines) {
-    // Abaikan header kategori pembatas murni seperti [Laboratorium] atau [Radiologi] jika berdiri sendiri
-    if (/^\[[^\]]+\]$/.test(line)) {
+  for (const rawLine of lines) {
+    // Abaikan header kategori pembatas murni seperti [Laboratorium]:, Lab:, EKG:, atau Radiologi: jika berdiri sendiri tanpa nilai
+    if (/^\[[^\]]+\]:?$/.test(rawLine)) {
       continue
     }
+    if (/^(?:Lab(?:oratorium)?|EKG|ECG|Radiologi(?:\s*-\s*[^:\n]+)?|Penunjang|Lainnya)\s*:$/i.test(rawLine)) {
+      continue
+    }
+
+    const line = rawLine
+      .replace(/^\[([^\]]+)\]\s*:?\s*/, (_, cat) => {
+        const cleanCat = cat.trim().replace(/\bLaboratorium\b/gi, 'Lab')
+        return cleanCat ? `${cleanCat}: ` : ''
+      })
+      .trim()
 
     // Jika baris berisi beberapa hasil dipisah pipe `|`, misal: "Hb: 12.5 | Leu: 9800 | Plt: 250000"
     if (line.includes('|')) {

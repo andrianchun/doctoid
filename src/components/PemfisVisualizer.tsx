@@ -1070,7 +1070,7 @@ export const PemfisVisualizer: React.FC<PemfisVisualizerProps> = ({
               className="w-full flex items-center justify-between text-xs font-bold text-slate-600 hover:text-ink cursor-pointer"
             >
               <span className="flex items-center gap-1.5">
-                <span>Pratinjau Hasil Catatan Rekam Medis (Auto-Generated)</span>
+                <span>Pratinjau Hasil Catatan Buku Log Pasien (Auto-Generated)</span>
               </span>
               {showLivePreview ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
             </button>

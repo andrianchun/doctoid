@@ -32,7 +32,7 @@ export default function ClinicalTrendingView({ notes }: ClinicalTrendingViewProp
 
   // Sort notes chronologically (oldest to newest for trend analysis)
   const timelineData: TrendPoint[] = useMemo(() => {
-    const sorted = [...notes].sort((a, b) => new Date(a.tanggal).getTime() - new Date(b.tanggal).getTime())
+    const sorted = notes.toSorted((a, b) => new Date(a.tanggal).getTime() - new Date(b.tanggal).getTime())
     return sorted.map((n) => ({
       date: n.tanggal,
       noteId: n.id,
@@ -436,7 +436,7 @@ export default function ClinicalTrendingView({ notes }: ClinicalTrendingViewProp
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {[...ttvPoints].reverse().map((p, idx) => {
+                  {ttvPoints.toReversed().map((p, idx) => {
                     const t = p.metrics.ttv
                     return (
                       <tr key={idx} className="hover:bg-slate-50/50">
@@ -564,7 +564,7 @@ export default function ClinicalTrendingView({ notes }: ClinicalTrendingViewProp
             <div className="space-y-2">
               <p className="text-xs font-bold text-ink">Riwayat Pemeriksaan Kesadaran Harian</p>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                {[...gcsPoints].reverse().map((p, idx) => {
+                {gcsPoints.toReversed().map((p, idx) => {
                   const g = p.metrics.gcs
                   return (
                     <div key={idx} className="flex items-center justify-between p-3 rounded-2xl border border-slate-100 bg-white/70">
@@ -603,7 +603,7 @@ export default function ClinicalTrendingView({ notes }: ClinicalTrendingViewProp
 
             {motorikPoints.length > 0 ? (
               <div className="space-y-2.5">
-                {[...motorikPoints].reverse().map((p, idx) => {
+                {motorikPoints.toReversed().map((p, idx) => {
                   const m = p.metrics.motorik
                   return (
                     <div key={idx} className="rounded-2xl border border-slate-100 bg-surface/40 p-3 space-y-2">

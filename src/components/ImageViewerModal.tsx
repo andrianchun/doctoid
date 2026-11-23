@@ -8,10 +8,10 @@ import {
   RotateCw,
   ChevronLeft,
   ChevronRight,
-  Download,
   RefreshCw,
   Eye,
   EyeOff,
+  FileText,
 } from 'lucide-react'
 import { useUi } from '../store'
 import { verifyBiometric } from '../webauthn'
@@ -229,17 +229,6 @@ export const ImageViewerModal: React.FC<ImageViewerModalProps> = ({
     setIsDragging(false)
   }
 
-  const handleDownload = () => {
-    const src = currentImage.dataUrl || normalizeMediaUrl(currentImage.url, currentImage.name) || currentImage.url
-    if (!src) return
-    const a = document.createElement('a')
-    a.href = src
-    a.download = currentImage.name || `lampiran-${Date.now()}.webp`
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
-  }
-
   if (!isOpen || images.length === 0) return null
 
   return createPortal(
@@ -290,15 +279,6 @@ export const ImageViewerModal: React.FC<ImageViewerModalProps> = ({
           </button>
           <button
             type="button"
-            onClick={handleDownload}
-            aria-label="Unduh Berkas"
-            title="Unduh Berkas"
-            className="p-2 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors cursor-pointer"
-          >
-            <Download size={17} />
-          </button>
-          <button
-            type="button"
             onClick={onClose}
             aria-label="Tutup Galeri"
             title="Tutup (Esc)"
@@ -332,15 +312,17 @@ export const ImageViewerModal: React.FC<ImageViewerModalProps> = ({
           className="max-h-full max-w-full flex items-center justify-center will-change-transform"
         >
           {currentImage.type?.startsWith('video/') || currentImage.url?.endsWith('.mp4') || currentImage.url?.endsWith('.webm') ? (
-            <video
-              src={currentImage.url}
-              controls
-              autoPlay
-              playsInline
-              className={`max-h-[82vh] max-w-[96vw] rounded-lg shadow-2xl transition-all duration-200 pointer-events-auto ${
-                !unmasked ? 'blur-md scale-105' : ''
-              }`}
-            />
+            <div className="flex flex-col items-center justify-center p-8 text-center text-slate-300 bg-slate-900/95 rounded-2xl border border-slate-800 max-w-sm mx-4 space-y-3 shadow-2xl">
+              <div className="size-14 rounded-2xl bg-blue-500/10 border border-blue-500/20 text-blue-400 flex items-center justify-center">
+                <FileText size={28} />
+              </div>
+              <span className="text-sm font-bold text-white truncate max-w-full">
+                {currentImage.name || 'Berkas Video Klinis'}
+              </span>
+              <p className="text-xs text-slate-400 leading-relaxed">
+                Pemutaran video dinonaktifkan demi privasi dan keamanan berkas medis.
+              </p>
+            </div>
           ) : imgError ? (
             <div className="flex flex-col items-center justify-center p-6 text-center text-slate-300 bg-slate-900/90 rounded-2xl border border-slate-800 max-w-sm mx-4 space-y-3 shadow-2xl">
               <span className="text-xs font-bold text-slate-200 truncate max-w-full">

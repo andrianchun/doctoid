@@ -53,6 +53,7 @@ import {
 } from '../utils/waInboxSync'
 import { splitTitleAndName, cleanNamaDepan, isValidPatientName } from '../utils/patientName'
 import { convertToWebP } from '../utils/mediaCompress'
+import { normalizePenunjangText, resolvePenunjangModalityName } from '../utils/penunjangNormalizer'
 
 const today = () => getLocalDateString()
 
@@ -245,7 +246,7 @@ export default function Brainstorm() {
   const allPatients = useLiveQuery(() => db.patients.toArray(), [], [])
   const pendingInboxItems = useLiveQuery(() => db.inboxQueue?.where('status').equals('pending').toArray(), [], []) || []
   const sortedPendingInboxItems = useMemo(() => {
-    return [...pendingInboxItems].sort((a, b) => {
+    return pendingInboxItems.toSorted((a, b) => {
       const timeA = new Date(a.created_at || a.id || 0).getTime()
       const timeB = new Date(b.created_at || b.id || 0).getTime()
       return timeB - timeA
@@ -541,9 +542,9 @@ export default function Brainstorm() {
       const hasAttachmentTag = (tag: string) => processedAttachments.some((a) => a.tag?.toLowerCase() === tag.toLowerCase())
       const isAlreadyInPenunjang = (name: string) => {
         const nLower = name.toLowerCase()
-        if (nLower.includes('ekg') && (hasAttachmentTag('EKG') || /\[ekg\]/i.test(finalO_penunjang))) return true
-        if ((nLower.includes('ct') || nLower.includes('scan') || nLower.includes('radiologi')) && (hasAttachmentTag('Radiologi') || /\[radiologi\]/i.test(finalO_penunjang))) return true
-        if ((nLower.includes('darah') || nLower.includes('lab') || nLower.includes('kimia') || nLower.includes('gds')) && (hasAttachmentTag('Lab') || /\[laboratorium\]/i.test(finalO_penunjang))) return true
+        if (nLower.includes('ekg') && (hasAttachmentTag('EKG') || /(?:\[ekg\]|\bekg\s*:)/i.test(finalO_penunjang))) return true
+        if ((nLower.includes('ct') || nLower.includes('scan') || nLower.includes('radiologi')) && (hasAttachmentTag('Radiologi') || /(?:\[radiologi\]|\bradiologi\b)/i.test(finalO_penunjang))) return true
+        if ((nLower.includes('darah') || nLower.includes('lab') || nLower.includes('kimia') || nLower.includes('gds')) && (hasAttachmentTag('Lab') || /(?:\[laboratorium\]|\b(?:lab|laboratorium)\s*:)/i.test(finalO_penunjang))) return true
         if (nLower.includes('thorax') && (hasAttachmentTag('Radiologi') || /thorax/i.test(finalO_penunjang))) return true
         return false
       }
@@ -635,9 +636,9 @@ export default function Brainstorm() {
         const hasAttachmentTag = (tag: string) => attachments.some((a) => (a as any).tag?.toLowerCase() === tag.toLowerCase())
         const isAlreadyInPenunjang = (name: string) => {
           const nLower = name.toLowerCase()
-          if (nLower.includes('ekg') && (hasAttachmentTag('EKG') || /\[ekg\]/i.test(form.O_penunjang))) return true
-          if ((nLower.includes('ct') || nLower.includes('scan') || nLower.includes('radiologi')) && (hasAttachmentTag('Radiologi') || /\[radiologi\]/i.test(form.O_penunjang))) return true
-          if ((nLower.includes('darah') || nLower.includes('lab') || nLower.includes('kimia') || nLower.includes('gds')) && (hasAttachmentTag('Lab') || /\[laboratorium\]/i.test(form.O_penunjang))) return true
+          if (nLower.includes('ekg') && (hasAttachmentTag('EKG') || /(?:\[ekg\]|\bekg\s*:)/i.test(form.O_penunjang))) return true
+          if ((nLower.includes('ct') || nLower.includes('scan') || nLower.includes('radiologi')) && (hasAttachmentTag('Radiologi') || /(?:\[radiologi\]|\bradiologi\b)/i.test(form.O_penunjang))) return true
+          if ((nLower.includes('darah') || nLower.includes('lab') || nLower.includes('kimia') || nLower.includes('gds')) && (hasAttachmentTag('Lab') || /(?:\[laboratorium\]|\b(?:lab|laboratorium)\s*:)/i.test(form.O_penunjang))) return true
           if (nLower.includes('thorax') && (hasAttachmentTag('Radiologi') || /thorax/i.test(form.O_penunjang))) return true
           return false
         }
@@ -1044,6 +1045,7 @@ export default function Brainstorm() {
         if (form.O_penunjang.trim()) {
           mergedPenunjang = mergedPenunjang ? `${mergedPenunjang}\n${form.O_penunjang.trim()}` : form.O_penunjang.trim()
         }
+        mergedPenunjang = normalizePenunjangText(mergedPenunjang)
 
         // Gabungkan A (Diagnosis) tanpa duplikasi nama
         const existingDxNames = new Set(existingTodayNote.A.map((d) => d.nama_diagnosis.trim().toLowerCase()))
@@ -1077,10 +1079,11 @@ export default function Brainstorm() {
         })
       } else {
         // Catatan pertama untuk hari ini
+        const cleanPenunjang = normalizePenunjangText(form.O_penunjang.trim())
         const metrics = extractClinicalMetrics({
           S: form.S.trim(),
           O_pemfis: form.O_pemfis.trim(),
-          O_penunjang: form.O_penunjang.trim(),
+          O_penunjang: cleanPenunjang,
         })
 
         const isNewPatientAdmission = !selectedPatient
@@ -1093,7 +1096,7 @@ export default function Brainstorm() {
           tipe_note: isNewPatientAdmission ? 'kajian_awal' : 'visite',
           S: form.S.trim(),
           O_pemfis: form.O_pemfis.trim(),
-          O_penunjang: form.O_penunjang.trim(),
+          O_penunjang: cleanPenunjang,
           A: form.A.filter((d) => d.nama_diagnosis.trim()),
           P: form.P,
           attachments: attachments.map((a) => ({ name: a.name, type: a.type, dataUrl: a.dataUrl, url: a.url, kategori: a.kategori, tag: a.tag })),
@@ -1127,23 +1130,17 @@ export default function Brainstorm() {
           }
         }
 
+        const cleanHasil = normalizePenunjangText(form.O_penunjang)
         for (const [katKey, atts] of Object.entries(groups) as ['Radiologi' | 'Laboratorium' | 'Lainnya', typeof penunjangAtts][]) {
           if (atts.length === 0) continue
-          let namaBaku = 'Pemeriksaan Penunjang'
-          if (katKey === 'Radiologi') {
-            namaBaku = /ct[\s-]?scan|msct/i.test(form.O_penunjang) ? 'CT Scan Kepala' : 'Pemeriksaan Radiologi'
-          } else if (katKey === 'Laboratorium') {
-            namaBaku = 'Pemeriksaan Laboratorium'
-          } else if (/ekg/i.test(form.O_penunjang)) {
-            namaBaku = 'EKG 12-Lead'
-          }
+          const namaBaku = resolvePenunjangModalityName(katKey, form.O_penunjang)
 
           await db.penunjang.add({
             patient_id: p.id,
             tanggal: todayStr,
             kategori: katKey,
             nama_pemeriksaan: namaBaku,
-            hasil: form.O_penunjang || 'Dokumen hasil pemeriksaan terlampir',
+            hasil: cleanHasil || 'Dokumen hasil pemeriksaan terlampir',
             status: 'selesai',
             attachments: atts.map((att) => ({ id: att.id, name: att.name, type: att.type, dataUrl: att.dataUrl, url: att.url })),
             created_at: new Date().toISOString(),
@@ -1685,7 +1682,7 @@ export default function Brainstorm() {
         ? 'Lepas Rawat'
         : 'KRS'
       const confirmReadmission = window.confirm(
-        `Pasien ${detectedPatient.title || ''} ${detectedPatient.nama_depan} (No. RM: ${detectedPatient.no_rm}) sudah ada di Rekam Medis (Status: ${keluarLabel}).\n\nApakah ini episode RAWAT INAP BARU (Readmisi)?\n\n• Klik OK untuk menghubungkan rekam medis dan arsipkan riwayat rawat sebelumnya.\n• Klik Batal untuk membuat data pasien baru terpisah.`
+        `Pasien ${detectedPatient.title || ''} ${detectedPatient.nama_depan} (No. RM: ${detectedPatient.no_rm}) sudah ada di Buku Log Pasien (Status: ${keluarLabel}).\n\nApakah ini episode RAWAT INAP BARU (Readmisi)?\n\n• Klik OK untuk menghubungkan riwayat buku log dan arsipkan riwayat rawat sebelumnya.\n• Klik Batal untuk membuat data pasien baru terpisah.`
       )
       if (confirmReadmission) {
         patientToUse = detectedPatient
@@ -1769,10 +1766,11 @@ export default function Brainstorm() {
       }) as number
     }
 
+    const cleanPenunjang = normalizePenunjangText(form.O_penunjang)
     const metrics = extractClinicalMetrics({
       S: form.S,
       O_pemfis: form.O_pemfis,
-      O_penunjang: form.O_penunjang,
+      O_penunjang: cleanPenunjang,
     })
 
     const noteDate = form.tgl_mrs || today()
@@ -1785,7 +1783,7 @@ export default function Brainstorm() {
       tanggal: noteDate,
       waktu: nowTime,
       tipe_note: isNewAdmission ? 'kajian_awal' : 'visite',
-      S: form.S, O_pemfis: form.O_pemfis, O_penunjang: form.O_penunjang, A: form.A, P: form.P,
+      S: form.S, O_pemfis: form.O_pemfis, O_penunjang: cleanPenunjang, A: form.A, P: form.P,
       attachments: attachments.map(a => ({ name: a.name, type: a.type, dataUrl: a.dataUrl, url: a.url, kategori: a.kategori, tag: a.tag })),
       metrics,
     })
@@ -1818,21 +1816,14 @@ export default function Brainstorm() {
 
       for (const [katKey, atts] of Object.entries(groups) as ['Radiologi' | 'Laboratorium' | 'Lainnya', typeof penunjangAtts][]) {
         if (atts.length === 0) continue
-        let namaBaku = 'Pemeriksaan Penunjang'
-        if (katKey === 'Radiologi') {
-          namaBaku = /ct[\s-]?scan|msct/i.test(form.O_penunjang) ? 'CT Scan Kepala' : 'Pemeriksaan Radiologi'
-        } else if (katKey === 'Laboratorium') {
-          namaBaku = 'Pemeriksaan Laboratorium'
-        } else if (/ekg/i.test(form.O_penunjang)) {
-          namaBaku = 'EKG 12-Lead'
-        }
+        const namaBaku = resolvePenunjangModalityName(katKey, form.O_penunjang)
 
         await db.penunjang.add({
           patient_id: targetPatientId,
           tanggal: noteDate,
           kategori: katKey,
           nama_pemeriksaan: namaBaku,
-          hasil: form.O_penunjang || 'Dokumen hasil pemeriksaan terlampir',
+          hasil: cleanPenunjang || 'Dokumen hasil pemeriksaan terlampir',
           status: 'selesai',
           attachments: atts.map((att) => ({ id: att.id, name: att.name, type: att.type, dataUrl: att.dataUrl, url: att.url })),
           created_at: new Date().toISOString(),
@@ -2334,8 +2325,8 @@ export default function Brainstorm() {
               <button
                 type="button"
                 onClick={() => pemfisAttachRef.current?.click()}
-                title="Lampirkan Foto/Video Pemeriksaan Fisik"
-                aria-label="Lampirkan Foto/Video Pemeriksaan Fisik"
+                title="Lampirkan Foto Pemeriksaan Fisik"
+                aria-label="Lampirkan Foto Pemeriksaan Fisik"
                 className="p-1.5 rounded-xl text-slate-500 hover:text-primary hover:bg-primary/10 transition-colors cursor-pointer"
               >
                 <Paperclip size={16} />
@@ -2915,8 +2906,8 @@ export default function Brainstorm() {
       )}
 
       {/* hidden inputs */}
-      <input ref={pemfisAttachRef} type="file" accept="image/*,video/*,audio/*" hidden onChange={(e) => e.target.files?.[0] && handleAttachFile(e.target.files[0], 'pemfis')} />
-      <input ref={penunjangAttachRef} type="file" accept="image/*,.pdf,audio/*,video/*" hidden onChange={(e) => e.target.files?.[0] && handleAttachFile(e.target.files[0], 'penunjang')} />
+      <input ref={pemfisAttachRef} type="file" accept="image/*" hidden onChange={(e) => e.target.files?.[0] && handleAttachFile(e.target.files[0], 'pemfis')} />
+      <input ref={penunjangAttachRef} type="file" accept="image/*,.pdf" hidden onChange={(e) => e.target.files?.[0] && handleAttachFile(e.target.files[0], 'penunjang')} />
 
       <input ref={ocrCameraRef} type="file" accept="image/*" capture="environment" hidden onChange={(e) => e.target.files?.[0] && runOcr(e.target.files[0])} />
       <input ref={ocrGalleryRef} type="file" accept="image/*" hidden onChange={(e) => e.target.files?.[0] && runOcr(e.target.files[0])} />
@@ -3164,7 +3155,7 @@ export default function Brainstorm() {
             <div className="flex items-center justify-between border-b border-slate-200 p-4">
               <div>
                 <p className="text-xs font-bold text-ink">Pilih Pasien Lama (Readmisi)</p>
-                <p className="caption text-ink-muted">Pilih pasien untuk menyambungkan riwayat rawat inap & rekam medis</p>
+                <p className="caption text-ink-muted">Pilih pasien untuk menyambungkan riwayat rawat inap & buku log pasien</p>
               </div>
               <button onClick={() => setShowSearchModal(false)} aria-label="Tutup" className="cursor-pointer rounded-full p-1.5 text-ink-muted hover:bg-slate-100">
                 <X size={20} />
@@ -3262,7 +3253,7 @@ export default function Brainstorm() {
                   </div>
 
                   <div className="space-y-1">
-                    <h4 className="text-sm font-bold text-slate-900">Memproses Rekam Medis</h4>
+                    <h4 className="text-sm font-bold text-slate-900">Memproses Buku Log Pasien</h4>
                     <p className="text-xs text-slate-500 leading-relaxed px-1">
                       {importStepText || 'Sedang memproses lampiran & data konsul...'}
                     </p>
@@ -3524,7 +3515,7 @@ export default function Brainstorm() {
                             importingInboxId ? 'opacity-40 pointer-events-none' : 'hover:bg-primary-deep'
                           }`}
                         >
-                          Gunakan di Rekam Medis
+                          Gunakan di Buku Log Pasien
                         </button>
                       </div>
                     </div>

@@ -2,6 +2,8 @@ import type { Jaminan, KategoriTerapi, RegexField, PoliLogItem } from './db'
 import { getNeuroLockPrompt, getAnalisisInstruksi, RAPIKAN_INSTRUKSI, DIRECT_EDIT_INSTRUKSI } from './prompts'
 import { db } from './db'
 import { sanitizePiiForAi, restorePiiFromAi } from './utils/privacySanitizer'
+import { normalizePenunjangText } from './utils/penunjangNormalizer'
+import { cleanDuplicateMedicalPrefixes } from './utils/visitePemfis'
 
 class APIError extends Error {
   status: number
@@ -37,7 +39,7 @@ function getProvider(key: string): 'openai' | 'google' | 'anthropic' {
 /* Fase Hemat Token & Kecepatan: Google Gemini Flash selalu prioritas #1 (kuota token melimpah & latensi rendah), baru OpenAI gpt-4o-mini */
 const PROVIDER_COST_TIER: Record<string, number> = { google: 0, openai: 1, anthropic: 2 }
 function cheapestFirst(keys: string[]): string[] {
-  return [...keys].sort((a, b) => (PROVIDER_COST_TIER[getProvider(a)] ?? 99) - (PROVIDER_COST_TIER[getProvider(b)] ?? 99))
+  return keys.toSorted((a, b) => (PROVIDER_COST_TIER[getProvider(a)] ?? 99) - (PROVIDER_COST_TIER[getProvider(b)] ?? 99))
 }
 
 const GOOGLE_MODELS = ['gemini-3.5-flash', 'gemini-flash-latest', 'gemini-3.8-flash']
@@ -192,7 +194,14 @@ export async function rapikan(text: string, attachments: { type: string; dataUrl
         resultText = restorePiiFromAi(resultText, originalTokens)
       }
 
-      return JSON.parse(resultText)
+      const parsed = JSON.parse(resultText) as RapikanResult
+      if (parsed.O_pemfis) {
+        parsed.O_pemfis = cleanDuplicateMedicalPrefixes(parsed.O_pemfis)
+      }
+      if (parsed.O_penunjang) {
+        parsed.O_penunjang = normalizePenunjangText(parsed.O_penunjang)
+      }
+      return parsed
     } catch (err: any) {
       lastError = err
       if (err.name === 'APIError' && [400, 401, 403, 404, 429, 500, 502, 503, 504].includes(err.status)) {
@@ -232,7 +241,7 @@ export async function analisisKasus(formStateStr: string): Promise<AnalisisResul
             model: 'gpt-4o-mini',
             messages: [
               { role: 'system', content: systemPrompt },
-              { role: 'user', content: `Data Rekam Medis Pasien saat ini:\n\n${formStateStr}\n\nLakukan analisis klinis, tambahkan terapi/diagnosis yang tertinggal atau koreksi bila ada kontraindikasi.` }
+              { role: 'user', content: `Data Buku Log Pasien saat ini:\n\n${formStateStr}\n\nLakukan analisis klinis, tambahkan terapi/diagnosis yang tertinggal atau koreksi bila ada kontraindikasi.` }
             ],
             response_format: { type: 'json_object' },
             temperature: 0.1,
@@ -247,7 +256,7 @@ export async function analisisKasus(formStateStr: string): Promise<AnalisisResul
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               systemInstruction: { parts: [{ text: systemPrompt }] },
-              contents: [{ parts: [{ text: `Data Rekam Medis Pasien saat ini:\n\n${formStateStr}\n\nLakukan analisis klinis, tambahkan terapi/diagnosis yang tertinggal atau koreksi bila ada kontraindikasi.` }] }],
+              contents: [{ parts: [{ text: `Data Buku Log Pasien saat ini:\n\n${formStateStr}\n\nLakukan analisis klinis, tambahkan terapi/diagnosis yang tertinggal atau koreksi bila ada kontraindikasi.` }] }],
               generationConfig: { responseMimeType: 'application/json', temperature: 0.1 }
             }),
           })

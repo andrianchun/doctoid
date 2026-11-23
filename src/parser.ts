@@ -1,6 +1,8 @@
 import { db, type TerapiItem, type DiagnosisItem, type Jaminan, type RegexRule, type RegexField } from './db'
 import { getLocalDateString } from './utils/dateFormat'
 import { isValidPatientName, isGenderToken as checkGenderToken } from './utils/patientName'
+import { normalizePenunjangText } from './utils/penunjangNormalizer'
+import { cleanDuplicateMedicalPrefixes } from './utils/visitePemfis'
 
 /* Deteksi token jenis kelamin (L/P/Laki-laki/Perempuan) agar tidak pernah salah dibaca sebagai nama pasien */
 export function isGenderToken(str: string): boolean {
@@ -1071,8 +1073,8 @@ export function localParse(raw: string, learnedRules: RegexRule[] = []): { data:
   const today = getLocalDateString()
 
   const S = sec.S.join('\n').trim()
-  const O_pemfis = sec.O_pemfis.join('\n').trim()
-  const O_penunjang = sec.O_penunjang.join('\n').trim()
+  const O_pemfis = cleanDuplicateMedicalPrefixes(sec.O_pemfis.join('\n').trim())
+  const O_penunjang = normalizePenunjangText(sec.O_penunjang.join('\n').trim())
   const A = parseDiagnosisLines(sec.A)
   const P = parsePlanningLines(sec.P, today)
 

@@ -18,7 +18,7 @@ export interface NotificationExtraPayload {
  */
 export async function notifyParserFinished(
   patientName: string,
-  detail: string = 'Data siap diterapkan ke rekam medis',
+  detail: string = 'Data siap diterapkan ke buku log pasien',
   extraData?: NotificationExtraPayload
 ) {
   const title = 'SIMRS / WA Selesai Diparsing'

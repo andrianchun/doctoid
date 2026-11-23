@@ -80,10 +80,7 @@ export const WhatsAppIntegrationCard: React.FC<WhatsAppIntegrationCardProps> = (
       } catch {}
 
       // 2. Hubungi controller server gateway port 3001 sebagai alternatif
-      const controller = new AbortController()
-      const timer = setTimeout(() => controller.abort(), 3000)
-      const res = await fetch(`${getGatewayBase()}/api/status?t=${Date.now()}`, { signal: controller.signal })
-      clearTimeout(timer)
+      const res = await fetch(`${getGatewayBase()}/api/status?t=${Date.now()}`, { signal: AbortSignal.timeout(3000) })
       if (res.ok) {
         const data = await res.json()
         setBotState(data)
@@ -445,7 +442,7 @@ export const WhatsAppIntegrationCard: React.FC<WhatsAppIntegrationCardProps> = (
             <p className="leading-relaxed">
               1. <b>Grup &quot;{botState.clinicalGroupName || 'Doctobot by Doctoid'}&quot;</b> aktif dengan logo resmi dan panduan rujukan medis di WhatsApp Anda.<br />
               2. Di grup IGD / bangsal RS, tandai pesan / foto lab / rontgen / video kejang &gt; klik <b>Forward (Panah Teruskan)</b> &gt; kirim ke grup <b>&quot;Doctobot by Doctoid&quot;</b>.<br />
-              3. <b>Keamanan Terkunci</b>: Bot hanya memproses pesan dari grup ini. Grup lain seperti manajemen atau koordinasi kerja tetap 100% aman dan tidak terserap ke rekam medis.
+              3. <b>Keamanan Terkunci</b>: Bot hanya memproses pesan dari grup ini. Grup lain seperti manajemen atau koordinasi kerja tetap 100% aman dan tidak terserap ke buku log pasien.
             </p>
 
             <div className="pt-2 flex items-center justify-between flex-wrap gap-2 border-t border-emerald-100">
