@@ -104,4 +104,10 @@ Script `npm run release` secara otomatis melakukan rangkaian:
 8. Git auto-commit (`release vX.Y.Z`) & Git push ke repository.
 
 ---
+
+## 6. Sinkronisasi Portal Hub (`hexaverse-app`) & Kebersihan Aset
+1. Setelah rilis Hosting/OTA sukses, perbarui versi kartu **Docto.id** di `E:\CODING\hexaverse-app\public\index.html` jika ada kenaikan versi produksi.
+2. Pastikan hanya `public/apk/doctoid-latest.apk` yang dipakai saat jalur rilis APK; `public/doctoid.apk` dan `android/.../assets/` tidak boleh menyimpan duplikat APK.
+
+---
 *Dokumen ini merupakan panduan rilis resmi Doctoid v0.1+.*

@@ -1,14 +1,14 @@
 {
   "name": "docto.id",
   "private": true,
-  "version": "0.1.93",
+  "version": "0.1.94",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
     "build:ota": "tsc -b && vite build && node scripts/build-ota.js",
     "release": "node scripts/release.js",
-    "sync:android": "tsc -b && vite build && npx cap sync android",
+    "sync:android": "tsc -b && vite build && npx cap sync android && node -e \"const fs=require('fs'); ['android/app/src/main/assets/public/apk','android/app/src/main/assets/public/ota'].forEach(p=>fs.rmSync(p,{recursive:true,force:true}))\"",
     "generate:assets": "node scripts/generate-assets.js",
     "lint": "oxlint",
     "wa:bot": "node scripts/wa-bot/server.js",

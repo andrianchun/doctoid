@@ -139,4 +139,15 @@ Dokter spesialis bekerja dengan intensitas tinggi di bangsal rumah sakit dan pol
 
 ---
 
+## 7. Standar Ekosistem Enterprise (16px Floor, Dark Mode, Updater & Layout Audit)
+
+Mengacu pada [`E:\CODING\DESIGN.md`](file:///e:/CODING/DESIGN.md):
+- **Lantai Tipografi Minimum 16px (`1rem`)**: Seluruh isi SOAP, riwayat terapi, form pasien, dan teks antarmuka utama wajib menggunakan minimal `1rem` (`16px` pada [tokens.css](file:///e:/CODING/docto.id/src/styles/tokens.css)). Tetap dilarang keras memakai `text-[9px]`, `text-[10px]`, atau `text-[11px]`.
+- **Dukungan Dual-Theme (Light & Dark Klinis)**: Selain mode terang klinis (`#FFFFFF` / `#F8FAFC`), mode gelap untuk penggunaan jaga malam menggunakan permukaan obsidian gelap (`#09090B` / `#0F172A`) dengan kontras teks terang yang nyaman tanpa silau, tetap mempertahankan 3 warna semantik klinis (`#10B981`, `#F59E0B`, `#F43F5E`).
+- **Komponen Baku `<Button>` & `<Dialog>`**: Aksi primer, destruktif, dan dialog konfirmasi hapus pasien menggunakan komponen standar [Button.tsx](file:///e:/CODING/docto.id/src/components/ui/Button.tsx) dan [Dialog.tsx](file:///e:/CODING/docto.id/src/components/ui/Dialog.tsx), dengan area sentuh minimal `44px`.
+- **Pola Updater Bottom Sheet (`logym.app` Layout)**: Notifikasi pembaruan OTA/APK menggunakan layout Solid Bottom Sheet di layar ponsel, dialog terpusat di PC, serta modal frost wajib pada *Forced Update*, beraksen Medical Blue (`#3B82F6` / `#1D4ED8`).
+- **Automated Layout Audit**: Wajib memeriksa tampilan **Dark & Light Mode**, viewport **Mobile (~375px) & PC (~1440px)** bebas overflow horizontal, kepatuhan **Strict No-Icon Clutter** & `CustomSelect` (tanpa `<select>` native), serta copywriting Bahasa Indonesia medis seragam.
+
+---
+
 *Dokumen ini merupakan hukum baku UI/UX & Copywriting resmi Doctoid App.*

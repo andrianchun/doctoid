@@ -1,0 +1,26 @@
+/* ==========================================================================
+   Docto.id Design Tokens (Enterprise Standard + Golden Ratio Typography)
+   Minimum Base Font Floor: 16px (1rem)
+   ========================================================================== */
+
+:root {
+  --text-caption: 1rem;       /* 16px floor */
+  --text-body: 1rem;          /* 16px */
+  --text-h3: 1.3125rem;       /* 21px */
+  --text-h2: 1.618rem;        /* ~25.89px */
+  --text-h1: 2.0625rem;       /* 33px display */
+
+  /* Clinical Medical Blue & Semantic Tokens */
+  --brand-primary: #3b82f6;
+  --brand-primary-deep: #1d4ed8;
+  --brand-primary-soft: #38bdf8;
+  --brand-success: #10b981;
+  --brand-warning: #f59e0b;
+  --brand-danger: #f43f5e;
+
+  --touch-target-min: 44px;
+}
+
+html {
+  font-size: 16px;
+}

@@ -1,60 +1,19 @@
-# Docto.id — AI Agent & Design Guidelines
+# AGENTS.md — DOCTO.ID (`docto.id`)
 
-Panduan dan kaidah perancangan UI/UX serta arsitektur kode untuk asisten AI pada proyek **Docto.id**.
+Aturan induk global mengacu penuh pada [`E:\CODING\AGENTS.md`](file:///e:/CODING/AGENTS.md) dan [`E:\CODING\DESIGN.md`](file:///e:/CODING/DESIGN.md). Dokumen pendamping proyek: [design.md](file:///e:/CODING/docto.id/design.md), [releaseprotocol.md](file:///e:/CODING/docto.id/releaseprotocol.md), [PROGRESS.md](file:///e:/CODING/docto.id/PROGRESS.md), dan [SCHEMA.md](file:///e:/CODING/docto.id/SCHEMA.md).
 
----
+## 1. Tech Stack & Proyek Firebase
+- **Frontend:** React 19 + TypeScript + Vite + Tailwind CSS + Dexie IndexedDB + Capacitor Android.
+- **Backend:** 100% Firebase Blaze Plan — project ID **`docto-id`** (Hosting, Firestore, Auth, Storage, Cloud Functions / WhatsApp & AI SOAP backend).
+- **Localhost Preview:** Jalankan `npm run dev` dan pastikan bebas error sebelum meminta ACC user. Dilarang bump versi atau `release` sebelum disetujui di `localhost`.
 
-## 1. Kaidah Desain Antarmuka (UI/UX) Medis
+## 2. Trigger Perintah Singkat
+- **`"audit"`** -> Jalankan `pre-flight-audit`: cek keamanan E2E/rules, root-cause bug hunt, dan layout audit (Dark/Light Mode, Mobile/PC, Bahasa Indonesia medis seragam).
+- **`"release"` / `"rilis"`** -> Jalankan [releaseprotocol.md](file:///e:/CODING/docto.id/releaseprotocol.md).
+- **`"new app [nama]"`** -> Scaffold app baru dari `E:\CODING\_starter-template`.
 
-### A. Minimalis & Anti Clutter ("Jangan Kotak di Dalam Kotak")
-- **Hindari *nested containers***: Jangan menumpuk card di dalam card dengan border, background, dan shadow yang berlapis-lapis.
-- Gunakan pemisah rambut (*hairline dividers*, misal: `divide-y divide-slate-100` atau `border-slate-200`) atau spasi konsisten daripada membungkus setiap item dalam kotak berbingkai baru.
-- Jaga kontras teks medis tetap tajam dan nyaman dibaca dokter di bawah pencahayaan ruangan atau bangsal RS.
-
-### B. Bersih dari Emoji Dekoratif & Ikon Berlebihan
-- **Tanpa emoji dekoratif**: Hindari penggunaan emoji seperti 📥, ⚡, 📎, 🚀, dsb. pada tombol kerja atau label status.
-- **Tanpa ikon dekoratif pada daftar / baris**: Jangan meletakkan ikon-ikon kecil (seperti ikon pil, kaca pembesar, orang, checklist, dsb.) di setiap baris daftar planning, alert, atau item catatan. Cukup gunakan teks yang jelas, badge status minimalis, atau penanda fungsional murni (seperti lingkaran checklist sederhana).
-- Gunakan ikon SVG fungsional yang ramping (**Lucide icons**) hanya jika memang menambah kejelasan fungsi tombol navigasi/aksi utama.
-- Tombol aksi harus memiliki teks yang jelas, standar, dan tegas (misal: `Gunakan di Rekam Medis`, `Abaikan`, `Batal`).
-
-### C. Keterbacaan Teks Klinis (SOAP & Konsulan)
-- **Jangan memotong teks klinis secara agresif**: Dokter membutuhkan konteks lengkap (anamnesis, tanda vital, lab, terapi).
-- Teks konsulan dari WhatsApp atau resume tidak boleh dipotong sepihak menjadi 40–50 karakter (`truncate`). Berikan area baca multi-baris yang lapang (`whitespace-pre-wrap leading-relaxed max-h-60 overflow-y-auto`).
-
-### D. Titik Masuk Tidak Mengganggu Form Utama
-- Jangan memasang banner besar yang memakan ruang pandang kerja dokter di formulir utama Catat Pasien.
-- Gunakan ikon notifikasi (**Lonceng / Bell**) di header atas dengan *badge count* jumlah pesan belum diproses.
-- Saat ikon ditekan atau saat notifikasi Android diklik, buka dalam bentuk modal / dialog lembar tinjau (*sheet*) yang rapi dan terisolasi.
-
----
-
-## 2. Integrasi Notifikasi & WhatsApp Konsultasi
-
-1. **Android Native Push / Local Notifications**:
-   - Konsulan baru dari gateway WhatsApp (Google Cloud VM) disinkronkan ke Dexie lokal dan memicu notifikasi native status bar Android via `@capacitor/local-notifications`.
-   - Gunakan notification channel prioritas tinggi (`importance: 5`) agar muncul sebagai notifikasi pop-up heads-up.
-   - Mengklik notifikasi pada status bar ponsel harus langsung mengarahkan dokter ke tab `Catat Pasien` dan memunculkan modal rujukan konsul WhatsApp tersebut.
-
-2. **Pembersihan Intent Berbagi (Anti-Zombie Intent)**:
-   - Setiap intent berbagi (Share / View) dari Android harus dibersihkan segera setelah diproses (`setIntent(new Intent())` dan `intent.removeExtra(...)`) agar tidak memunculkan data lama berulang kali saat aplikasi kembali dibuka.
-
-
----
-
-## 3. Standarisasi Komponen Notifikasi Pembaruan (Standard UpdaterAlert — Ekosistem Hexaverse)
-Seluruh lini aplikasi (Neuroid, Logym, Lomeal, Doctoid, Darka, Domus, Tokoto) WAJIB menggunakan satu arsitektur standar emas notifikasi pembaruan aplikasi (`UpdaterAlert`):
-1. **Arsitektur Adaptif Dua Mode (Dual Mode)**:
-   - **Mode Opsional (Default / Non-Forced Update)**:
-     - **DILARANG** memblokir layar dengan scrim/backdrop hitam pekat (`bg-black/*`).
-     - **WAJIB** berupa **Floating Bottom Card** yang melayang di atas bilah navigasi bawah (`fixed bottom-24 inset-x-4 z-[9999] max-w-sm mx-auto pointer-events-none` dengan kontainer dalam `pointer-events-auto`).
-     - Menyertakan: logo resmi aplikasi berbayang halus (`size-12 rounded-xl object-contain`), judul *"Update Tersedia"*, indikator versi tabular `vOld → vNew`, catatan rilis "Yang Baru", tombol silang `X` tutup di pojok kanan atas, dan tombol aksi utama *full-width* (`Update Sekarang`).
-     - **Transformasi In-Place**: Saat ditekan, kartu bertransformasi langsung di tempat menjadi indikator progres unduhan tanpa membuka modal baru.
-   - **Mode Wajib (Forced / Critical Update)**:
-     - Tampil sebagai modal terpusat berlatar belakang kaca es pekat (`fixed inset-0 z-[9999] bg-black/75 backdrop-blur-md`).
-     - Menampilkan logo besar aplikasi (`size-20 rounded-2xl shadow-xl border border-white/20 p-2 object-contain`), judul hero *"Pembaruan Wajib!"*, versi loncatan `vOld → vNew`, catatan rilis berlatar belakang cekung (*sunken card*), dan tombol aksi masif (`py-3.5 text-sm font-bold`).
-     - Tombol `X` dinonaktifkan dan latar belakang dikunci dengan *Body Scroll Lock*.
-2. **Indikator Progres Unduhan Cerdas (Fluid 60fps Dynamic Crawler)**:
-   - Seluruh bar progres unduhan WAJIB dilengkapi *active progress crawler* (interval 200ms) dan interpolasi frame 30ms (60fps fluid) agar tidak membeku di 0%.
-   - Label status transparan per fase (*Mengunduh paket...*, *Mempersiapkan pemasangan APK...*, *Memasang berkas & memuat ulang...*).
-3. **Integritas Penekanan Tombol Kembali (Hardware Back Button)**:
-   - Selama proses pengunduhan berlangsung, tombol fisik kembali (*hardware back*) dilarang menutup kartu atau membatalkan proses.
+## 3. Domain Klinis, Privasi E2E & Invarian Teknis
+- **AI Clinical & WhatsApp Bot Domain Lock:** Parser laporan pasien, generator SOAP, dan respons bot klinis hanya memproses konteks klinis medis, wajib bebas *zombie intent* (tidak memicu ulang aksi lama/duplikat saat offline-replay), dan tidak boleh mengarang dosis obat atau fakta pasien. Seluruh Cloud Functions wajib memiliki `maxInstances`.
+- **Privasi Data Rekam Medis & Rules:** Sinkronisasi lintas perangkat memakai enkripsi E2E ke `doctoid/{syncId}`. Aturan Firestore mengunci `allow read, write: if request.auth != null;` dan memblokir `allow list, delete: if false;` pada `doctoid/{syncId}`. `storage.rules` hanya mengizinkan `request.auth != null` dengan unggahan `image/* <= 5MB`.
+- **Crash Safety & Offline Sync:** `ErrorBoundary` terpasang di root `src/main.tsx`. Seluruh tabel lokal dikelola melalui Dexie (`src/db.ts`, `src/sync.ts`) agar aman offline di bangsal RS tanpa jaringan stabil.
+- **OTA & Anti-Bloat APK:** Manifest `dist/ota/version.json` hanya digenerate oleh `build:ota` (dilarang membuat `public/ota/version.json`). `sync:android` dilarang menyalin file `.apk` ke `android/.../assets/`. UI updater mengikuti pola Solid Bottom Sheet referensi `logym.app` dalam palet klinis Doctoid.
